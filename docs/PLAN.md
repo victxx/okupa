@@ -17,9 +17,23 @@ cuelga, las recuerda y regala cosas a otros okupas.
 | EF — Best CROPS App | Envío por devp2p sin RPC ni relé (C), cliente mínimo abierto (O), nadie ve la cuenta al enviar (P), clave que nunca sale de la consola (S) |
 | 0G — Physical AI (+ mejor build en hardware real) | La DSi es el cuerpo; 0G decide en el bucle; un request id y un episodio en 0G Storage por decisión; parada segura = dormir |
 
-Chainlink queda fuera, salvo que se confirme que un dispositivo puede verificar
-por sí mismo un informe firmado por una DON de CRE (sustituiría al lector de
-confianza).
+Chainlink queda fuera: con la comprobación de inclusión en la propia DSi no hay
+un lector de confianza que sustituir.
+
+## Solo la DSi
+
+El juego se usa con la consola y una Wi-Fi; ningún servidor nuestro en ningún paso.
+
+| Paso | Cómo lo hace la DSi |
+|---|---|
+| Encontrar nodos | Lee el árbol DNS de nodos de Sepolia (EIP-1459) y comprueba su firma |
+| Enviar | RLPx + eth directamente a varios nodos públicos |
+| Saber si entró | Pide cabeceras y cuerpos de los últimos bloques a varios nodos independientes y busca su transacción |
+| Pensar | Llama al router de 0G por HTTPS con una clave de poco saldo |
+
+El ordenador solo sirve para desarrollar y para copiar la ROM a la SD.
+La comprobación con varios nodos no verifica el consenso de la beacon chain:
+confía en que no mientan a la vez. Decirlo así siempre.
 
 ## Por qué Ethereum es el corazón
 
@@ -53,8 +67,9 @@ sube; conviene revisarlo antes de cualquier entrega.
 
 - El camino de envío es siempre la consola: firma local → RLPx/eth → peers. Nunca
   RPC, proxy ni relé para enviar.
-- El lector es de solo lectura y sustituible. Lo que diga es una observación de
-  confianza, no consenso ni finalidad verificados en la DSi; decirlo así siempre.
+- Ningún servidor propio en el juego. Descubrir, enviar y comprobar los hace la
+  consola; la mente es 0G. Si 0G no responde, todo lo demás sigue funcionando.
+- Inclusión = varios nodos independientes coinciden; nunca hablar de finalidad.
 - 0G decide solo lo que el okupa **hace y dice** (de conjuntos cerrados) y los
   objetos que encuentra. Nunca la inclusión, la pared, la pendiente ni el nonce.
 - Sin 0G: el okupa duerme, con una frase fija que no se atribuye a 0G.
@@ -67,7 +82,7 @@ sube; conviene revisarlo antes de cualquier entrega.
 ## Qué es el MVP
 
 1. La DSi firma y envía una foto o un dibujo a Sepolia por P2P.
-2. Se incluye; el lector lo confirma (HMAC) y el cuadro se cuelga.
+2. Se incluye; la DSi lo comprueba con varios nodos y cuelga el cuadro.
 3. 0G decide la reacción del okupa (gesto + frase) y la registra en su diario.
 4. La DSi muestra la reacción; reabrir conserva pared, diario y pendiente.
 5. Regalo: un cuadro enviado a la cuenta de otro okupa aparece en su casa.
@@ -95,24 +110,26 @@ encontrarla.
   formato binario propio de pocos KB.
 - Primero un prototipo: ¿escribe el modelo de 0G una malla aceptable dentro de
   esos límites? Si no, 0G elige y combina piezas de un catálogo pequeño hecho a mano.
-- El lector valida (triángulos, tonos, tamaño) antes de guardar en 0G Storage.
+- Se valida (triángulos, tonos, tamaño) antes de guardar en 0G Storage, y la DSi
+  vuelve a comprobar límites y keccak al recibirla.
 
 ## Arquitectura
 
 ```text
-DSi / host ──firma── RLPx/eth ──► peers de Sepolia
-     ▲                               │
-     │ informe HMAC                  ▼
-  lector (solo lectura) ◄─── RPC de lectura sustituible
-     │
-     └── mente en 0G: Compute (decisión, TEE) + Storage (diario, mallas)
+          DNS (EIP-1459) ──► lista firmada de nodos
+                │
+DSi ──firma── RLPx/eth ──► varios peers de Sepolia ──► validadores
+ │  ◄── cabeceras + cuerpos de bloques (¿está mi tx?) ──┘
+ │
+ └── HTTPS ──► 0G: Compute (decisión, TEE) + Storage (diario, mallas)
 ```
 
 - `core/`: C99 sin heap ni E/S. Keccak, RLP, secp256k1 (librería revisada,
   versión fijada), transacciones tipo 2, ECIES, RLPx, eth (Status, Transactions).
 - `platform/host` y `platform/dsi`: sockets, reloj, almacenamiento, entropía.
 - `game/`: estado de la casa, UI compartida host/DSi, cámara, regalos.
-- `reader/`: Python; observador, puente LAN autenticado, mente 0G.
+- `tools/`: utilidades de desarrollo en el ordenador (descubrimiento, ensayos);
+  nunca forman parte del juego.
 
 ## Hitos (cada uno = varios commits pequeños)
 
@@ -121,11 +138,11 @@ DSi / host ──firma── RLPx/eth ──► peers de Sepolia
 | 0 | Esqueleto, build host, CI | `make test` verde en CI |
 | 1 | Keccak, RLP, claves, firma de tx tipo 2 | vectores oficiales + tx aceptada por Geth local |
 | 2 | ECIES + handshake RLPx + Hello/Status | sesión con Geth local registrada en ambos lados |
-| 3 | Envío P2P desde el host a Sepolia | tx en un explorador, sin RPC en el envío |
-| 4 | Port a DSi: arranque, SD, Wi-Fi, mismo núcleo | foto de la DSi con la tx en Sepolia |
+| 3 | Descubrimiento DNS + envío P2P desde el host a Sepolia | tx en un explorador, sin RPC en el envío |
+| 4 | Port a DSi: arranque, SD, Wi-Fi, DNS, mismo núcleo | foto de la DSi con la tx en Sepolia |
 | 5 | Casa, okupa, cuaderno, cámara | renders host + fotos de la DSi |
-| 6 | Lector + informe HMAC + pared | cuadro colgado y reapertura en la DSi |
-| 7 | Mente 0G: reacción, diario, parada segura | request id + root de Storage + reacción en la DSi |
+| 6 | Inclusión comprobada en la DSi con varios nodos + pared | cuadro colgado y reapertura, sin ordenador encendido |
+| 7 | Mente 0G por HTTPS desde la DSi: reacción, diario, parada segura | request id + root de Storage + reacción en la DSi |
 | 8 | Regalos entre okupas | regalo visto en la casa de otra cuenta |
 | 9 | Día del okupa y peticiones | decisiones con request id en el diario |
 | 10 | Objetos 3D | malla validada, guardada y vista en la DSi |

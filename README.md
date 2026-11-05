@@ -9,6 +9,8 @@ hangs them on its wall, remembers them and sometimes gives you something back.
 
 ## What makes it different
 
+- **Just the console and a Wi-Fi.** No server of ours anywhere: the DSi finds
+  Ethereum nodes, sends, checks its own inclusion and thinks with 0G by itself.
 - **No server in the way.** The DSi signs each picture itself and gossips it to
   Ethereum peers over devp2p. No RPC provider, no relay, nobody to ask permission.
 - **A companion with a body.** The DSi is its body: the camera is its eyes, the
@@ -32,7 +34,7 @@ Just started. See [docs/PLAN.md](docs/PLAN.md).
 core/       portable C: hashing, RLP, keys, transactions, devp2p (RLPx, eth)
 platform/   host (macOS/Linux) and dsi (BlocksDS)
 game/       house, companion, sketchbook, camera, gifts
-reader/     read-only inclusion reader + 0G mind (Python)
+tools/      development helpers on a computer, never part of the game
 docs/       plan and design notes
 ```
 
