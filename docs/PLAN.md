@@ -15,7 +15,12 @@ cuelga, las recuerda y regala cosas a otros okupas.
 | Premio | Qué demuestra Okupa |
 |---|---|
 | EF — Best CROPS App | Envío por devp2p sin RPC ni relé (C), cliente mínimo abierto (O), nadie ve la cuenta al enviar (P), clave que nunca sale de la consola (S) |
-| 0G — Physical AI (+ mejor build en hardware real) | La DSi es el cuerpo; 0G decide en el bucle; un request id y un episodio en 0G Storage por decisión; parada segura = dormir |
+| 0G — Physical AI, carril "personal devices" (+ mejor build en hardware real) | Compañero de bolsillo abierto y verificable: la DSi es el cuerpo, 0G el cerebro en cada punto de decisión, la memoria del usuario en 0G Storage e inferencia sellada (TEE) |
+
+Lo que pide 0G y cómo se cumple: llamada a 0G dentro del bucle de decisión (visión
+y decisión), episodio en 0G Storage con request id por decisión, demo en hardware
+real (y repetición de episodios en el host), y parada segura que no finge decidir.
+Lo que no quieren: un chatbot con avatar. El okupa decide y actúa; no conversa.
 
 Chainlink queda fuera: con la comprobación de inclusión en la propia DSi no hay
 un lector de confianza que sustituir.
@@ -28,12 +33,59 @@ El juego se usa con la consola y una Wi-Fi; ningún servidor nuestro en ningún 
 |---|---|
 | Encontrar nodos | Lee el árbol DNS de nodos de Sepolia (EIP-1459) y comprueba su firma |
 | Enviar | RLPx + eth directamente a varios nodos públicos |
-| Saber si entró | Pide cabeceras y cuerpos de los últimos bloques a varios nodos independientes y busca su transacción |
-| Pensar | Llama al router de 0G por HTTPS con una clave de poco saldo |
+| Saber si entró | Pide cabeceras y cuerpos de los últimos bloques a varios nodos independientes y busca su transacción; después, cliente ligero (ver más abajo) |
+| Pensar | Paga a 0G directamente con su propia clave (vía Direct) y verifica la firma del TEE de cada respuesta |
 
 El ordenador solo sirve para desarrollar y para copiar la ROM a la SD.
 La comprobación con varios nodos no verifica el consenso de la beacon chain:
 confía en que no mientan a la vez. Decirlo así siempre.
+
+## Decisiones del 2026-11-06
+
+- **Privacidad.** Los dibujos pueden ser públicos. Las fotos van siempre cifradas
+  (ECIES) a la clave pública de quien las recibe, también la propia: la cadena
+  prueba quién, a quién y cuándo; solo el destinatario ve la imagen. Límite: si una
+  clave se filtra, sus fotos quedan expuestas para siempre.
+- **Amigos.** Código de amigo = dirección + clave pública. En la DSi se añade
+  leyendo con la cámara el QR de la pantalla del otro; en plataformas sin cámara,
+  buscando por código. Solo se muestran regalos de amigos.
+- **Objetos procedurales.** Un catálogo de generadores (fruta, peluche, taza…);
+  0G elige generador y parámetros; el objeto es su semilla (≈16 B) y cabe en la
+  propia transacción. ≤ 200 triángulos, cuatro tonos, mismo resultado en todas las
+  plataformas. Sin Storage ni mallas que validar.
+- **0G Direct.** La consola firma su token de acceso (EIP-191) con su clave, paga
+  desde su cuenta en el ledger de 0G y verifica con ecrecover la firma del TEE sobre
+  `sha256(petición):sha256(respuesta)`. El router con clave de API queda solo como
+  plan B en desarrollo.
+- **Cliente ligero (investigación).** Medir BLS12-381 en la DSi. Si es viable,
+  verificar actualizaciones del sync committee (datos de cualquier nodo beacon, no
+  confiables) y probar la transacción contra la cabecera verificada.
+- **Okupa autónomo.** 0G decide todo lo que el okupa hace: su actividad, su ánimo,
+  sus peticiones, qué escribe en el diario, qué objeto encuentra o fabrica, y si
+  manda una carta o un regalo a un amigo por iniciativa propia, con un presupuesto
+  de sellos diario que fija el jugador. La consola sigue siendo la única que firma
+  y nunca cede a 0G la inclusión, la pared, la pendiente ni el nonce.
+- **Multiplataforma.** Todo lo compartido vive en la cadena y en 0G. Un navegador
+  no puede abrir TCP: la versión web leerá y enviará por RPC y lo dirá; la propiedad
+  fuerte (sin servidor) es de las consolas.
+
+## El bucle de decisión
+
+```text
+observar ──► 0G decide (visión + decisión, TEE) ──► la DSi actúa ──► episodio
+   ▲                                                                  │
+   └──────────────── memoria (diario cifrado en 0G Storage) ◄─────────┘
+```
+
+- **Observación:** hora y tiempo desde la última visita, caricias en la pantalla,
+  regalos y cartas nuevas, el último cuadro (imagen), resumen de su memoria.
+- **Decisión:** JSON validado contra conjuntos cerrados (actividad, ánimo, gesto,
+  frase ≤ 60 B, petición, objeto, carta). Fuera de esos conjuntos no se ejecuta.
+- **Acción:** la consola anima, coloca y, si toca, prepara la carta; el movimiento
+  es local, 0G no controla nada en tiempo real.
+- **Episodio:** observación (hash), decisión, request id, firma del TEE, hora →
+  cifrado → 0G Storage. El host puede repetir cualquier episodio.
+- **Parada segura:** sin 0G el okupa duerme; nada se decide en local en su nombre.
 
 ## Por qué Ethereum es el corazón
 
@@ -136,20 +188,21 @@ DSi ──firma── RLPx/eth ──► varios peers de Sepolia ──► valid
 | # | Hito | Evidencia de "hecho" |
 |---|---|---|
 | 0 | Esqueleto, build host, CI | `make test` verde en CI |
-| 1 | Keccak, RLP, claves, firma de tx tipo 2 | vectores oficiales + tx aceptada por Geth local |
+| 1 | Keccak, SHA-256, RLP, claves, firma de tx tipo 2 | vectores oficiales + tx aceptada por Geth local |
 | 2 | ECIES + handshake RLPx + Hello/Status | sesión con Geth local registrada en ambos lados |
 | 3 | Descubrimiento DNS + envío P2P desde el host a Sepolia | tx en un explorador, sin RPC en el envío |
-| 4 | Port a DSi: arranque, SD, Wi-Fi, DNS, mismo núcleo | foto de la DSi con la tx en Sepolia |
+| 4 | Port a DSi: arranque, SD, Wi-Fi, DNS, mismo núcleo, QR de la dirección | foto de la DSi con la tx en Sepolia |
 | 5 | Casa, okupa, cuaderno, cámara | renders host + fotos de la DSi |
 | 6 | Inclusión comprobada en la DSi con varios nodos + pared | cuadro colgado y reapertura, sin ordenador encendido |
-| 7 | Mente 0G por HTTPS desde la DSi: reacción, diario, parada segura | request id + root de Storage + reacción en la DSi |
-| 8 | Regalos entre okupas | regalo visto en la casa de otra cuenta |
-| 9 | Día del okupa y peticiones | decisiones con request id en el diario |
-| 10 | Objetos 3D | malla validada, guardada y vista en la DSi |
-| 11 | README CROPS, vídeo ≤ 3 min | entrega simulada completa |
+| 7 | 0G Direct desde la DSi: bucle de decisión, firma TEE verificada, parada segura | request id + firma válida + reacción en la DSi |
+| 8 | Diario cifrado en 0G Storage y repetición de episodios en el host | root por episodio + repetición idéntica |
+| 9 | Amigos por QR, fotos cifradas, cartas y regalos | regalo visto en la casa de otra cuenta, ilegible para terceros |
+| 10 | Okupa autónomo: día, peticiones, objetos procedurales, cartas por iniciativa propia | decisiones con request id en el diario |
+| 11 | Investigación: BLS en la DSi y, si da, cliente ligero | tiempos medidos en la consola |
+| 12 | README CROPS, vídeo ≤ 3 min | entrega simulada completa |
 
 ## Decisiones pendientes
 
-- Autorizar que 0G elija la actividad del día y las peticiones (además del gesto).
-- Comprobar que 0G Compute tenga proveedor en testnet para un modelo de visión.
+- Aspecto del okupa.
+- Proveedor de 0G Compute estable en testnet; si no, mainnet con poco saldo.
 - Licencia (EF pide una libre) y visibilidad: el repo es privado.
