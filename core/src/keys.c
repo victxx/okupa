@@ -1,17 +1,33 @@
 #include "okupa_keys.h"
 #include "okupa_keccak.h"
 #include "secp256k1.h"
+#include "secp256k1_preallocated.h"
 #include <string.h>
+
+/* Signing needs a built context; the static one only verifies. It lives in a
+ * fixed buffer (no heap) and is built once; the core has a single owner. */
+static secp256k1_context *context(void)
+{
+    static union { unsigned char b[1024]; long double align; } mem;
+    static secp256k1_context *ctx;
+    if (!ctx && secp256k1_context_preallocated_size(SECP256K1_CONTEXT_NONE) <= sizeof mem.b)
+        ctx = secp256k1_context_preallocated_create(mem.b, SECP256K1_CONTEXT_NONE);
+    return ctx;
+}
+
+const secp256k1_context *ok_secp(void) { return context(); }
 
 ok_result ok_keys_public(const uint8_t priv[32], uint8_t pub[64])
 {
     secp256k1_pubkey key;
     uint8_t out[65];
     size_t n = sizeof out;
+    const secp256k1_context *ctx = context();
     if (!priv || !pub) return OK_ARGUMENT;
-    if (!secp256k1_ec_seckey_verify(secp256k1_context_static, priv)) return OK_CRYPTO;
-    if (!secp256k1_ec_pubkey_create(secp256k1_context_static, &key, priv)) return OK_CRYPTO;
-    secp256k1_ec_pubkey_serialize(secp256k1_context_static, out, &n, &key, SECP256K1_EC_UNCOMPRESSED);
+    if (!ctx) return OK_CRYPTO;
+    if (!secp256k1_ec_seckey_verify(ctx, priv)) return OK_CRYPTO;
+    if (!secp256k1_ec_pubkey_create(ctx, &key, priv)) return OK_CRYPTO;
+    secp256k1_ec_pubkey_serialize(ctx, out, &n, &key, SECP256K1_EC_UNCOMPRESSED);
     memcpy(pub, out + 1, 64);
     return OK_OK;
 }

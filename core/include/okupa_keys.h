@@ -3,7 +3,10 @@
 
 #include "okupa.h"
 
-/* Account keys. Uses libsecp256k1's static context: no heap, no global state. */
+/* Account keys over libsecp256k1, with its context in a fixed buffer (no heap). */
+struct secp256k1_context_struct;
+/* The core's libsecp256k1 context, or NULL if it could not be built. */
+const struct secp256k1_context_struct *ok_secp(void);
 
 /* 64-byte uncompressed public key (x || y), without the 0x04 prefix. */
 ok_result ok_keys_public(const uint8_t priv[32], uint8_t pub[64]);
