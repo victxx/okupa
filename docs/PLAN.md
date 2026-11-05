@@ -21,6 +21,34 @@ Chainlink queda fuera, salvo que se confirme que un dispositivo puede verificar
 por sí mismo un informe firmado por una DON de CRE (sustituiría al lector de
 confianza).
 
+## Por qué Ethereum es el corazón
+
+Ethereum no se usa como disco: lo pesado (diario, mallas) vive en 0G. En cadena
+solo van **actos firmados y pequeños**: un cuadro, un regalo, un saludo.
+
+- **Entrada sin permiso.** La capa 1 es la red grande donde cualquiera entrega una
+  transacción a los validadores por P2P público. Una L2 tiene secuenciador; un juego
+  normal, un servidor. Okupa entra desde una consola de 2009 sin pedir permiso a nadie.
+- **Lo tuyo sobrevive al juego.** Cada cuadro y cada regalo lo firma una clave que
+  nunca sale de la consola, con autor, destinatario y fecha públicos. Si el juego
+  desaparece, la pared y los regalos siguen ahí y cualquiera puede reconstruirlos.
+- **Un sello, no una comisión.** Enviar algo cuesta como un sello de correos, y eso
+  le da valor: se mandan pocas cosas y con intención.
+
+Coste en mainnet (2026-11-05: base 0,74 gwei, mediana 3 h 1,9 gwei, pico 14,3 gwei;
+propina mediana 0,46 gwei; ETH ≈ 2.000 €). Gas con el suelo de calldata de EIP-7623
+y todos los bytes distintos de cero (caso peor):
+
+| Acto | Gas | Hoy | Mediana | Pico |
+|---|---|---|---|---|
+| Saludo (8 B) | ~21.300 | 0,05 € | 0,10 € | 0,63 € |
+| Regalo objeto (72 B) | ~23.900 | 0,06 € | 0,11 € | 0,71 € |
+| Dibujo (520 B) | ~41.800 | 0,10 € | 0,20 € | 1,24 € |
+| Foto (1032 B) | ~62.300 | 0,15 € | 0,30 € | 1,84 € |
+
+La demo usa Sepolia (gratis). Si un cambio futuro encarece el calldata, el coste
+sube; conviene revisarlo antes de cualquier entrega.
+
 ## Reglas del proyecto
 
 - El camino de envío es siempre la consola: firma local → RLPx/eth → peers. Nunca
