@@ -56,6 +56,31 @@ int main(void)
     assert(ok_tx_unsigned(&tx, small, sizeof small, &len) == OK_RANGE);
     tx.data = NULL;
     assert(ok_tx_unsigned(&tx, small, sizeof small, &len) == OK_ARGUMENT);
-    puts("tx: unsigned type 2 bytes and signing hash match an independent encoder");
+    /* Signed: byte-for-byte what eth-account 0.13.7 produces (both use RFC 6979). */
+    {
+        static uint8_t out[512], want[512];
+        uint8_t priv[32], hash[32], want_hash[32];
+        hex("4646464646464646464646464646464646464646464646464646464646464646", priv, 32);
+        tx.chain_id = 11155111; tx.nonce = 0; tx.max_priority_fee = 1000000000; tx.max_fee = 30000000000ull;
+        tx.gas_limit = 62300; tx.value = 0; tx.data = hello; tx.data_len = sizeof hello;
+        hex("02f87483aa36a780843b9aca008506fc23ac0082f35c946e2c210710508fd15f37b12a2beb312ec4beaf1980864f4b50410100c080a0f50fc320e10ae34d46db9ce4eb0e4c5b3a4bac2fbfdcc3418433a43802e377bea06d75a300b7fc644bd03cc97f407e96baf895dc805dc5e55777391e39c9831ad4", want, 119);
+        hex("52381afb4c8aaaf4122ba0096e30245f28761458dc4d658e98955cfb3dc5a268", want_hash, 32);
+        assert(ok_tx_sign(&tx, priv, out, sizeof out, &len, hash) == OK_OK && len == 119);
+        assert(!memcmp(out, want, 119) && !memcmp(hash, want_hash, 32));
+
+        hex("0101010101010101010101010101010101010101010101010101010101010101", priv, 32);
+        tx.chain_id = 1; tx.nonce = 5; tx.max_priority_fee = 0; tx.max_fee = 0; tx.gas_limit = 21000;
+        tx.value = 123456789; tx.data = NULL; tx.data_len = 0;
+        hex("02f86601058080825208946e2c210710508fd15f37b12a2beb312ec4beaf1984075bcd1580c001a02ce1197fbbca222ccc596450b52636e6b93fea37d3e98ece9980973cd6773465a07148b7065eaba66462f14f0662d8b06dd76e67ca2cea9bb40dc4a3a1a49575cf", want, 105);
+        hex("abfb101833d1a1a1657502c0d960422d7027098dda9697c8ad5af9386ebbf257", want_hash, 32);
+        assert(ok_tx_sign(&tx, priv, out, sizeof out, &len, hash) == OK_OK && len == 105);
+        assert(!memcmp(out, want, 105) && !memcmp(hash, want_hash, 32));
+
+        memset(priv, 0, 32);
+        assert(ok_tx_sign(&tx, priv, out, sizeof out, &len, hash) == OK_CRYPTO);
+        hex("0101010101010101010101010101010101010101010101010101010101010101", priv, 32);
+        assert(ok_tx_sign(&tx, priv, out, 60, &len, hash) == OK_RANGE);
+    }
+    puts("tx: unsigned bytes and hash match an independent encoder; signed bytes match eth-account");
     return 0;
 }

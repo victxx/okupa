@@ -19,4 +19,10 @@ ok_result ok_tx_unsigned(const ok_tx *tx, uint8_t *out, size_t cap, size_t *len)
 /* keccak256 of the unsigned bytes: what the key signs. */
 ok_result ok_tx_signing_hash(const ok_tx *tx, uint8_t *scratch, size_t cap, uint8_t hash[32]);
 
+/* Signs with RFC 6979 nonces (deterministic) and writes
+ * 0x02 || rlp([...nine fields, y_parity, r, s]); hash = keccak256 of those bytes.
+ * The private key is only read; the caller owns and wipes it. */
+ok_result ok_tx_sign(const ok_tx *tx, const uint8_t priv[32], uint8_t *out, size_t cap,
+                     size_t *len, uint8_t hash[32]);
+
 #endif
