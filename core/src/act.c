@@ -1,0 +1,58 @@
+#include "okupa_act.h"
+#include <string.h>
+
+static const uint8_t magic[4] = {'O', 'K', 'P', 'A'};
+
+static ok_result header(uint8_t kind, size_t payload, uint8_t *out, size_t cap, size_t *len)
+{
+    if (!out || !len) return OK_ARGUMENT;
+    if (cap < OK_ACT_HEADER + payload) return OK_RANGE;
+    memcpy(out, magic, 4);
+    out[4] = 1;
+    out[5] = kind;
+    *len = OK_ACT_HEADER + payload;
+    return OK_OK;
+}
+
+ok_result ok_act_hello(uint8_t *out, size_t cap, size_t *len)
+{
+    return header(OK_ACT_HELLO, 0, out, cap, len);
+}
+
+ok_result ok_act_drawing(const uint8_t pixels[OK_DRAWING_BYTES], uint8_t *out, size_t cap, size_t *len)
+{
+    ok_result r;
+    if (!pixels) return OK_ARGUMENT;
+    r = header(OK_ACT_DRAWING, OK_DRAWING_BYTES, out, cap, len);
+    if (r == OK_OK) memcpy(out + OK_ACT_HEADER, pixels, OK_DRAWING_BYTES);
+    return r;
+}
+
+ok_result ok_act_decode(const uint8_t *data, size_t n, ok_act *act)
+{
+    if (!data || !act) return OK_ARGUMENT;
+    act->drawing = NULL;
+    if (n < OK_ACT_HEADER || memcmp(data, magic, 4) || data[4] != 1) return OK_FORMAT;
+    act->kind = data[5];
+    if (act->kind == OK_ACT_HELLO && n == OK_ACT_HEADER) return OK_OK;
+    if (act->kind == OK_ACT_DRAWING && n == OK_ACT_HEADER + OK_DRAWING_BYTES) {
+        act->drawing = data + OK_ACT_HEADER;
+        return OK_OK;
+    }
+    return OK_FORMAT;
+}
+
+int ok_drawing_get(const uint8_t pixels[OK_DRAWING_BYTES], unsigned x, unsigned y)
+{
+    if (x >= OK_DRAWING_SIDE || y >= OK_DRAWING_SIDE) return 0;
+    return (pixels[y * 8 + x / 8] >> (7 - x % 8)) & 1;
+}
+
+void ok_drawing_set(uint8_t pixels[OK_DRAWING_BYTES], unsigned x, unsigned y, int ink)
+{
+    uint8_t bit;
+    if (x >= OK_DRAWING_SIDE || y >= OK_DRAWING_SIDE) return;
+    bit = (uint8_t)(0x80 >> (x % 8));
+    if (ink) pixels[y * 8 + x / 8] |= bit;
+    else pixels[y * 8 + x / 8] &= (uint8_t)~bit;
+}
