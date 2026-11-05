@@ -134,5 +134,5 @@ DSi / host ──firma── RLPx/eth ──► peers de Sepolia
 ## Decisiones pendientes
 
 - Autorizar que 0G elija la actividad del día y las peticiones (además del gesto).
-- Proveedor de 0G Compute en testnet: ahora mismo no hay ninguno para el modelo de visión.
-- Licencia (EF pide una libre) y visibilidad: el repo sigue privado.
+- Comprobar que 0G Compute tenga proveedor en testnet para un modelo de visión.
+- Licencia (EF pide una libre) y visibilidad: el repo es privado.
