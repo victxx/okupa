@@ -4,8 +4,8 @@ SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror -fsanitize=add
 CPPFLAGS += -Icore/include -Ithird_party/tiny_sha3
 BUILD ?= build
 
-CORE = core/src/okupa.c third_party/tiny_sha3/sha3.c
-TESTS = core
+CORE = core/src/okupa.c core/src/keccak.c third_party/tiny_sha3/sha3.c
+TESTS = core keccak
 
 .PHONY: all test sanitize clean
 all: $(addprefix $(BUILD)/test-,$(TESTS))
