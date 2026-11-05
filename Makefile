@@ -1,10 +1,10 @@
 CC ?= cc
 CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror
 SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
-CPPFLAGS += -Icore/include
+CPPFLAGS += -Icore/include -Ithird_party/tiny_sha3
 BUILD ?= build
 
-CORE = core/src/okupa.c
+CORE = core/src/okupa.c third_party/tiny_sha3/sha3.c
 TESTS = core
 
 .PHONY: all test sanitize clean
