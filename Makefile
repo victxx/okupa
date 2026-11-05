@@ -1,0 +1,24 @@
+CC ?= cc
+CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror
+SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
+CPPFLAGS += -Icore/include
+BUILD ?= build
+
+CORE = core/src/okupa.c
+TESTS = core
+
+.PHONY: all test sanitize clean
+all: $(addprefix $(BUILD)/test-,$(TESTS))
+
+$(BUILD)/test-%: tests/test_%.c $(CORE) $(wildcard core/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) -o $@
+
+test: all
+	@for t in $(TESTS); do ./$(BUILD)/test-$$t || exit 1; done
+
+sanitize:
+	$(MAKE) test BUILD=build/sanitize CFLAGS='$(SANITIZE_FLAGS)'
+
+clean:
+	rm -rf build
