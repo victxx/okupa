@@ -65,6 +65,48 @@ int main(void)
     ok_rlp_init(&w, buf, 4); a = ok_rlp_list_begin(&w); str("dog"); ok_rlp_list_end(&w, a);
     assert(ok_rlp_done(&w, &len) == OK_RANGE);
     ok_rlp_init(&w, NULL, 10); str(""); assert(ok_rlp_done(&w, &len) == OK_RANGE);
-    puts("rlp: spec examples, long strings and lists, integers, overflow");
+    /* Decoding: round trips, list walks and every malformed shape. */
+    {
+        ok_rlp_item it, child;
+        size_t pos = 0;
+        uint64_t v;
+        static const uint8_t cat_dog[] = {0xc8, 0x83, 'c', 'a', 't', 0x83, 'd', 'o', 'g'};
+        static const uint8_t bad[][4] = {
+            {0x81, 0x05},             /* single byte < 0x80 wrapped */
+            {0xb8, 0x05, 1, 2},       /* long form for a short string */
+            {0xb9, 0x00, 0x40},       /* leading zero in the length */
+            {0x83, 'd', 'o'},         /* truncated payload */
+            {0xc3, 0x83, 'a', 'b'},   /* list truncated */
+        };
+        static const size_t bad_len[] = {2, 4, 3, 3, 4};
+        assert(ok_rlp_decode(cat_dog, sizeof cat_dog, &it) == OK_OK && it.list && it.len == 8);
+        assert(ok_rlp_next(&it, &pos, &child) == OK_OK && !child.list && child.len == 3 && !memcmp(child.data, "cat", 3));
+        assert(ok_rlp_next(&it, &pos, &child) == OK_OK && !memcmp(child.data, "dog", 3));
+        assert(ok_rlp_next(&it, &pos, &child) == OK_RANGE);
+        for (i = 0; i < 5; i++) assert(ok_rlp_decode(bad[i], bad_len[i], &it) == OK_FORMAT);
+        assert(ok_rlp_decode(cat_dog, sizeof cat_dog - 1, &it) == OK_FORMAT);
+        { uint8_t extra[10]; memcpy(extra, cat_dog, 9); extra[9] = 0; assert(ok_rlp_decode(extra, 10, &it) == OK_FORMAT); }
+        assert(ok_rlp_decode(cat_dog, 0, &it) == OK_ARGUMENT);
+        /* A list item claiming more bytes than its parent holds. */
+        { static const uint8_t lie[] = {0xc2, 0x85, 'x'}; assert(ok_rlp_decode(lie, sizeof lie, &it) == OK_FORMAT); }
+        /* Nesting deeper than 16 lists is refused; 16 is fine. */
+        { uint8_t deep[17]; /* d0 cf ... c1 c0: seventeen lists, each holding the next */
+          for (i = 0; i < 17; i++) deep[i] = (uint8_t)(0xc0 + (16 - i));
+          assert(ok_rlp_decode(deep, 17, &it) == OK_FORMAT);
+          assert(ok_rlp_decode(deep + 1, 16, &it) == OK_OK); }
+        /* Encoder output decodes back, including the 1024-byte string. */
+        start(); ok_rlp_bytes(&w, big, sizeof big); assert(ok_rlp_done(&w, &len) == OK_OK);
+        assert(ok_rlp_decode(buf, len, &it) == OK_OK && it.len == 1024 && it.data == buf + 3);
+        start(); ok_rlp_uint(&w, 1024); assert(ok_rlp_done(&w, &len) == OK_OK);
+        assert(ok_rlp_decode(buf, len, &it) == OK_OK && ok_rlp_to_uint(&it, &v) == OK_OK && v == 1024);
+        start(); ok_rlp_uint(&w, 0); assert(ok_rlp_done(&w, &len) == OK_OK);
+        assert(ok_rlp_decode(buf, len, &it) == OK_OK && ok_rlp_to_uint(&it, &v) == OK_OK && v == 0);
+        { static const uint8_t zero_led[] = {0x82, 0x00, 0x01}; assert(ok_rlp_decode(zero_led, 3, &it) == OK_OK && ok_rlp_to_uint(&it, &v) == OK_FORMAT); }
+        { static const uint8_t nine[] = {0x89, 1, 0, 0, 0, 0, 0, 0, 0, 0}; assert(ok_rlp_decode(nine, 10, &it) == OK_OK && ok_rlp_to_uint(&it, &v) == OK_FORMAT); }
+        /* Every one-byte truncation of a valid long list fails cleanly. */
+        start(); a = ok_rlp_list_begin(&w); str(lorem); str(lorem); ok_rlp_list_end(&w, a); assert(ok_rlp_done(&w, &len) == OK_OK);
+        for (i = 0; i < len; i++) assert(ok_rlp_decode(buf, i, &it) != OK_OK);
+    }
+    puts("rlp: spec examples, long strings and lists, integers, overflow, strict decoding");
     return 0;
 }
