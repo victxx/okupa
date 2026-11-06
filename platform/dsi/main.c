@@ -726,6 +726,11 @@ int main(void)
             show_net = 0;
         }
         if (ok_dsi_mind_take(&thought)) obey(&ui, &pet, &thought, (int64_t)now);
+        {
+            static char comment[OK_MIND_TEXT + 1];
+            if (ok_dsi_mind_take_comment(comment, sizeof comment) > 0) /* its verified reaction to the drawing */
+                ok_ui_direct(&ui, &pet, OK_MOVE_WAVE, OK_PLACE_ATTIC, OK_POSE_HAPPY, comment);
+        }
         /* What its mind made, drew, dreamed or wrote. */
         {
             static char said[80], letter_day[11];
@@ -748,6 +753,7 @@ int main(void)
                 snprintf(on_path, sizeof on_path, "%.30sletters-on.txt", net_dir);
                 if ((f = fopen(on_path, "r"))) {
                     letters_allowed = 1;
+                    ok_facts_now.og_features |= 64;
                     fclose(f);
                 }
             }
@@ -871,6 +877,7 @@ int main(void)
                     memcpy(sent_hash, hash, 32);
                     sent_waiting = 1;
                     ui.drawing_sent = 1;
+                    ok_dsi_mind_comment(ui.drawing); /* its mind on 0G looks at the drawing and says something */
                     if ((f = fopen(sent_path, "wb"))) {
                         fwrite(sent_hash, 1, 32, f);
                         fwrite(sent_pixels, 1, 512, f);

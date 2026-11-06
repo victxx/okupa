@@ -20,6 +20,7 @@ enum { OK_LOOK_PLAYER, OK_LOOK_WINDOW, OK_LOOK_DOOR, OK_LOOK_FRAMES, OK_LOOK_FLO
 enum { OK_FEEL_HAPPY, OK_FEEL_HUNGRY, OK_FEEL_SLEEPY, OK_FEEL_BORED, OK_FEEL_LONELY, OK_FEEL_CURIOUS, OK_FEELINGS };
 #define OK_MIND_LINE 40
 #define OK_MIND_RECENT 6 /* its own last decisions, fed back as memory */
+#define OK_MIND_MEMORY 128 /* one of them: "activity: line (asked: ...)" */
 #define OK_MIND_TEXT 160 /* what it heard or saw, cut to this */
 #define OK_MIND_NOTE 60  /* a thought, a question, a fact to keep */
 #define OK_MIND_KNOWN 16 /* facts it keeps about its life and the player */
@@ -89,7 +90,8 @@ ok_result ok_mind_diary_parse(const char *body, size_t n, char entry[OK_MIND_DIA
 void ok_mind_dream_parse(const char *body, size_t n, char dream[OK_MIND_DREAM + 1]);
 /* The provider's whole response body. */
 ok_result ok_mind_parse(const char *body, size_t n, ok_mind *decision);
-/* One memory line for the next request: "activity" or "activity: line". */
-void ok_mind_memory(const ok_mind *d, char out[OK_MIND_LINE + 24]);
+/* One memory line for the next request: "activity", "activity: line", and
+ * "(asked: ...)" when it asked something, so it does not ask it again. */
+void ok_mind_memory(const ok_mind *d, char out[OK_MIND_MEMORY]);
 
 #endif

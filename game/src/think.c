@@ -535,6 +535,19 @@ ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t de
                 fetch_ctx);
 }
 
+static const char COMMENT[] =
+    "You are Okupa, a small cheeky, affectionate monkey who lives in a Nintendo DSi. The player just drew this for "
+    "you on the tiny 64x64 sketchbook and sent it to hang on your wall. React to what is really in the drawing in "
+    "one short, warm, specific line in English, at most 40 characters, as Okupa. Only the line, no quotes.";
+
+ok_result ok_think_comment(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                           const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
+                           ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    return look(t, p, device_key, now_ms, nonce, "comment", COMMENT, "What do you think of my drawing?", 40, png,
+                png_len, buf, cap, fetch, fetch_ctx);
+}
+
 ok_result ok_think_guess(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
                          const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
                          ok_think_fetch_fn fetch, void *fetch_ctx)
@@ -672,8 +685,8 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
             return OK_RANGE;
     } else if (!strcmp(kind, "dream")) {
         if (!put(out, cap, &o, ",\"dream\":") || !put_str(out, cap, &o, t->dream, strlen(t->dream))) return OK_RANGE;
-    } else if (!strcmp(kind, "sight") || !strcmp(kind, "guess")) {
-        if (!put(out, cap, &o, !strcmp(kind, "guess") ? ",\"guess\":" : ",\"saw\":") ||
+    } else if (!strcmp(kind, "sight") || !strcmp(kind, "guess") || !strcmp(kind, "comment")) {
+        if (!put(out, cap, &o, !strcmp(kind, "guess") ? ",\"guess\":" : !strcmp(kind, "comment") ? ",\"comment\":" : ",\"saw\":") ||
             !put_str(out, cap, &o, t->saw, strlen(t->saw)))
             return OK_RANGE;
     }

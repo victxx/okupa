@@ -138,6 +138,12 @@ ok_result ok_think_dream(ok_think *t, const ok_think_provider *p, const uint8_t 
                          const uint8_t nonce[16], const char *prompt, uint8_t *image, size_t cap, char *buf,
                          size_t buf_cap, ok_think_fetch_fn fetch, void *fetch_ctx);
 
+/* The okupa's reaction to a drawing the player sent it: t->saw is one line
+ * from the vision model, decoration only. */
+ok_result ok_think_comment(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                           const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
+                           ok_think_fetch_fn fetch, void *fetch_ctx);
+
 /* Pictionary: the player's drawing as a PNG; t->saw is the vision model's
  * guess, one to three lower-case words (anything else is OK_THINK_ANSWER). */
 ok_result ok_think_guess(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
