@@ -927,7 +927,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     blob(0, 540, 160, 106, 72, 76);
     wear(look->wear, a, face);
     for (i = 0; i < 2; i++)
-        if (!ok_r3d_project(P(i ? 74 : -74, 655, 226), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
+        if (!ok_r3d_project(P(i ? 70 : -70, 655, 226), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
     if (!ok_r3d_project(P(0, 528, 240), &face->mouth_x, &face->mouth_y, &face->mouth_z)) face->mouth_x = -100;
     if (!ok_r3d_project(P(0, 575, 242), &face->nose_x, &face->nose_y, &face->nose_z)) face->nose_x = -100;
     if (!ok_r3d_project(P(0, 900, 0), &face->top_x, &face->top_y, NULL)) face->top_x = -100;
@@ -992,14 +992,14 @@ static void sprite(uint16_t *frame, const ok_monkey_face *f, int cx, int cy, con
         }
 }
 
-/* Eyes: a white with a dark rim, a pupil with a glint that looks where the
- * okupa is looking, furry lids for sleepy and blinking. */
-static const char *const eye_white[] = {"..###..", ".#www#.", "#wwwww#", "#wwwww#", "#wwwww#", "#wwwww#", ".#www#.", "..###.."};
-static const char *const pupil[] = {"okk", "kkk", "kkk", ".k."};
-static const char *const lid_half[] = {"..###..", ".#fff#.", "#fffff#", "#######"};
-static const char *const lid_shut[] = {"..###..", ".#fff#.", "#fffff#", "#fffff#", "#fffff#", "#######"};
-static const char *const eye_shut[] = {"#.....#", ".#...#.", "..###.."};
-static const char *const eye_joy[] = {"..###..", ".#...#.", "#.....#"};
+/* Eyes: big glossy black ovals with a glint (the glint follows the look),
+ * furry lids for sleepy and blinking. */
+static const char *const eye_black[] = {".###.", "#####", "#####", "#####", "#####", "#####", ".###."};
+static const char *const glint[] = {"oo", "o."};
+static const char *const lid_half[] = {".fff.", "fffff", "#####"};
+static const char *const lid_shut[] = {".fff.", "fffff", "fffff", "fffff", "#####"};
+static const char *const eye_shut[] = {"#...#", ".###."};
+static const char *const eye_joy[] = {".###.", "#...#"};
 static const char *const mouth_smile[] = {"#.....#", ".#...#.", "..###.."};
 static const char *const mouth_open[] = {"#######", "#rrrrr#", ".#rrr#.", "..###.."};
 static const char *const mouth_wobble[] = {"..#.#..", ".#.#.#.", "#.....#"};
@@ -1012,8 +1012,8 @@ static const char *const nose[] = {"n.n"};
 static const char *const blush[] = {"pppp"};
 static const char *const brow_l[] = {"..##", "##.."};
 static const char *const brow_r[] = {"##..", "..##"};
-static const char *const glasses[] = {"...####...", ".##....##.", "#........#", "#........#", "#........#",
-                                      "#........#", "#........#", "#........#", ".##....##.", "...####..."};
+static const char *const glasses[] = {"..####..", ".#....#.", "#......#", "#......#", "#......#", "#......#",
+                                      ".#....#.", "..####.."};
 static const char *const bridge[] = {"###"};
 static const char *const heart[] = {".hh.hh.", "hhhhhhh", "hhhhhhh", ".hhhhh.", "..hhh..", "...h..."};
 static const char *const zed[] = {"zzzz", "..z.", ".z..", "zzzz"};
@@ -1060,22 +1060,22 @@ void ok_monkey_face_draw(uint16_t *frame, const ok_monkey_face *f)
         if (!seen(f->eye_x[i], y, f->eye_z[i])) continue;
         x = f->eye_x[i];
         switch (f->eyes) {
-        case 'j': sprite(frame, f, x, y + 1, eye_joy, 3, 1); break;
-        case 's': sprite(frame, f, x, y + 2, eye_shut, 3, 1); break;
+        case 'j': sprite(frame, f, x, y + 1, eye_joy, 2, 1); break;
+        case 's': sprite(frame, f, x, y + 2, eye_shut, 2, 1); break;
         case 'b': /* a blink: the lid comes all the way down */
-            sprite(frame, f, x, y, eye_white, 8, 1);
-            sprite(frame, f, x, y - 1, lid_shut, 6, 1);
+            sprite(frame, f, x, y, eye_black, 7, 1);
+            sprite(frame, f, x, y, lid_shut, 5, 1);
             break;
         default:
-            sprite(frame, f, x, y, eye_white, 8, 1);
-            sprite(frame, f, x + f->look, y + (f->eyes == 'u' ? -1 : f->eyes == 'd' ? 2 : 1), pupil, 4, 1);
-            if (f->eyes == 'h') sprite(frame, f, x, y - 2, lid_half, 4, 1);
+            sprite(frame, f, x + f->look, y, eye_black, 7, 1);
+            sprite(frame, f, x + f->look, y - 1 + (f->eyes == 'u' ? -1 : f->eyes == 'd' ? 1 : 0), glint, 2, 1);
+            if (f->eyes == 'h') sprite(frame, f, x + f->look, y - 2, lid_half, 3, 1);
             if (f->eyes == 'd') sprite(frame, f, x + (i ? 1 : -1), y - 6, i ? brow_r : brow_l, 2, 1);
         }
-        if (f->eyes != 'd') sprite(frame, f, f->eye_x[i] + (i ? 5 : -5), y + 6, f->blush ? blush : cheek, 1, 1);
+        if (f->eyes != 'd') sprite(frame, f, f->eye_x[i] + (i ? 5 : -5), y + 5, f->blush ? blush : cheek, 1, 1);
     }
     if (f->glasses && seen(f->eye_x[0], f->eye_y[0], f->eye_z[0]) && seen(f->eye_x[1], f->eye_y[1], f->eye_z[1])) {
-        for (i = 0; i < 2; i++) sprite(frame, f, f->eye_x[i], f->eye_y[i], glasses, 10, 1);
+        for (i = 0; i < 2; i++) sprite(frame, f, f->eye_x[i], f->eye_y[i], glasses, 8, 1);
         sprite(frame, f, (f->eye_x[0] + f->eye_x[1]) / 2, f->eye_y[0] - 1, bridge, 1, 1);
     }
     if (seen(f->nose_x, f->nose_y, f->nose_z)) sprite(frame, f, f->nose_x, f->nose_y, nose, 1, 1);
