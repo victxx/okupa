@@ -227,7 +227,7 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
 
 int main(void)
 {
-    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0;
+    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0, threads_on = 0;
     uint32_t frame_at, late = 0, draw_us = 0, loop_us = 0, loop_at = 0;
     ok_look worn;
     ok_tech tech;
@@ -271,9 +271,9 @@ int main(void)
     ok_dsi_audio_start();
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
-    ok_dsi_net_start();
     ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
-    ok_dsi_mind_start(storage ? net_dir : NULL);
+    /* The network and the mind start once the intro is over: their crypto
+     * shares this one CPU and the film needs all of it. */
     ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
     frame_at = cpuGetTiming();
@@ -285,6 +285,11 @@ int main(void)
         scanKeys();
         ok_dsi_audio_pump();
         now = time(NULL);
+        if (!threads_on && ui.scene != OK_UI_SPLASH && ui.scene != OK_UI_FILM) {
+            threads_on = 1;
+            ok_dsi_net_start();
+            ok_dsi_mind_start(storage ? net_dir : NULL);
+        }
         /* SELECT: the technical side, over the same running game. */
         if (keysDown() & KEY_SELECT) {
             tech_on = !tech_on;
