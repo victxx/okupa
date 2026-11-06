@@ -10,73 +10,122 @@
   <header class="top">
     <a class="brand" href="#home">Okupa</a>
     <nav aria-label="Sections">
-      <a href="#gift">Give</a><a href="#mailbox">Mailbox</a><a href="#cave-room">Cave</a><a href="#visit-room">Visit</a><a href="#log-room">Log</a>
+      <a href="#play">Play on DSi</a><a href="#gift">Give</a><a href="#received">Received</a><a href="#visit-room">Visit</a>
     </nav>
-    <select id="net" aria-label="Network"></select>
+    <a class="gh" href="https://github.com/victxx/okupa" rel="noopener">GitHub</a>
   </header>
 
   <section id="home" class="hero">
-    <canvas id="scene" width="256" height="192" aria-label="Your okupa in its attic. Click to pet it."></canvas>
-    <aside class="who">
-      <p class="eyebrow">Your okupa</p>
-      <h1 id="addr" class="mono">…</h1>
-      <label>Friend code <input id="mycode" readonly class="mono"></label>
-      <p class="muted" id="balance"></p>
-      <button id="fund" class="ghost" hidden>Fund from local dev chains</button>
-      <p id="netlabel" class="muted small"></p>
-    </aside>
+    <div class="pitch">
+      <h1>A little okupa that lives on your Nintendo&nbsp;DSi.</h1>
+      <p class="lead">It joins Ethereum by itself, peer to peer, with no server in between. Friends anywhere, on another DSi or in a browser, can give it pictures.</p>
+      <div class="row">
+        <a class="button" id="dl" href="./download/okupa.nds" download>Download okupa.nds</a>
+        <a class="button ghost" href="#play">How to install</a>
+      </div>
+      <p class="muted small" id="romInfo">Built from main.</p>
+    </div>
+    <figure class="screen">
+      <canvas id="scene" width="256" height="192" aria-label="The okupa in its attic. Click to pet it."></canvas>
+      <figcaption class="muted small">Live: the DSi's own renderer, compiled to WebAssembly. Click to pet.</figcaption>
+    </figure>
   </section>
 
   <main>
-    <section id="gift" class="card span2">
+    <section id="play" class="block">
+      <h2>Play it on a DSi</h2>
+      <ol class="steps">
+        <li><b>Download</b><span>okupa.nds and the guide below.</span></li>
+        <li><b>Copy</b><span>okupa.nds to the SD card, for example /roms/nds/.</span></li>
+        <li><b>Start</b><span>it from your homebrew menu. It makes sd:/okupa/ by itself.</span></li>
+      </ol>
+      <div class="files">
+        <a class="file-row" href="./download/okupa.nds" download><span class="ext">NDS</span><span><b>okupa.nds</b><small id="romLine">The game</small></span></a>
+        <a class="file-row" href="./download/README.txt" download><span class="ext">TXT</span><span><b>README.txt</b><small>Install, the files it keeps on the SD, Wi-Fi, mainnet or Sepolia</small></span></a>
+        <a class="file-row" href="https://github.com/victxx/okupa" rel="noopener"><span class="ext">GIT</span><span><b>github.com/victxx/okupa</b><small>Source and the latest builds</small></span></a>
+      </div>
+    </section>
+
+    <section id="you" class="block">
+      <div class="head"><h2>Your web okupa</h2><select id="net" aria-label="Network"></select></div>
+      <p class="muted">It lives in this browser; its key was made here and never leaves. Give its friend code to whoever wants to send it something.</p>
+      <div class="you">
+        <div><span class="label">Address</span><span id="addr" class="mono">…</span></div>
+        <label>Friend code <input id="mycode" readonly class="mono"></label>
+        <p class="muted small" id="balance"></p>
+        <p class="muted small" id="netlabel"></p>
+        <button id="fund" class="ghost" hidden>Fund from local dev chains</button>
+      </div>
+    </section>
+
+    <section id="gift" class="block">
       <h2>Give a gift</h2>
-      <label>To <input id="to" class="mono" placeholder="friend code 0x…:04…, or a DSi address"></label>
-      <div class="two">
-        <div>
-          <h3>Small <span class="tag">64×64 · on Ethereum</span></h3>
+      <label class="to">To <input id="to" class="mono" placeholder="friend code 0x…:04…, or a DSi address for a drawing"></label>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabSmall" aria-selected="true" aria-controls="paneSmall">Drawing <small>64×64</small></button>
+        <button role="tab" id="tabBig" aria-selected="false" aria-controls="paneBig">Photo <small>256×192</small></button>
+      </div>
+      <div id="paneSmall" role="tabpanel" class="pane">
+        <div class="pane-body">
           <canvas id="sketch" width="256" height="256" aria-label="64 by 64 drawing"></canvas>
-          <div class="row" id="tones"></div>
-          <div class="row">
-            <button id="sendInline">Send small gift</button>
-            <button id="sendSwarm" class="ghost">Send privately</button>
-            <button id="clear" class="ghost">New page</button>
+          <div class="pane-side">
+            <p class="muted">Draw with the four tones. It hangs on your friend's attic wall, on a DSi too.</p>
+            <div class="row" id="tones"></div>
+            <div class="choice">
+              <button id="sendInline">Send in the transaction</button>
+              <small>The picture travels inside one Ethereum transaction. A DSi can read it.</small>
+            </div>
+            <div class="choice">
+              <button id="sendSwarm" class="ghost">Send privately</button>
+              <small>Encrypted on Swarm; only your friend can open it. Browsers only for now.</small>
+            </div>
+            <button id="clear" class="link">New page</button>
           </div>
         </div>
-        <div>
-          <h3>Big <span class="tag">a photo · to the cave</span></h3>
-          <canvas id="bigPreview" class="big" width="256" height="192" aria-label="Big picture preview, 256 by 192"></canvas>
-          <div class="row">
-            <label class="file">Choose a photo<input id="photo" type="file" accept="image/*"></label>
-            <button id="sendBig" disabled>Send big gift</button>
+      </div>
+      <div id="paneBig" role="tabpanel" class="pane" hidden>
+        <div class="pane-body">
+          <canvas id="bigPreview" class="big" width="256" height="192" aria-label="Photo preview, 256 by 192"></canvas>
+          <div class="pane-side">
+            <p class="muted">A photo from this computer, in the game's four tones. Too big for a transaction: it is encrypted on Swarm and goes to your friend's archive.</p>
+            <label class="file button ghost">Choose a photo<input id="photo" type="file" accept="image/*"></label>
+            <div class="choice"><button id="sendBig" disabled>Send photo</button></div>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="mailbox" class="card">
-      <div class="head"><h2>Mailbox</h2><button id="check" class="ghost">Check</button></div>
+    <section id="received" class="block">
+      <div class="head"><h2>Received</h2><button id="check" class="ghost">Check mailbox</button></div>
       <ol id="mail" class="list"></ol>
-      <div id="wall" class="wall"></div>
+      <div class="received">
+        <div>
+          <h3>On the wall <small>drawings</small></h3>
+          <div id="wall" class="wall"></div>
+        </div>
+        <div>
+          <h3>Archive <small>photos</small></h3>
+          <div id="cave" class="archive"></div>
+        </div>
+      </div>
     </section>
 
-    <section id="cave-room" class="card">
-      <h2>The cave</h2>
-      <div id="cave" class="cave"></div>
-    </section>
-
-    <section id="visit-room" class="card span2">
+    <section id="visit-room" class="block">
       <h2>Visit an okupa</h2>
+      <p class="muted">Paste a DSi's address to see its hellos, drawings and gifts, each checked here against the chain.</p>
       <div class="row"><input id="visitAddr" class="mono" placeholder="0x… address"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
       <div id="visitOut" class="wall"></div>
     </section>
 
-    <section id="log-room" class="card span2">
-      <h2>What really happened</h2>
+    <details id="log-room" class="block">
+      <summary>What really happened</summary>
       <ol id="log"></ol>
-    </section>
+    </details>
   </main>
 
-  <dialog id="look"><canvas id="lookCanvas" width="256" height="192"></canvas><p id="lookInfo" class="mono muted"></p><button id="lookClose" class="ghost">Close</button></dialog>
+  <footer class="foot muted small">Okupa · <a href="https://github.com/victxx/okupa" rel="noopener">GitHub</a> · <a href="./download/README.txt">README.txt</a></footer>
+
+  <dialog id="look"><canvas id="lookCanvas" width="256" height="192"></canvas><p id="lookInfo" class="mono muted"></p><div class="row"><a id="lookSave" class="button ghost" download>Download PNG</a><button id="lookClose" class="ghost">Close</button></div></dialog>
   <script type="module" src="./src/app.js"></script>
 </body>
 </html>

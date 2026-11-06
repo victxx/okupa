@@ -139,7 +139,7 @@ function renderWall(animateNewest = false) {
   hangInAttic(animateNewest);
   if (!hung.length) { w.textContent = 'Nothing on the wall yet.'; w.className = 'wall muted'; return; }
   w.className = 'wall';
-  for (const h of hung) w.append(frame(hexToBytes(h.pixels), h.bpp, [`from ${h.from.slice(0, 10)}…`, `${h.how}`, `tx ${h.tx.slice(0, 12)}…`]));
+  for (const h of hung) w.append(frame(hexToBytes(h.pixels), h.bpp, [`from ${h.from.slice(0, 8)}…`, `${h.how} · ${h.tx.slice(0, 8)}…`]));
 }
 
 // ---------- network ----------
@@ -267,11 +267,11 @@ async function checkMailbox() {
         if (!p || (p.kind !== okupa.KIND.PHOTO && p.kind !== okupa.KIND.BIG_PHOTO)) throw new Error('not a picture');
         px = p.pixels; bpp = 2; how = 'via Swarm';
         if (p.kind === okupa.KIND.BIG_PHOTO) {
-          cave.unshift({ tx: e.tx, from: v.from, pixels: bytesToHex(px), block: String(v.block) });
+          cave.unshift({ tx: e.tx, from: v.from, pixels: bytesToHex(px), block: String(v.block), bytes: picture.length, chunk: bytesToHex(ref.subarray(0, 32)), got: new Date().toISOString() });
           store.set(caveKey(), cave.slice(0, 8));
-          log(`✓ ${e.tx.slice(0, 12)}…: big picture from ${v.from.slice(0, 10)}…, block ${v.block}, ${picture.length} B from Swarm match the sealed keccak. Into the cave.`, 'ok');
+          log(`✓ ${e.tx.slice(0, 12)}…: big picture from ${v.from.slice(0, 10)}…, block ${v.block}, ${picture.length} B from Swarm match the sealed keccak. Into the archive.`, 'ok');
           record({ act: 'received-swarm-big', from: v.from, to: me, tx: e.tx, block: String(v.block), arkivEntity: e.key, swarmAddress: bytesToHex(ref.subarray(0, 32)), pictureKeccak: bytesToHex(pictureHash), pictureBytes: picture.length });
-          say('into the cave (big, via Swarm)'); caveNew++;
+          say('into the archive (photo, via Swarm)'); caveNew++;
           continue;
         }
         log(`✓ ${e.tx.slice(0, 12)}…: sender ${v.from.slice(0, 10)}… recovered from the signature, block ${v.block}, seal opened, ${picture.length} B from Swarm match the sealed keccak.`, 'ok');
@@ -293,19 +293,35 @@ async function checkMailbox() {
   if (caveNew) scene?.cheer();
 }
 
-// ---------- the cave: where big pictures live ----------
-const caveKey = () => `cave.${net().chainId}`;
+// ---------- the archive: photos from friends, kept like files ----------
+const caveKey = () => `cave.${net().chainId}`; // key name kept so earlier archives still load
+function pngUrl(px) { const c = document.createElement('canvas'); paintBig(c, px); return c.toDataURL('image/png'); }
+function lookAt(it) {
+  const px = hexToBytes(it.pixels);
+  paintBig($('lookCanvas'), px);
+  $('lookInfo').textContent = `from ${it.from} · block ${it.block} · tx ${it.tx}`;
+  $('lookSave').href = pngUrl(px); $('lookSave').download = `okupa-photo-${it.tx.slice(2, 10)}.png`;
+  $('look').showModal();
+}
 function renderCave() {
   const w = $('cave'); w.replaceChildren();
   const items = store.get(caveKey(), []);
-  if (!items.length) { w.textContent = 'Empty. Big pictures from friends end up here.'; w.className = 'cave muted'; return; }
-  w.className = 'cave';
+  if (!items.length) { w.textContent = 'No photos yet. Photos from friends are kept here.'; w.className = 'archive muted'; return; }
+  w.className = 'archive';
   for (const it of items) {
-    const f = document.createElement('button'); f.className = 'bigframe';
-    const c = document.createElement('canvas'); paintBig(c, hexToBytes(it.pixels)); f.append(c);
-    const t = document.createElement('span'); t.className = 'mono'; t.textContent = `from ${it.from.slice(0, 10)}… · block ${it.block}`; f.append(t);
-    f.onclick = () => { paintBig($('lookCanvas'), hexToBytes(it.pixels)); $('lookInfo').textContent = `from ${it.from} · tx ${it.tx}`; $('look').showModal(); };
-    w.append(f);
+    const row = document.createElement('div'); row.className = 'arow';
+    const c = document.createElement('canvas'); paintBig(c, hexToBytes(it.pixels)); c.onclick = () => lookAt(it); c.title = 'Open';
+    const meta = document.createElement('div'); meta.className = 'ameta';
+    const name = document.createElement('b'); name.textContent = `okupa-photo-${it.tx.slice(2, 10)}.png`;
+    const sub = document.createElement('small');
+    sub.textContent = `from ${it.from.slice(0, 10)}… · block ${it.block} · ${Math.round((it.bytes || 12294) / 1024)} KB on Swarm`;
+    meta.append(name, sub);
+    const acts = document.createElement('div'); acts.className = 'aacts';
+    const open = document.createElement('button'); open.className = 'ghost'; open.textContent = 'Open'; open.onclick = () => lookAt(it);
+    const dl = document.createElement('a'); dl.className = 'button ghost'; dl.textContent = 'PNG'; dl.download = `okupa-photo-${it.tx.slice(2, 10)}.png`;
+    dl.onclick = () => { dl.href = pngUrl(hexToBytes(it.pixels)); };
+    acts.append(open, dl);
+    row.append(c, meta, acts); w.append(row);
   }
 }
 
@@ -384,6 +400,14 @@ $('sendBig').onclick = (e) => busy(e.target, sendBigGift);
 $('photo').onchange = (e) => { const f = e.target.files?.[0]; if (f) loadPhoto(f).catch((err) => log(`✗ ${err.message}`, 'bad')); };
 $('to').value = store.get('to', '');
 $('to').oninput = () => store.set('to', $('to').value.trim());
+for (const [tab, pane, other, otherPane] of [['tabSmall', 'paneSmall', 'tabBig', 'paneBig'], ['tabBig', 'paneBig', 'tabSmall', 'paneSmall']]) {
+  $(tab).onclick = () => { $(tab).setAttribute('aria-selected', 'true'); $(other).setAttribute('aria-selected', 'false'); $(pane).hidden = false; $(otherPane).hidden = true; };
+}
+fetch('./download/rom.json').then((r) => r.json()).then((r) => {
+  const mb = (r.bytes / 1048576).toFixed(1);
+  $('romInfo').textContent = `Build ${r.commit} · ${mb} MB · sha256 ${r.sha256.slice(0, 12)}…`;
+  $('romLine').textContent = `The game · build ${r.commit} · ${mb} MB`;
+}).catch(() => {});
 $('lookClose').onclick = () => $('look').close();
 $('check').onclick = (e) => busy(e.target, checkMailbox);
 $('visit').onclick = (e) => busy(e.target, visit);
