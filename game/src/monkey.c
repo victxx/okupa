@@ -1049,7 +1049,7 @@ static void stroke(int x0, int y0, int z0, int x1, int y1, int z1, int r)
 
 static void face3d(const uint16_t *skin, const ok_monkey_face *f)
 {
-    int s, hz = ok_r3d_on_hardware() ? 6 : 0; /* a hair further out on the hardware, whose depth is coarser */
+    int s, hz = ok_r3d_on_hardware() ? 24 : 0; /* further out on the hardware, whose depth is coarser */
     for (s = -1; s <= 1; s += 2) {
         int x = s * 72 + f->look * 8, y = 644, x0, y0, x1, y1;
         int32_t d0, d1;
@@ -1115,8 +1115,8 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
         stroke(14, 524, 226 + hz, 32, 540, 221 + hz, 6);
     }
     ok_r3d_material(f->blush ? RGB(31, 13, 15) : RGB(31, 17, 17), ++next_id, 0); /* cheeks */
-    ok_r3d_ellipsoid(P(-118, 592, 182), P(30, 15, 10), 6, 4);
-    ok_r3d_ellipsoid(P(118, 592, 182), P(30, 15, 10), 6, 4);
+    ok_r3d_ellipsoid(P(-118, 592, 182 + hz), P(30, 15, 10), 6, 4);
+    ok_r3d_ellipsoid(P(118, 592, 182 + hz), P(30, 15, 10), 6, 4);
 }
 
 void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
@@ -1286,11 +1286,14 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     /* A heart-shaped face: two lobes round the eyes over one soft disc, and a
      * gentle muzzle low on it. */
     part(skin, OK_PART_EYES, face->mask_id);
-    blob(-78, 650, 124, 92, 98, 96);
-    blob(78, 650, 124, 92, 98, 96);
-    ok_r3d_ellipsoid(P(0, 572, 118), P(150, 124, 116), 8, 5);
-    part(skin, OK_PART_MUZZLE, face->mask_id);
-    blob(0, 538, 156, 100, 66, 76); /* a smaller, rounder snout */
+    {
+        int fz = ok_r3d_on_hardware() ? 16 : 0; /* the face a little proud of the head on the hardware's coarser depth */
+        blob(-78, 650, 124 + fz, 92, 98, 96);
+        blob(78, 650, 124 + fz, 92, 98, 96);
+        ok_r3d_ellipsoid(P(0, 572, 118 + fz), P(150, 124, 116), 8, 5);
+        part(skin, OK_PART_MUZZLE, face->mask_id);
+        blob(0, 538, 156 + fz, 100, 66, 76); /* a smaller, rounder snout */
+    }
     face3d(skin, face);
     wear(look->wear, a, face);
     for (i = 0; i < 2; i++) /* where glasses go */
