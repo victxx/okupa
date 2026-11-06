@@ -224,11 +224,17 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
                                                      "*peeks*",        "*wanders*",   "*sighs*",     "*waves*",
                                                      "*munches*",      "*plays*",     "*yawns*",     "*heads out*",
                                                      "*heads in*"};
+    static int last_activity = -1;
     int move = moves[d->activity], where = OK_PLACE_ATTIC, here = ok_house_where();
     /* Its line (or what it does, if it says nothing); its thought in a
      * cloud; its question waits in its own bubble for the player to answer
      * by holding L. All three come from the verified decision. */
     const char *said = d->line[0] ? d->line : d->thought[0] ? NULL : doing[d->activity];
+    /* It carries on with the same thing, saying nothing: let the body keep
+     * going instead of restarting it, and keep the bubble for news. */
+    if (d->activity == last_activity && !d->line[0] && !d->thought[0] && !d->ask[0]) return;
+    if (d->activity == last_activity && !d->line[0]) said = NULL;
+    last_activity = d->activity;
     if (d->activity == OK_MIND_GO_OUTSIDE) where = OK_PLACE_GARDEN;
     if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
         (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
@@ -249,6 +255,8 @@ int main(void)
     time_t now = time(NULL), last = now, saved_at = now, last_input = now;
     ok_mind thought; /* the mind's latest decision */
     int listening = 0; /* a clip is with 0G */
+    int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0; /* Pictionary */
+    char game_guess[OK_MIND_TEXT + 1] = "";
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
@@ -403,6 +411,53 @@ int main(void)
         }
         if (listening && !ok_dsi_mind_ear_busy() && !ok_dsi_ear_recording()) ok_ui_listening(&ui, 0);
         listening = ok_dsi_mind_ear_busy();
+        /* Pictionary against the okupa's mind: X and it guesses the drawing
+         * in the sketchbook (0G's vision model, checked here); A says it is
+         * right, B wrong. */
+        if (!tech_on && (keysDown() & KEY_X) && !game_waiting) {
+            int k;
+            for (k = 0; k < (int)sizeof ui.drawing && !ui.drawing[k]; k++) {}
+            if (k == (int)sizeof ui.drawing) {
+                ui.say = "Draw something first, then press X!";
+                ui.say_ticks = 60 * 3;
+            } else {
+                ok_dsi_mind_guess(ui.drawing);
+                game_waiting = 1;
+                ok_ui_listening(&ui, 2);
+            }
+        }
+        {
+            int g = ok_dsi_mind_take_guess(game_guess, sizeof game_guess);
+            if (g) {
+                ok_ui_listening(&ui, 0);
+                game_waiting = 0;
+            }
+            if (g > 0) {
+                static char q[64];
+                snprintf(q, sizeof q, "Is it a %.30s? A yes, B no", game_guess);
+                ok_ui_ask(&ui, q);
+                game_asked = 1;
+            } else if (g < 0) {
+                ui.say = "My head is foggy... no guess this time.";
+                ui.say_ticks = 60 * 3;
+            }
+        }
+        if (!tech_on && game_asked && (keysDown() & (KEY_A | KEY_B))) {
+            static char said[64], did[96];
+            int right = (keysDown() & KEY_A) != 0;
+            if (right) game_okupa++;
+            else game_you++;
+            snprintf(said, sizeof said, right ? "Yes! Okupa %d - You %d" : "Nooo! Okupa %d - You %d", game_okupa,
+                     game_you);
+            snprintf(did, sizeof did, "said your Pictionary guess '%.30s' was %s", game_guess, right ? "right" : "wrong");
+            ok_ui_ask(&ui, NULL);
+            ui.say = said;
+            ui.say_ticks = 60 * 4;
+            ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, did);
+            ok_facts_log(ok_dsi_uptime(), 'G', "game: %s, Okupa %d - You %d", right ? "right" : "wrong", game_okupa,
+                         game_you);
+            game_asked = 0;
+        }
         if (!tech_on && (keysDown() & KEY_R)) {
             ok_dsi_mind_look();
             ui.say = "Let me look at you...";

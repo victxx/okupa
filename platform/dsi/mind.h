@@ -31,6 +31,10 @@ void ok_dsi_mind_hear(const uint8_t *wav, size_t len);
 int ok_dsi_mind_ear_busy(void);
 int ok_dsi_mind_ear_state(void); /* 0 idle, 2 the clip is with 0G */
 void ok_dsi_mind_look(void);
+/* Pictionary: 0G's vision model guesses the 64x64 drawing. take_guess: 1
+ * with the verified guess, -1 if it could not, 0 not yet. */
+void ok_dsi_mind_guess(const uint8_t pixels[512]);
+int ok_dsi_mind_take_guess(char *out, size_t cap);
 /* 1 once per new verified decision (with its line, thought, question). */
 int ok_dsi_mind_take(ok_mind *d);
 /* Lines for the Dev screen. */

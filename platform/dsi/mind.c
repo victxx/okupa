@@ -1,4 +1,6 @@
 #include "mind.h"
+#include "net.h"
+#include "okupa_json.h"
 #include "okupa_memory.h"
 #include "okupa_png.h"
 #include "senses.h"
@@ -60,7 +62,11 @@ static const uint8_t *clip;
 static size_t clip_len;
 static volatile int clip_waiting, look_wanted, ear_state;
 static uint32_t looked_at;
-static uint8_t photo[40 * 1024];
+static uint8_t photo[64 * 1024]; /* a camera PNG (37 KB) or a drawing (49 KB) */
+/* Pictionary: the drawing to guess, and the guess once 0G has made it. */
+static uint8_t doodle[512];
+static volatile int guess_wanted, guess_state; /* guess_state: 1 new guess, -1 it could not */
+static char guess_text[OK_MIND_TEXT + 1];
 static char sense_buf[OK_EAR_RATE * OK_EAR_SECONDS + 64 * 1024];
 static char chain[65]; /* sha256 of the last episode written */
 
@@ -90,6 +96,9 @@ static void line(int i, const char *fmt, ...)
 
 const char (*ok_dsi_mind_lines(void))[33] { return (const char (*)[33])lines; }
 
+/* The live feed on the SELECT screens: every real 0G step as it happens. */
+#define feed(...) ok_facts_log(ok_dsi_uptime(), 'G', __VA_ARGS__)
+
 void ok_dsi_mind_observe(const ok_pet *p, int outside, uint32_t seconds_since_player, const char *did)
 {
     seen_pet = *p;
@@ -114,6 +123,22 @@ void ok_dsi_mind_hear(const uint8_t *wav, size_t len)
 }
 
 void ok_dsi_mind_look(void) { look_wanted = 1; }
+
+void ok_dsi_mind_guess(const uint8_t pixels[512])
+{
+    if (guess_wanted) return;
+    memcpy(doodle, pixels, sizeof doodle);
+    guess_wanted = 1;
+}
+
+int ok_dsi_mind_take_guess(char *out, size_t cap)
+{
+    int s = guess_state;
+    if (!s) return 0;
+    guess_state = 0;
+    if (s > 0) snprintf(out, cap, "%s", guess_text);
+    return s;
+}
 
 int ok_dsi_mind_take(ok_mind *d)
 {
@@ -264,11 +289,13 @@ static int clock_sync(void)
             clock_synced_at = frames_alive;
             describe_offset(ok_facts_now.og_clock, sizeof ok_facts_now.og_clock, clock_offset);
             line(4, "Clock: %.25s", ok_facts_now.og_clock);
+            feed("clock: %.32s", ok_facts_now.og_clock);
             return 1;
         }
     }
     snprintf(ok_facts_now.og_clock, sizeof ok_facts_now.og_clock, "no NTP: RTC%s", cfg.tz_minutes ? " + tz" : "");
     line(4, "Clock: %.25s", ok_facts_now.og_clock);
+    feed("clock: no NTP answer, using the RTC");
     return 0;
 }
 
@@ -325,15 +352,18 @@ static int dial(const char *host)
     addr.sin_port = htons(443);
     if (!resolve(host, &addr.sin_addr)) {
         line(2, "DNS: no address for host");
+        feed("DNS: no address for %.22s", host);
         return -2;
     }
     line(2, "TCP %s:443", inet_ntoa(addr.sin_addr));
+    feed("TCP %s:443 ...", inet_ntoa(addr.sin_addr));
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -3;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 8000) ||
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &elen) || error) {
         hang_up();
         line(2, "TCP: no connection");
+        feed("TCP: no connection");
         return -3;
     }
     draw(seed, sizeof seed);
@@ -344,16 +374,25 @@ static int dial(const char *host)
     return 0;
 }
 
+static void tls_name(char *out, size_t cap);
+
 static int fetch(void *ctx, const char *host, const char *req, size_t n, const char *body, size_t body_len,
                  char *resp, size_t cap, size_t *got)
 {
     int e, tries;
+    uint32_t t0;
     (void)ctx;
     if (fd >= 0 && strcmp(open_host, host)) hang_up(); /* another provider: another connection */
     for (tries = 0; tries < 2; tries++) {
         int reused = fd >= 0;
         if (!reused && (e = dial(host))) return e;
+        t0 = cpuGetTiming();
         e = ok_think_exchange(&tls, req, n, body, body_len, resp, cap, got);
+        if (!e && !reused) {
+            char suite[24];
+            tls_name(suite, sizeof suite);
+            feed("%.23s ok %lu ms", suite, (unsigned long)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u));
+        }
         if (!e) {
             if (!ok_think_keeps_open(resp, *got)) hang_up();
             return 0;
@@ -361,6 +400,7 @@ static int fetch(void *ctx, const char *host, const char *req, size_t n, const c
         hang_up();
         if (!reused) {
             line(2, "TLS %d: %.22s", e, why(e));
+            feed("TLS failed %d: %.24s", e, why(e));
             return e;
         }
         /* the server dropped the idle connection: once more, fresh */
@@ -467,6 +507,7 @@ static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned c
         fclose(f);
     }
     line(13, "Episode %u on SD, chained", count);
+    feed("episode %u on SD, chained %.8s", count, chain);
 }
 
 static void load_chain(void)
@@ -585,7 +626,7 @@ static void save_facts(void)
 /* Waits, but not when the player has just spoken or asked it to look. */
 static void rest_frames(int frames)
 {
-    while (frames-- > 0 && !clip_waiting && !look_wanted) wait_frames(1);
+    while (frames-- > 0 && !clip_waiting && !look_wanted && !guess_wanted) wait_frames(1);
 }
 
 /* A failed call: say why on both screens. */
@@ -597,9 +638,37 @@ static void failed(void)
         stopped("HTTP %d: %.20s", t.http_status, t.response ? t.response : "");
     else
         stopped("%s", ok_think_stage_name(t.stage));
+    feed("safe stop: %.28s", ok_facts_now.og_error);
     hang_up();
     /* A certificate the clock cannot place: ask NTP again first. */
     if (t.net_error == BR_ERR_X509_EXPIRED || t.net_error == BR_ERR_X509_TIME_UNKNOWN) clock_synced = 0;
+}
+
+/* A number member of an object, or -1. */
+static long number(const ok_json *obj, const char *key)
+{
+    ok_json v;
+    long n = 0;
+    size_t i;
+    if (ok_json_member(obj, key, &v) != OK_OK || !v.len) return -1;
+    for (i = 0; i < v.len && v.at[i] >= '0' && v.at[i] <= '9'; i++) n = n * 10 + (v.at[i] - '0');
+    return i ? n : -1;
+}
+
+/* After a verified call: who signed, and what it used (from the provider's
+ * own usage counts, inside the signed bytes). */
+static void feed_verified(uint32_t ms)
+{
+    ok_json root, usage;
+    long in, out;
+    feed("TEE sig ok %.6s..%.4s %lu ms", t.recovered, t.recovered + 38, (unsigned long)ms);
+    if (t.response && ok_json_parse(t.response, t.response_len, &root) == OK_OK &&
+        ok_json_member(&root, "usage", &usage) == OK_OK) {
+        in = number(&usage, "prompt_tokens");
+        out = number(&usage, "completion_tokens");
+        if (in >= 0) feed("paid for %ld tokens in, %ld out", in, out < 0 ? 0 : out);
+        else if ((in = number(&usage, "seconds")) >= 0) feed("paid for %ld s of audio", in);
+    }
 }
 
 static int thinker(void *arg)
@@ -632,6 +701,7 @@ static int thinker(void *arg)
     load_chain();
     load_facts();
     line(1, "%.20s%s", cfg.model, cfg.have_ear ? " + ears" : "");
+    feed("mind on: %.22s%s", cfg.model, cfg.have_ear ? " + ears" : "");
     p.host = cfg.host;
     p.provider = cfg.provider;
     p.model = cfg.model;
@@ -644,6 +714,10 @@ static int thinker(void *arg)
     ear.generation = 0;
 
     for (;;) {
+        if ((paused || !wifi_ready()) && guess_wanted) { /* no guess without its mind */
+            guess_wanted = 0;
+            guess_state = -1;
+        }
         if (paused) {
             line(0, "0G mind: paused (Y resumes)");
             hang_up();
@@ -652,6 +726,7 @@ static int thinker(void *arg)
         }
         if (!wifi_ready() || !have_pet) {
             line(0, "0G mind: waiting for Wi-Fi");
+            if (strcmp(ok_facts_now.og_error, "waiting for Wi-Fi")) feed("waiting for Wi-Fi");
             snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "waiting for Wi-Fi");
             hang_up();
             wait_frames(60);
@@ -667,11 +742,16 @@ static int thinker(void *arg)
                 now_ms = (uint64_t)utc_now() * 1000u;
                 draw(nonce, sizeof nonce);
                 line(3, "Listening: %lu bytes to 0G", (unsigned long)clip_len);
+                feed("hearing: %lu KB to %.20s", (unsigned long)(clip_len / 1024), cfg.ear_model);
+                t0 = cpuGetTiming();
                 r = ok_think_hear(&t, &ear, key, now_ms, nonce, clip, clip_len, sense_buf, sizeof sense_buf, fetch,
                                   NULL);
+                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
+                if (r == OK_OK && t.stage == OK_THINK_DECIDED) feed_verified(ms);
                 if (r == OK_OK && t.stage == OK_THINK_DECIDED && t.heard[0]) {
                     snprintf(heard_text, sizeof heard_text, "%s", t.heard);
                     line(3, "Heard: %.25s", t.heard);
+                    feed("heard: \"%.30s\"", t.heard);
                 } else if (r == OK_OK) {
                     failed();
                 }
@@ -693,17 +773,49 @@ static int thinker(void *arg)
                 now_ms = (uint64_t)utc_now() * 1000u;
                 draw(nonce, sizeof nonce);
                 line(3, "Looking: %lu B photo to 0G", (unsigned long)n);
+                feed("looking: %lu KB photo to vision", (unsigned long)(n / 1024));
+                t0 = cpuGetTiming();
                 r = ok_think_see(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sizeof sense_buf, fetch, NULL);
+                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
                 if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                    feed_verified(ms);
                     snprintf(saw_text, sizeof saw_text, "%s", t.saw);
                     line(3, "Saw: %.27s", t.saw);
+                    feed("saw: %.33s", t.saw);
                 } else if (r == OK_OK) {
                     failed();
                 }
                 save_episode(&p, now_ms, count);
             } else {
                 stopped("%s", why_cam);
+                feed("%.38s", why_cam);
             }
+        }
+
+        /* Pictionary: the player's drawing, guessed by 0G's vision model. */
+        if (guess_wanted) {
+            if (ok_png_drawing(doodle, 2, photo, sizeof photo, &n) == OK_OK) {
+                now_ms = (uint64_t)utc_now() * 1000u;
+                draw(nonce, sizeof nonce);
+                feed("guessing your drawing (%lu KB)", (unsigned long)(n / 1024));
+                t0 = cpuGetTiming();
+                r = ok_think_guess(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sizeof sense_buf, fetch, NULL);
+                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
+                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                    feed_verified(ms);
+                    snprintf(guess_text, sizeof guess_text, "%s", t.saw);
+                    feed("guess: %.32s", t.saw);
+                    line(3, "Guess: %.25s", t.saw);
+                    guess_state = 1;
+                } else {
+                    if (r == OK_OK) failed();
+                    guess_state = -1;
+                }
+                save_episode(&p, now_ms, count);
+            } else {
+                guess_state = -1;
+            }
+            guess_wanted = 0;
         }
 
         /* 3. What it notices, copied from the game loop, and what it does. */
@@ -732,6 +844,7 @@ static int thinker(void *arg)
 
         now_ms = (uint64_t)utc_now() * 1000u;
         draw(nonce, sizeof nonce);
+        feed("asking %.24s...", cfg.model);
         t0 = cpuGetTiming();
         r = ok_think_run(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
         ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
@@ -755,6 +868,11 @@ static int thinker(void *arg)
             line(12, "Decided by 0G, checked here");
             line(4, "Clock: %.25s", ok_facts_now.og_clock);
             ok_facts_now.og_error[0] = 0;
+            feed_verified(ms);
+            feed("chose: %s, %s", ok_mind_activity_name(t.decision.activity), ok_mind_mood_name(t.decision.mood));
+            if (t.decision.line[0]) feed("says: %.32s", t.decision.line);
+            if (t.decision.thought[0]) feed("thinks: %.30s", t.decision.thought);
+            if (t.decision.ask[0]) feed("asks: %.32s", t.decision.ask);
             remember(&t.decision);
             /* What it heard and saw has been told: it moves on. */
             heard_text[0] = saw_text[0] = 0;
@@ -766,6 +884,7 @@ static int thinker(void *arg)
             if (t.decision.remember[0] && ok_memory_add(&facts, t.decision.remember)) {
                 save_facts();
                 line(13, "Keeps: %.25s", t.decision.remember);
+                feed("keeps: %.32s", t.decision.remember);
             }
             mailbox = t.decision;
             mailbox_new = 1;
@@ -780,10 +899,10 @@ static int thinker(void *arg)
         line(0, "0G mind: alive, %u/%u verified", verified, count);
         save_episode(&p, now_ms, count);
 
-        /* Every 5 s while the player is around, every 20 s otherwise; after
-         * failures it backs off up to a minute. 0G allows 30 requests a
-         * minute and a decision is two. Speaking or R cuts the wait short. */
-        rest = seen_idle < 60 ? 5 : 20;
+        /* Every 12 s while the player is around, every 30 s otherwise, so
+         * each thing it does has time to play out; after failures it backs
+         * off up to a minute. Speaking or R cuts the wait short. */
+        rest = seen_idle < 60 ? 12 : 30;
         if (fails) rest = fails >= 3 ? 60 : 10 << fails; /* each try costs a TLS handshake the game waits for */
         rest = rest * 60 - (int)(ms * 60 / 1000);
         rest_frames(rest > 60 * 3 ? rest : 60 * 3);
