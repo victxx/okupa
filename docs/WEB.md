@@ -108,7 +108,7 @@ in Arkiv, checked it, opened it and put it in the cave. Evidence:
 
 **Web monkey**
 - **C (censorship resistance):** weaker than the DSi. The web monkey sends through an RPC endpoint that can refuse it, and switching endpoints is the only remedy. Arkiv can hide a mailbox entry and a Bee node can withhold a picture. Neither can forge a gift, and the gift itself stays on Ethereum, so anyone can rebuild a wall from the chain. Arkiv entries expire, and pictures stay on Swarm only while their postage batch is paid for.
-- **O (open source):** everything is open-licensed (MIT/BSD dependencies, listed below). The repository is still private.
+- **O (open source):** everything is open-licensed (MIT/BSD dependencies, listed below). The repository is public: https://github.com/victxx/okupa.
 - **P (privacy):**
   - Kept private: picture contents. They are encrypted on Swarm, and only the recipient can open the seal.
   - Public: who gave to whom and when (Ethereum, Arkiv).
@@ -200,7 +200,7 @@ build; nothing is being submitted.
 | At least one user-visible feature reads from Arkiv | **Met.** The mailbox drives the wall |
 | README lists writer wallet(s) and one runnable query | Missing (local addresses only). The query exists: `scripts/read-mailbox.mjs <net> <address>` |
 | `/arkiv/schema.md`, `friction.md`, `reach.md`, `why-arkiv.md`, `how-you-use-arkiv.md` | Missing. The content is in this file (schema, owners, expiry, trust) |
-| Public repo, open-source license, AI-use statement | Missed: the repo is private and has no LICENSE. AI use is stated below |
+| Public repo, open-source license, AI-use statement | Public repo: yes. Still no LICENSE file. AI use is stated below |
 | Not "SDK installed but never read" / "a log nothing reads" | Met: B's wall exists only through Arkiv reads |
 
 **Arkiv + Swarm bonus, $500 (needs an Arkiv track entry; "a project that uses only Swarm does not qualify")**
