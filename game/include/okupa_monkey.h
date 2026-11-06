@@ -58,6 +58,7 @@ typedef struct {
     int32_t home_x, home_z, bed_x, bed_y, bed_z;
     int32_t spot_x[3], spot_z[3]; /* where it may wander to */
     int32_t door_x, door_z;       /* where it stands to go out (or in) */
+    int32_t face_yaw;             /* which way it faces when standing about (degrees; 0 = +z) */
 } ok_monkey_room;
 
 typedef struct {

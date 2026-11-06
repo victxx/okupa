@@ -61,6 +61,9 @@ void ok_r3d_uv(int x, int y, int w, int h);
  * stretching it (discs and caps lie flat, like a lawn); untiled, a disc
  * shows its rectangle once. 0 turns tiling off. */
 void ok_r3d_tile(int texels_per_unit);
+/* 0..256: how far textured pixels lean towards their rectangle's average
+ * colour (set before ok_r3d_uv); a flat look with only a hint of texture. */
+void ok_r3d_flatten(int amount);
 
 /* The model transform, a small stack. */
 void ok_r3d_push(void);

@@ -61,7 +61,7 @@ static int cur_id, cur_flags, shadow_k;
 static vert vb[MAX_VERTS];
 static int triangles;
 static const uint16_t *tex;
-static int tex_stride, uv_x, uv_y, uv_w = 1, uv_h = 1, tile;
+static int tex_stride, uv_x, uv_y, uv_w = 1, uv_h = 1, tile, flatten, avg_r, avg_g, avg_b;
 static uint8_t lut[4][3][32]; /* channel value under each tone */
 /* A kept frame (ok_r3d_keep), and the rectangle drawn since it was kept. */
 static uint16_t keep_fb[W * H];
@@ -177,6 +177,7 @@ void ok_r3d_begin(uint16_t *frame, uint16_t background)
     stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;
     triangles = 0;
     tile = 0;
+    flatten = 0;
     dirty_x0 = dirty_y0 = 0;
     dirty_x1 = W - 1;
     dirty_y1 = H - 1;
@@ -250,6 +251,21 @@ void ok_r3d_uv(int x, int y, int w, int h)
     uv_y = y;
     uv_w = w > 0 ? w : 1;
     uv_h = h > 0 ? h : 1;
+    if (flatten && tex) { /* the rectangle's average colour, to blend towards */
+        int i, j, n = 0;
+        avg_r = avg_g = avg_b = 0;
+        for (j = 0; j < uv_h; j += 2)
+            for (i = 0; i < uv_w; i += 2, n++) {
+                uint16_t c = tex[(uv_y + j) * tex_stride + uv_x + i];
+                avg_r += c & 31, avg_g += c >> 5 & 31, avg_b += c >> 10 & 31;
+            }
+        avg_r /= n, avg_g /= n, avg_b /= n;
+    }
+}
+
+void ok_r3d_flatten(int amount)
+{
+    flatten = amount < 0 ? 0 : amount > 256 ? 256 : amount;
 }
 
 void ok_r3d_push(void)
@@ -464,6 +480,10 @@ static void raster(const vert *a, const vert *b, const vert *c)
                 uint16_t t;
                 tv = tile ? tv & (uv_h - 1) : tv < 0 ? 0 : tv >= uv_h ? uv_h - 1 : tv;
                 t = tex[(uv_y + tv) * tex_stride + uv_x + (tu & (uv_w - 1))];
+                if (flatten) /* only a hint of the texture over its own flat colour */
+                    t = (uint16_t)(((t & 31) * (256 - flatten) + avg_r * flatten) >> 8 |
+                                   (((t >> 5 & 31) * (256 - flatten) + avg_g * flatten) >> 8) << 5 |
+                                   (((t >> 10 & 31) * (256 - flatten) + avg_b * flatten) >> 8) << 10);
                 row[x] = (uint16_t)(0x8000u | lut[k][0][t & 31] | lut[k][1][t >> 5 & 31] << 5 | lut[k][2][t >> 10 & 31] << 10);
             } else {
                 row[x] = tone[tone_of((int32_t)(l >> 8))];
@@ -777,6 +797,7 @@ void ok_r3d_restore(uint16_t *frame)
     stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;
     triangles = 0;
     tile = 0;
+    flatten = 0;
 }
 
 void ok_r3d_finish(void)
