@@ -936,6 +936,11 @@ static void pick_dns(void)
 
 /* ---- The postman -------------------------------------------------------------- */
 
+static void let_others_run(void)
+{
+    cothread_yield();
+}
+
 static int postman(void *arg)
 {
     static ok_dnsdisc_walk w;
@@ -943,6 +948,7 @@ static int postman(void *arg)
     uint64_t next;
     int from, dns_from, dns_to;
     (void)arg;
+    ok_yield = let_others_run; /* block checks hash hundreds of KB: let the game breathe */
     ok_keccak_init(&pool);
     stir();
     for (;;) {

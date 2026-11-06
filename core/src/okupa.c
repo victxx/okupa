@@ -12,6 +12,8 @@ const char *ok_result_name(ok_result r)
     return "unknown";
 }
 
+void (*ok_yield)(void);
+
 void ok_wipe(void *p, size_t n)
 {
     volatile uint8_t *b = (volatile uint8_t *)p;
