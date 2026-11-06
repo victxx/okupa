@@ -115,6 +115,9 @@ int main(void)
     assert(len == n && len == strlen(msg) + OK_ECIES_OVERHEAD && !memcmp(out, want, n));
     assert(ok_ecies_decrypt(kb, out, len, auth, 2, in, sizeof in, &n) == OK_OK);
     assert(n == strlen(msg) && !memcmp(in, msg, n));
+    memcpy(in, out, len);
+    assert(ok_ecies_decrypt(kb, in, len, auth, 2, in, len, &n) == OK_OK); /* in place */
+    assert(n == strlen(msg) && !memcmp(in, msg, n));
 
     /* A flipped bit, the wrong key or the wrong auth data is refused. */
     out[90] ^= 1;

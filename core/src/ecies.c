@@ -64,7 +64,7 @@ ok_result ok_ecies_encrypt(const uint8_t pub[64], const uint8_t eph_priv[32], co
 ok_result ok_ecies_decrypt(const uint8_t priv[32], const uint8_t *in, size_t n,
                            const uint8_t *auth, size_t auth_len, uint8_t *out, size_t cap, size_t *len)
 {
-    uint8_t ke[16], km[32], want[32], diff = 0;
+    uint8_t ke[16], km[32], want[32], iv[16], diff = 0;
     size_t m, i;
     ok_result r;
     if (!priv || !in || (!auth && auth_len) || !out || !len) return OK_ARGUMENT;
@@ -77,8 +77,9 @@ ok_result ok_ecies_decrypt(const uint8_t priv[32], const uint8_t *in, size_t n,
     if (diff) {
         r = OK_CRYPTO;
     } else {
+        memcpy(iv, in + 65, 16); /* out may overlap in, IV included */
         if (m) memmove(out, in + 81, m);
-        r = crypt(ke, in + 65, out, m);
+        r = crypt(ke, iv, out, m);
         if (r == OK_OK) *len = m;
     }
     ok_wipe(ke, sizeof ke);
