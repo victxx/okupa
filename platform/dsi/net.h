@@ -13,11 +13,11 @@ const char *ok_dsi_net_summary(void);
 /* Fourteen lines of detail for the Dev screen. */
 const char (*ok_dsi_net_lines(void))[33];
 
-/* Files on the SD card: a log of every network line, the peers that let us
- * in, and the remembered Wi-Fi networks. Set them before ok_dsi_net_start. */
-void ok_dsi_network_log(const char *path);
-void ok_dsi_network_peers(const char *path);
-void ok_dsi_wifi_store(const char *path);
+/* The folder on the SD card for the network's files (before ok_dsi_net_start):
+ * net-log.txt, wifi.txt (remembered networks), peers-<network>.txt (nodes
+ * that let us in) and network.txt ("sepolia" to leave mainnet). */
+void ok_dsi_net_files(const char *dir);
+const char *ok_dsi_net_name(void);
 
 /* Wi-Fi set-up from the Dev screen; the postman stands back meanwhile. */
 int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void));

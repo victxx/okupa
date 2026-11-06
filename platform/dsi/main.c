@@ -16,7 +16,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40], wifi_path[40], log_path[40], peers_path[40];
+static char save_path[40], temp_path[40], net_dir[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -54,9 +54,7 @@ static int open_storage(void)
         mkdir(save_path, 0700);
         snprintf(save_path, sizeof save_path, "%sokupa/save.bin", roots[i]);
         snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
-        snprintf(wifi_path, sizeof wifi_path, "%sokupa/wifi.txt", roots[i]);
-        snprintf(log_path, sizeof log_path, "%sokupa/net-log.txt", roots[i]);
-        snprintf(peers_path, sizeof peers_path, "%sokupa/peers.txt", roots[i]);
+        snprintf(net_dir, sizeof net_dir, "%sokupa/", roots[i]);
         return 1;
     }
     return 0;
@@ -120,9 +118,7 @@ int main(void)
         } else {
             save_status = "Save: new okupa on SD";
         }
-        ok_dsi_wifi_store(wifi_path);
-        ok_dsi_network_log(log_path);
-        ok_dsi_network_peers(peers_path);
+        ok_dsi_net_files(net_dir);
     }
     cpuStartTiming(0); /* runs for good: the checks and the network's entropy read it */
     ok_dsi_net_start();

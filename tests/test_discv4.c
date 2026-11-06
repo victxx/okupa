@@ -116,6 +116,16 @@ int main(void)
     assert(ok_v4_enrresponse_read(&p, h, &enr) == OK_OK && h[0] == 0xaa);
     assert(enr.has_eth && !memcmp(enr.fork_hash, "\x6c\x1d\x94\x23", 4) && enr.tcp == 30304);
     assert(ok_v4_neighbors_next(&p, &pos, &node) == OK_FORMAT); /* wrong type */
+    /* The shipped bootnode records all verify. */
+    {
+        static ok_v4_crawl c;
+        uint8_t fork[4] = {0};
+        int i;
+        ok_v4_crawl_init(&c, key, fork, 1);
+        for (i = 0; i < ok_mainnet_bootnode_count; i++) assert(ok_v4_crawl_add_enr(&c, ok_mainnet_bootnodes[i]) == OK_OK);
+        for (i = 0; i < ok_sepolia_bootnode_count; i++) assert(ok_v4_crawl_add_enr(&c, ok_sepolia_bootnodes[i]) == OK_OK);
+        assert(c.count == ok_mainnet_bootnode_count + ok_sepolia_bootnode_count);
+    }
     puts("discv4: EIP-8 packets decode (future versions, trailing data); ours match eth-keys; ENR responses verify");
     return 0;
 }
