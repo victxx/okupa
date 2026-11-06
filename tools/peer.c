@@ -5,6 +5,7 @@
  *   build/okupa-peer enode://<128 hex>@<ipv4>:<port>   dial a node (we initiate)
  *   build/okupa-peer --listen <port>                  answer one dial (for tests)
  *   build/okupa-peer --listen <port> --key <hex file>  with a fixed identity
+ *   build/okupa-peer --hold <seconds> enode://...     stay connected after admission
  */
 #include "okupa_keys.h"
 #include "okupa_session.h"
@@ -85,6 +86,7 @@ static void hex_line(const char *label, const uint8_t *p, size_t n)
 static int sock_read(void *ctx, uint8_t *buf, size_t n)
 {
     ssize_t k = read(*(int *)ctx, buf, n);
+    if (k < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return OK_IO_IDLE; /* the 15 s receive timeout */
     return k > 0 ? (int)k : 0;
 }
 
@@ -92,6 +94,13 @@ static int sock_write(void *ctx, const uint8_t *buf, size_t n)
 {
     ssize_t k = write(*(int *)ctx, buf, n);
     return k > 0 ? (int)k : 0;
+}
+
+static time_t hold_until;
+static int hold_on(void *ctx)
+{
+    (void)ctx;
+    return time(NULL) < hold_until;
 }
 
 static void sock_log(void *ctx, const char *line)
@@ -129,9 +138,11 @@ static int dial(const char *enode, const uint8_t priv[32])
     timeouts(fd);
     if (connect(fd, (struct sockaddr *)&addr, sizeof addr)) die("connect");
     say("connected to %s:%u", ip, port);
+    memset(&io, 0, sizeof io);
     io.read = sock_read;
     io.write = sock_write;
     io.log = sock_log;
+    io.hold = hold_until ? hold_on : NULL;
     io.ctx = &fd;
     fresh(&e);
     ok_session_dial(&io, priv, remote_pub, &e, &ok_sepolia, (uint64_t)time(NULL), CLIENT, &rep);
@@ -159,6 +170,7 @@ static int listen_once(unsigned port, const uint8_t priv[32], const uint8_t pub[
     if ((fd = accept(srv, NULL, NULL)) < 0) die("accept");
     close(srv);
     timeouts(fd);
+    memset(&io, 0, sizeof io);
     io.read = sock_read;
     io.write = sock_write;
     io.log = sock_log;
@@ -187,6 +199,7 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--listen") && i + 1 < argc) listen_port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--key") && i + 1 < argc) key = argv[++i];
+        else if (!strcmp(argv[i], "--hold") && i + 1 < argc) hold_until = time(NULL) + atoi(argv[++i]);
         else enode = argv[i];
     }
     if (!listen_port && !enode) {

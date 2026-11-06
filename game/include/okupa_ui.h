@@ -36,6 +36,7 @@ typedef struct {
     char password[64];
     int password_len, keys; /* keys: 0 lower case, 1 upper case, 2 symbols */
     char wifi_status[33];
+    char net_status[33]; /* the platform's one-line network state, shown at home */
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);

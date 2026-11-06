@@ -3,19 +3,25 @@
 
 #include "okupa_ui.h"
 
-/* The network test on the console: Wi-Fi, the Sepolia node list from DNS,
- * then devp2p sessions until a node has room. Everything Ethereum is the
- * shared core; this file owns Wi-Fi and sockets.
- * lines: the Dev screen's text, updated as it goes; show() redraws it. */
-void ok_dsi_network_test(char lines[][33], int count, void (*show)(void));
+/* The network lives in a background thread, the "postman": it joins a
+ * remembered Wi-Fi, finds Sepolia nodes (known peers, the DNS list, discovery
+ * v4), keeps trying until one lets us in and then stays connected. The game
+ * never waits for it. Ethereum itself is the shared core. */
+void ok_dsi_net_start(void);
+/* One short line for the home screen ("Online: ...", "Looking for a node"). */
+const char *ok_dsi_net_summary(void);
+/* Fourteen lines of detail for the Dev screen. */
+const char (*ok_dsi_net_lines(void))[33];
 
-/* Where to append a copy of every line (NULL: nowhere). */
+/* Files on the SD card: a log of every network line, the peers that let us
+ * in, and the remembered Wi-Fi networks. Set them before ok_dsi_net_start. */
 void ok_dsi_network_log(const char *path);
+void ok_dsi_network_peers(const char *path);
+void ok_dsi_wifi_store(const char *path);
 
-/* Wi-Fi chosen in the app. Without it, the console's own saved settings. */
-void ok_dsi_wifi_use(const char *ssid, const char *password);
+/* Wi-Fi set-up from the Dev screen; the postman stands back meanwhile. */
 int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void));
-/* 1 once associated with an address; status says what happened. */
+/* 1 once associated with an address; remembers the network. */
 int ok_dsi_wifi_connect(const char *ssid, const char *password, char status[33], void (*show)(void));
 
 #endif
