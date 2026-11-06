@@ -91,18 +91,36 @@ static void pause_seconds(int seconds)
 /* Network lines for the Dev screen; each also goes to a log on the SD card,
  * closed every time, so the last step before a crash can be read later. */
 static void line(int i, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+/* The SD card log is kept in memory and written every 15 s (or when the
+ * buffer fills): opening a file per line cost milliseconds each time and
+ * competed with the game and the mind for the card. */
+static char log_buf[4096];
+static size_t log_len;
+static time_t log_flushed;
+
+static void flush_log(void)
+{
+    FILE *f;
+    if (log_len && log_path[0] && (f = fopen(log_path, "a"))) {
+        fwrite(log_buf, 1, log_len, f);
+        fclose(f);
+    }
+    log_len = 0;
+    log_flushed = time(NULL);
+}
+
 static void line(int i, const char *fmt, ...)
 {
     va_list ap;
-    FILE *f;
+    int n;
     if (i < 0 || i >= LINES) return;
     va_start(ap, fmt);
     vsnprintf(lines[i], 33, fmt, ap);
     va_end(ap);
-    if (log_path[0] && (f = fopen(log_path, "a"))) {
-        fprintf(f, "%lu %s\n", (unsigned long)time(NULL), lines[i]);
-        fclose(f);
-    }
+    if (log_len > sizeof log_buf - 64) flush_log();
+    n = snprintf(log_buf + log_len, sizeof log_buf - log_len, "%lu %s\n", (unsigned long)time(NULL), lines[i]);
+    if (n > 0) log_len += (size_t)n < sizeof log_buf - log_len ? (size_t)n : sizeof log_buf - log_len - 1;
+    if (time(NULL) - log_flushed >= 15) flush_log();
 }
 
 static void say(const char *text)
@@ -467,6 +485,9 @@ static int wait_for(int fd, short events, int ms)
         struct pollfd p = {fd, events, 0};
         int rc = poll(&p, 1, 0);
         stir();
+        /* Even when data is already there, let the game run first: a busy
+         * peer can keep a socket readable for minutes. */
+        cothread_yield();
         if (rc > 0) return (p.revents & events) != 0;
         if (rc < 0) return 0;
         next_frame();
