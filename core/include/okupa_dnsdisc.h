@@ -26,4 +26,20 @@ int ok_dnsdisc_matches(const char *hash, size_t hash_len, const char *txt, size_
 /* Walks "enrtree-branch:h1,h2,...": start with *pos = 0; OK_RANGE at the end. */
 ok_result ok_dnsdisc_branch_next(const char *txt, size_t n, size_t *pos, char child[OK_DNSDISC_HASH + 1]);
 
+/* The whole walk: verified root, then depth first through branches, every
+ * record checked against its name and every ENR against its signature. The
+ * platform answers TXT lookups (lookup returns 1 with the text, 0 if none);
+ * found() gets each node that announces want_fork. Returns nodes found. */
+#define OK_DNSDISC_STACK 128
+typedef struct {
+    int (*lookup)(void *ctx, const char *name, char *txt, size_t cap, size_t *len);
+    void (*found)(void *ctx, const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp);
+    void *ctx;
+    unsigned records, refused; /* filled in by the walk */
+    uint64_t seq;
+    char stack[OK_DNSDISC_STACK][OK_DNSDISC_HASH + 1];
+} ok_dnsdisc_walk;
+
+int ok_dnsdisc_walk_tree(ok_dnsdisc_walk *w, const char *url, const uint8_t want_fork[4], int limit);
+
 #endif

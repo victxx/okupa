@@ -1,4 +1,9 @@
 #include "okupa_dnsdisc.h"
+#include "okupa_enr.h"
+#include "okupa_keccak.h"
+#include "okupa_keys.h"
+#include "secp256k1.h"
+#include "secp256k1_recovery.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +18,114 @@ static const char LEAF[] =
     "enr:-KO4QORz8HhEW8sRz67YdcNES-E02Ckuics5iq4CKWVuqPA7bpiNbMePwhXjLBoMNBpF4M_0e4nAkpu6JJbL_ve5aFSGAZ7ScNOGg2V0"
     "aMfGhGwdlCOAgmlkgnY0gmlwhJ20auKJc2VjcDI1NmsxoQLitLKIt0ZA04DXHKqh257m20Y9Ml5AO4siHLRTNU9xzoRzbmFwwIN0Y3CCdmCD"
     "dWRwgnZg";
+
+/* A small tree of our own, signed with a test key, served from memory. */
+static char tree[4][2][400];
+static int served, nodes;
+
+static int fake_lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *len)
+{
+    int i;
+    (void)ctx;
+    served++;
+    for (i = 0; i < 4; i++)
+        if (!strcmp(tree[i][0], name)) {
+            *len = strlen(tree[i][1]);
+            assert(*len < cap);
+            memcpy(txt, tree[i][1], *len + 1);
+            return 1;
+        }
+    return 0;
+}
+
+static void fake_found(void *ctx, const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
+{
+    (void)ctx;
+    (void)pub;
+    assert(ip[0] == 157 && tcp == 30304);
+    nodes++;
+}
+
+static void name_of(const char *txt, char *out)
+{
+    static const char b32[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    uint8_t h[32];
+    uint32_t acc = 0;
+    int bits = 0, i, o = 0;
+    ok_keccak256(txt, strlen(txt), h);
+    for (i = 0; i < 16; i++) {
+        acc = acc << 8 | h[i];
+        bits += 8;
+        while (bits >= 5) out[o++] = b32[acc >> (bits -= 5) & 31];
+    }
+    out[o++] = b32[acc << (5 - bits) & 31];
+    out[o] = 0;
+}
+
+static void walk(void)
+{
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    static ok_dnsdisc_walk w;
+    secp256k1_ecdsa_recoverable_signature sig;
+    uint8_t priv[32], pub33[33], digest[32], rs[65], fork[4] = {0x6c, 0x1d, 0x94, 0x23};
+    char leaf_name[27], bad_name[27], branch_name[27], url[200], body[200], sigtxt[90];
+    size_t n = 33;
+    int recid, i, o = 0;
+    secp256k1_pubkey pk;
+
+    memset(priv, 0x77, 32);
+    assert(secp256k1_ec_pubkey_create(ok_secp(), &pk, priv));
+    secp256k1_ec_pubkey_serialize(ok_secp(), pub33, &n, &pk, SECP256K1_EC_COMPRESSED);
+    /* enrtree://<base32 key>@test.okupa */
+    {
+        static const char b32[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        uint32_t acc = 0;
+        int bits = 0, k = 0;
+        k = snprintf(url, sizeof url, "enrtree://");
+        for (i = 0; i < 33; i++) {
+            acc = acc << 8 | pub33[i];
+            bits += 8;
+            while (bits >= 5) url[k++] = b32[acc >> (bits -= 5) & 31];
+        }
+        if (bits) url[k++] = b32[acc << (5 - bits) & 31];
+        snprintf(url + k, sizeof url - (size_t)k, "@test.okupa");
+    }
+    strcpy(tree[2][1], LEAF);
+    name_of(LEAF, leaf_name);
+    snprintf(tree[2][0], 400, "%s.test.okupa", leaf_name);
+    strcpy(tree[3][1], LEAF);
+    tree[3][1][40] = tree[3][1][40] == 'A' ? 'B' : 'A'; /* served under the real leaf's name of another branch child */
+    strcpy(bad_name, "AAAAAAAAAAAAAAAAAAAAAAAAAA");
+    snprintf(tree[3][0], 400, "%s.test.okupa", bad_name);
+    snprintf(tree[1][1], 400, "enrtree-branch:%s,%s", bad_name, leaf_name);
+    name_of(tree[1][1], branch_name);
+    snprintf(tree[1][0], 400, "%s.test.okupa", branch_name);
+    snprintf(body, sizeof body, "enrtree-root:v1 e=%s l=AAAAAAAAAAAAAAAAAAAAAAAAAA seq=7", branch_name);
+    ok_keccak256(body, strlen(body), digest);
+    assert(secp256k1_ecdsa_sign_recoverable(ok_secp(), &sig, digest, priv, NULL, NULL));
+    secp256k1_ecdsa_recoverable_signature_serialize_compact(ok_secp(), rs, &recid, &sig);
+    rs[64] = (uint8_t)recid;
+    for (i = 0; i < 65; i += 3) {
+        uint32_t v = (uint32_t)rs[i] << 16 | (i + 1 < 65 ? (uint32_t)rs[i + 1] << 8 : 0) | (i + 2 < 65 ? rs[i + 2] : 0);
+        sigtxt[o++] = b64[v >> 18 & 63];
+        sigtxt[o++] = b64[v >> 12 & 63];
+        if (i + 1 < 65) sigtxt[o++] = b64[v >> 6 & 63];
+        if (i + 2 < 65) sigtxt[o++] = b64[v & 63];
+    }
+    sigtxt[o] = 0;
+    strcpy(tree[0][0], "test.okupa");
+    snprintf(tree[0][1], 400, "%s sig=%s", body, sigtxt);
+
+    w.lookup = fake_lookup;
+    w.found = fake_found;
+    assert(ok_dnsdisc_walk_tree(&w, url, fork, 10) == 1 && nodes == 1);
+    assert(w.seq == 7 && w.records == 1 && w.refused == 1 && served == 4);
+    fork[0] ^= 1; /* nobody on that network */
+    nodes = 0;
+    assert(ok_dnsdisc_walk_tree(&w, url, fork, 10) == 0 && nodes == 0);
+    url[12] = url[12] == 'A' ? 'B' : 'A'; /* another tree key: the root does not verify */
+    assert(ok_dnsdisc_walk_tree(&w, url, fork, 10) == 0);
+}
 
 int main(void)
 {
@@ -57,6 +170,7 @@ int main(void)
     assert(ok_dnsdisc_branch_next("enrtree-branch:ABC,DEF", 22, &pos, child) == OK_FORMAT);
     pos = 0;
     assert(ok_dnsdisc_branch_next("enrtree-branch:", 15, &pos, child) == OK_RANGE);
-    puts("dnsdisc: Sepolia tree root verifies against the tree key; children match their hashes");
+    walk();
+    puts("dnsdisc: Sepolia tree root verifies against the tree key; children match their hashes; a whole walk over a test tree");
     return 0;
 }

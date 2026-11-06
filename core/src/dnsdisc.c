@@ -4,6 +4,7 @@
 #include "okupa_keys.h"
 #include "secp256k1.h"
 #include "secp256k1_recovery.h"
+#include <stdio.h>
 #include <string.h>
 
 static const char base32[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -154,4 +155,52 @@ ok_result ok_dnsdisc_branch_next(const char *txt, size_t n, size_t *pos, char ch
     child[OK_DNSDISC_HASH] = 0;
     *pos = end < n ? end + 1 : n;
     return OK_OK;
+}
+
+int ok_dnsdisc_walk_tree(ok_dnsdisc_walk *w, const char *url, const uint8_t want_fork[4], int limit)
+{
+    static char txt[512], name[300];
+    char domain[200], hash[OK_DNSDISC_HASH + 1];
+    uint8_t key[33];
+    ok_dnsdisc_root root;
+    size_t len, pos;
+    int top = 0, found = 0;
+    w->records = w->refused = 0;
+    if (ok_dnsdisc_url(url, key, domain, sizeof domain) != OK_OK) return 0;
+    if (!w->lookup(w->ctx, domain, txt, sizeof txt, &len) || ok_dnsdisc_root_parse(txt, len, key, &root) != OK_OK)
+        return 0;
+    w->seq = root.seq;
+    strcpy(w->stack[top++], root.enr_root);
+    while (top && found < limit) {
+        strcpy(hash, w->stack[--top]);
+        snprintf(name, sizeof name, "%s.%s", hash, domain);
+        if (!w->lookup(w->ctx, name, txt, sizeof txt, &len)) continue;
+        if (!ok_dnsdisc_matches(hash, OK_DNSDISC_HASH, txt, len)) {
+            w->refused++; /* the resolver answered with something else */
+            continue;
+        }
+        if (ok_dnsdisc_kind(txt, len) == OK_DNSDISC_BRANCH) {
+            /* Push in reverse so the first child is visited first. */
+            int start = top, i, j;
+            char child[OK_DNSDISC_HASH + 1];
+            pos = 0;
+            while (top < OK_DNSDISC_STACK && ok_dnsdisc_branch_next(txt, len, &pos, child) == OK_OK) strcpy(w->stack[top++], child);
+            for (i = start, j = top - 1; i < j; i++, j--) {
+                strcpy(child, w->stack[i]);
+                strcpy(w->stack[i], w->stack[j]);
+                strcpy(w->stack[j], child);
+            }
+        } else if (ok_dnsdisc_kind(txt, len) == OK_DNSDISC_ENR) {
+            ok_enr e;
+            w->records++;
+            if (ok_enr_parse_text(txt, len, &e) != OK_OK) {
+                w->refused++;
+                continue;
+            }
+            if (!e.has_eth || memcmp(e.fork_hash, want_fork, 4) || !e.has_ip || !e.tcp) continue;
+            w->found(w->ctx, e.pub, e.ip, e.tcp);
+            found++;
+        }
+    }
+    return found;
 }

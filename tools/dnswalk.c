@@ -4,7 +4,6 @@
  *   build/okupa-dnswalk [resolver ip] [nodes] */
 #include "okupa_dns.h"
 #include "okupa_dnsdisc.h"
-#include "okupa_enr.h"
 #include "okupa_eth.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -17,13 +16,12 @@
 #include <unistd.h>
 
 #define TREE "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net"
-#define STACK 256
 #define MAX_QUERIES 400
 
 static int fd;
 static struct sockaddr_in resolver;
 static uint16_t next_id = 0x4f4b;
-static unsigned queries, refused;
+static unsigned queries;
 
 /* One TXT lookup, with a retry; 0 if there is no usable answer. */
 static int lookup(const char *name, char *txt, size_t cap, size_t *len)
@@ -45,16 +43,28 @@ static int lookup(const char *name, char *txt, size_t cap, size_t *len)
     return 0;
 }
 
+static int lookup_cb(void *ctx, const char *name, char *txt, size_t cap, size_t *len)
+{
+    (void)ctx;
+    return lookup(name, txt, cap, len);
+}
+
+static void found_cb(void *ctx, const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
+{
+    int i;
+    (void)ctx;
+    printf("enode://");
+    for (i = 0; i < 64; i++) printf("%02x", pub[i]);
+    printf("@%u.%u.%u.%u:%u\n", ip[0], ip[1], ip[2], ip[3], tcp);
+}
+
 int main(int argc, char **argv)
 {
-    static char stack[STACK][OK_DNSDISC_HASH + 1];
-    char domain[128], name[200], txt[400];
-    uint8_t key[33], fork[4];
+    static ok_dnsdisc_walk w;
+    uint8_t fork[4];
     uint64_t next;
     struct timeval tv = {3, 0};
-    ok_dnsdisc_root root;
-    size_t len, pos;
-    int top = 0, found = 0, seen = 0, limit = argc > 2 ? atoi(argv[2]) : 20;
+    int found, limit = argc > 2 ? atoi(argv[2]) : 20;
 
     memset(&resolver, 0, sizeof resolver);
     resolver.sin_family = AF_INET;
@@ -63,45 +73,11 @@ int main(int argc, char **argv)
     if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) return 2;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     ok_forkid(&ok_sepolia, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
-
-    if (ok_dnsdisc_url(TREE, key, domain, sizeof domain) != OK_OK) return 2;
-    if (!lookup(domain, txt, sizeof txt, &len) || ok_dnsdisc_root_parse(txt, len, key, &root) != OK_OK) {
-        fprintf(stderr, "okupa-dnswalk: no verified root for %s\n", domain);
-        return 1;
-    }
-    fprintf(stderr, "okupa-dnswalk: root seq %llu verified, nodes under %s\n", (unsigned long long)root.seq, root.enr_root);
-    strcpy(stack[top++], root.enr_root);
-    while (top && found < limit) {
-        char hash[OK_DNSDISC_HASH + 1];
-        strcpy(hash, stack[--top]);
-        snprintf(name, sizeof name, "%s.%s", hash, domain);
-        if (!lookup(name, txt, sizeof txt, &len)) continue;
-        if (!ok_dnsdisc_matches(hash, OK_DNSDISC_HASH, txt, len)) {
-            refused++; /* the resolver gave us something else */
-            continue;
-        }
-        if (ok_dnsdisc_kind(txt, len) == OK_DNSDISC_BRANCH) {
-            char children[STACK][OK_DNSDISC_HASH + 1];
-            int k = 0;
-            pos = 0;
-            while (k < STACK && ok_dnsdisc_branch_next(txt, len, &pos, children[k]) == OK_OK) k++;
-            while (k-- && top < STACK) strcpy(stack[top++], children[k]); /* first child on top */
-        } else if (ok_dnsdisc_kind(txt, len) == OK_DNSDISC_ENR) {
-            ok_enr e;
-            int i;
-            seen++;
-            if (ok_enr_parse_text(txt, len, &e) != OK_OK) {
-                refused++;
-                continue;
-            }
-            if (!e.has_eth || memcmp(e.fork_hash, fork, 4) || !e.has_ip || !e.tcp) continue;
-            printf("enode://");
-            for (i = 0; i < 64; i++) printf("%02x", e.pub[i]);
-            printf("@%u.%u.%u.%u:%u\n", e.ip[0], e.ip[1], e.ip[2], e.ip[3], e.tcp);
-            found++;
-        }
-    }
-    fprintf(stderr, "okupa-dnswalk: %d Sepolia nodes from %d records, %u queries, %u refused\n", found, seen, queries, refused);
+    w.lookup = lookup_cb;
+    w.found = found_cb;
+    found = ok_dnsdisc_walk_tree(&w, TREE, fork, limit);
+    fprintf(stderr, "okupa-dnswalk: root seq %llu, %d Sepolia nodes from %u records, %u queries, %u refused\n",
+            (unsigned long long)w.seq, found, w.records, queries, w.refused);
     close(fd);
     return found ? 0 : 1;
 }
