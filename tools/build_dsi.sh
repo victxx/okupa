@@ -13,6 +13,6 @@ docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL \
     --mount "type=bind,src=$PWD,dst=/work,readonly" \
     --mount "type=bind,src=$PWD/build/dsi,dst=/work/build/dsi" \
     --workdir /work --entrypoint sh "$image" -c \
-    "make -f platform/dsi/Makefile BUILD_ID=$id R3D_EXTRA=\"${R3D_EXTRA:-}\" -j4 && \
+    "make -f platform/dsi/Makefile BUILD_ID=$id R3D_EXTRA=\"${R3D_EXTRA:-}\" R3D_GL=${R3D_GL:-1} -j4 && \
      \$WONDERFUL_TOOLCHAIN/toolchain/gcc-arm-none-eabi/bin/arm-none-eabi-size build/dsi/okupa.elf"
 shasum -a 256 build/dsi/okupa.nds

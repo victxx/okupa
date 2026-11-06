@@ -23,7 +23,9 @@ ARM_MODE_OBJ := $(addprefix $(OUT)/obj/,game/src/r3d.o game/src/monkey.o game/sr
                 game/src/ui.o game/src/icons.o core/src/keccak.o core/src/sha256.o core/src/aes.o) $(LIB_OBJ)
 $(ARM_MODE_OBJ): MODE := -marm
 # The renderer on the DS's own 3D hardware (see game/src/r3d.c, OK_R3D_GL).
-$(OUT)/obj/game/src/r3d.o: MODE := -marm -DOK_R3D_GL
+# R3D_GL=0 builds the software renderer instead (the CPU draws every frame).
+R3D_GL ?= 1
+$(OUT)/obj/game/src/r3d.o: MODE := -marm $(if $(filter 1,$(R3D_GL)),-DOK_R3D_GL,)
 SPECS := $(BLOCKSDS)/sys/crts/ds_arm9.specs
 # Smaller libsecp256k1 tables for a 4 MB-era machine; same results, a bit slower.
 SECP_DEFS := -DENABLE_MODULE_RECOVERY=1 -DENABLE_MODULE_ECDH=1 -DECMULT_WINDOW_SIZE=5 \
