@@ -9,7 +9,7 @@ BUILD_ID ?= unknown
 
 SECP := third_party/secp256k1
 BEAR := third_party/bearssl
-CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c \
+CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c third_party/qrcodegen/qrcodegen.c \
         third_party/tiny_sha3/sha3.c platform/dsi/main.c platform/dsi/net.c platform/dsi/account.c
 SECP_SRC := $(SECP)/src/secp256k1.c $(SECP)/src/precomputed_ecmult.c $(SECP)/src/precomputed_ecmult_gen.c
 BEAR_SRC := $(shell find $(BEAR)/src -name '*.c')
@@ -22,7 +22,7 @@ SPECS := $(BLOCKSDS)/sys/crts/ds_arm9.specs
 SECP_DEFS := -DENABLE_MODULE_RECOVERY=1 -DENABLE_MODULE_ECDH=1 -DECMULT_WINDOW_SIZE=5 \
              -DCOMB_BLOCKS=2 -DCOMB_TEETH=5 -DUSE_FORCE_WIDEMUL_INT64=1
 CPPFLAGS := -Icore/include -Igame/include -Ithird_party/tiny_sha3 -I$(SECP)/include -I$(BEAR)/inc \
-            -Ithird_party/font8x8 -I$(BLOCKSDS)/libs/libnds/include -I$(BLOCKSDS)/libs/dswifi/include -DOKUPA_BUILD_ID='"$(BUILD_ID)"'
+            -Ithird_party/font8x8 -Ithird_party/qrcodegen -I$(BLOCKSDS)/libs/libnds/include -I$(BLOCKSDS)/libs/dswifi/include -DOKUPA_BUILD_ID='"$(BUILD_ID)"'
 CFLAGS := $(ARCH) -O2 -std=gnu11 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
           -fstack-usage -specs=$(SPECS)
 LDFLAGS := $(ARCH) -specs=$(SPECS) -Wl,-Map,$(OUT)/okupa.map -Wl,--gc-sections -Wl,--build-id=none \

@@ -8,6 +8,7 @@ Every external piece is pinned, hashed and licensed here. Nothing is modified in
 | libsecp256k1 (signatures, recovery, ECDH) | `third_party/secp256k1/` (git submodule) | https://github.com/bitcoin-core/secp256k1 | `v0.8.0` = `6e2c8bc4ecdc6e71dbe7a368f360d8d453ce435d` (2026-08-03) | MIT | pinned by the submodule commit |
 | BearSSL (SHA-256, HMAC, constant-time AES) | `third_party/bearssl/` (git submodule) | https://www.bearssl.org/git/BearSSL | `v0.6` = `8ef7680081c61b486622f2d983c0d3d21e83caad` | MIT | pinned by the submodule commit |
 | font8x8 (8x8 bitmap font) | `third_party/font8x8/font8x8_basic.h` | https://github.com/dhepper/font8x8 | `8e279d2d864e79128e96188a6b9526cfa3fbfef9` | Public domain | `font8x8_basic.h` 49d8df366296b203ca3211bc0672cf2a762135bf12710735b6292756b19dffd5 |
+| QR Code generator (C) | `third_party/qrcodegen/` | https://github.com/nayuki/QR-Code-generator | `8329a7108fc22be3e1eec0a9f9318978579e3621` (2024-09-01, last change to `c/`) | MIT (`LICENSE.txt`) | `qrcodegen.c` 6a2b9cc65176f2345dde260c74b6d352627e8a0a6385d086ae0e9c5d0913c70c, `qrcodegen.h` e82df4bff37d18b5863b9e7486fe6bda1b6cda8c3b9ecebfec473907265cb589 |
 
 
 ## TLS root certificates

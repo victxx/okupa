@@ -1,5 +1,6 @@
 #include "okupa_ui.h"
 #include "okupa_act.h"
+#include "qrcodegen.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -273,17 +274,26 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         rect(f, 10, 140, 236 * (u->wallet_progress > 100 ? 100 : u->wallet_progress) / 100, 8, RGB(9, 22, 10));
         centred(f, font, 128, 154, "Your strokes are its randomness", PAPER, 1);
     } else {
-        char a[23], b[21];
+        /* An EIP-681 link as a QR code, so a phone wallet can just scan it. */
+        static uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(6)], tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
+        char a[23], b[21], link[64];
+        int size, x, y, scale, left, topq;
         snprintf(a, sizeof a, "%.22s", u->wallet_address);
         snprintf(b, sizeof b, "%.20s", u->wallet_address + 22);
-        frame_box(f, 8, 30, 240, 40, PAPER, INK);
-        centred(f, font, 128, 38, a, INK, 1);
-        centred(f, font, 128, 52, b, INK, 1);
-        centred(f, font, 128, 84, "This address is the okupa.", PAPER, 1);
-        centred(f, font, 128, 96, "Its key never leaves", PAPER, 1);
-        centred(f, font, 128, 108, "this console.", PAPER, 1);
-        centred(f, font, 128, 130, "Send a little ETH here", PAPER, 1);
-        centred(f, font, 128, 142, "to let it write.", PAPER, 1);
+        centred(f, font, 128, 18, a, PAPER, 1);
+        centred(f, font, 128, 28, b, PAPER, 1);
+        snprintf(link, sizeof link, "ethereum:%.42s", u->wallet_address);
+        if (qrcodegen_encodeText(link, tmp, qr, qrcodegen_Ecc_MEDIUM, 1, 6, qrcodegen_Mask_AUTO, true)) {
+            size = qrcodegen_getSize(qr);
+            scale = 120 / (size + 4);
+            left = 128 - (size + 4) * scale / 2;
+            topq = 40;
+            rect(f, left, topq, (size + 4) * scale, (size + 4) * scale, RGB(31, 31, 31));
+            for (y = 0; y < size; y++)
+                for (x = 0; x < size; x++)
+                    if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
+        }
+        centred(f, font, 100, 172, "Scan to send ETH", PAPER, 1);
     }
     frame_box(f, 190, 166, 62, 22, PAPER, INK);
     centred(f, font, 221, 173, "Back", INK, 1);
