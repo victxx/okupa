@@ -315,6 +315,7 @@ static const char *why(int e)
     case 0: return "";
     case -2: return "DNS: no address";
     case -3: return "TCP: no connection";
+    case -5: return "answer too big";
     case BR_ERR_X509_EXPIRED: return "cert dates: clock wrong?";
     case BR_ERR_X509_TIME_UNKNOWN: return "cert: no clock";
     case BR_ERR_X509_NOT_TRUSTED: return "cert: unknown root";

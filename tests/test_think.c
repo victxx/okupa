@@ -20,6 +20,8 @@ static struct {
     uint8_t tee[32];
     int calls;
     char last_auth[1024];
+    uint8_t image[64]; /* the picture an image model made, when it did */
+    size_t image_len;
 } fake;
 
 static int fetch(void *ctx, const char *host, const char *head, size_t head_len, const char *payload,
@@ -38,7 +40,19 @@ static int fetch(void *ctx, const char *host, const char *head, size_t head_len,
     assert(!strcmp(host, "tee.example"));
     fake.calls++;
     if (fake.fail_net) return 62;
-    if (!strncmp(req, "POST /v1/proxy/audio/transcriptions ", 36)) {
+    if (!strncmp(req, "POST /v1/proxy/images/generations ", 34)) {
+        /* An image model: the picture is base64 in the JSON (with an escaped
+         * slash), and it is the picture's bytes the TEE hashes. */
+        assert(body);
+        fake.req_len = n - (size_t)(body + 4 - req);
+        memcpy(fake.req_body, body + 4, fake.req_len);
+        fake.resp_len = (size_t)snprintf(fake.resp_body, sizeof fake.resp_body,
+                                         "{\"data\":[{\"b64_json\":\"iVBORw0KGgo\\/AA==\"}],\"usage\":{}}");
+        memcpy(fake.image, "\x89PNG\r\n\x1a\n\x3f\x00", 10);
+        fake.image_len = 10;
+        k = snprintf(resp, cap, "HTTP/1.1 200 OK\r\nZG-Res-Key: chat-abc_1\r\nContent-Length: %lu\r\n\r\n%s",
+                     (unsigned long)fake.resp_len, fake.resp_body);
+    } else if (!strncmp(req, "POST /v1/proxy/audio/transcriptions ", 36)) {
         /* Whisper: the multipart body is hashed as is, and the answer has no model. */
         assert(body && strstr(req, "Content-Type: multipart/form-data; boundary="));
         fake.req_len = n - (size_t)(body + 4 - req);
@@ -75,8 +89,11 @@ static int fetch(void *ctx, const char *host, const char *head, size_t head_len,
         assert(!strncmp(req, "GET /v1/proxy/signature/", 24) && strstr(req, "?model=0GM-1.0 HTTP/1.1\r\n"));
         assert(!payload_len);
         if (fake.tamper) fake.resp_body[0] = ' ';
-        ok_zerog_text((const uint8_t *)fake.req_body, fake.req_len, (const uint8_t *)fake.resp_body, fake.resp_len,
-                      text);
+        if (fake.image_len)
+            ok_zerog_text((const uint8_t *)fake.req_body, fake.req_len, fake.image, fake.image_len, text);
+        else
+            ok_zerog_text((const uint8_t *)fake.req_body, fake.req_len, (const uint8_t *)fake.resp_body, fake.resp_len,
+                          text);
         assert(ok_personal_sign(text, OK_ZEROG_TEXT, fake.tee, sig) == OK_OK);
         for (i = 0; i < 65; i++) snprintf(sig_hex + 2 * i, 3, "%02x", sig[i]);
         snprintf(json, sizeof json, "{\"text\":\"%s\",\"signature\":\"0x%s\"}", text, sig_hex);
@@ -272,6 +289,23 @@ int main(void)
         assert(strstr(fake.req_body, "\\\"date\\\":\\\"2026-11-07\\\""));
         fake.content = "no json here";
         assert(ok_think_plan(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK && t.stage == OK_THINK_ANSWER);
+    }
+
+    /* A dream: the image model's picture, verified over its own bytes. */
+    {
+        static char buf[2048];
+        static uint8_t image[64];
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {8};
+        assert(ok_think_dream(&t, &p, device, 1800000000000ull, nonce, "a monkey flying over Mumbai", image, sizeof image,
+                              buf, sizeof buf, fetch, NULL) == OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && t.image_len == 10 && !memcmp(image, "\x89PNG\r\n\x1a\n\x3f\x00", 10));
+        assert(!strncmp(fake.req_body, "{\"model\":\"0GM-1.0\",\"n\":1,\"output_format\":\"png\"", 46));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"dream\""));
+        assert(ok_think_dream(&t, &p, device, 1, nonce, "a \"quoted\" dream", image, sizeof image, buf, sizeof buf, fetch,
+                              NULL) == OK_ARGUMENT);
+        fake.image_len = 0;
     }
 
     /* Keep-alive: the connection stays unless the server says it closes. */

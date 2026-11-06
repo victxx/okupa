@@ -150,7 +150,8 @@ int main(int argc, char **argv)
                             : NULL;
     double t0;
 
-    if (sense || (argc > 7 && (!strcmp(argv[7], "plan") || !strcmp(argv[7], "diary")))) count = 1;
+    if (sense || (argc > 7 && (!strcmp(argv[7], "plan") || !strcmp(argv[7], "diary") || !strncmp(argv[7], "dream=", 6))))
+        count = 1;
     if (argc < 6 || count < 1 || count > 500) {
         fprintf(stderr, "usage: okupa-mind <host> <provider> <model> <tee signer> <key file> [out dir] [decisions]\n");
         return 2;
@@ -201,6 +202,31 @@ int main(int argc, char **argv)
         return t.stage == OK_THINK_DECIDED ? 0 : 1;
     }
 
+    if (argc > 7 && !strncmp(argv[7], "dream=", 6)) { /* a dream: a picture from the image model */
+        static uint8_t image[300000];
+        static char buf[4096];
+        char path[600];
+        if (!entropy(nonce, sizeof nonce)) return 2;
+        t0 = seconds();
+        r = ok_think_dream(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, argv[7] + 6, image, sizeof image, buf,
+                           sizeof buf, fetch, NULL);
+        ok_wipe(key, sizeof key);
+        hang_up();
+        if (r != OK_OK) return 1;
+        printf("dream %.2fs %s (http %d, net %d) %s signer %s, %lu bytes\n", seconds() - t0, ok_think_stage_name(t.stage),
+               t.http_status, t.net_error, t.chat_id, t.recovered, (unsigned long)t.image_len);
+        if (t.stage == OK_THINK_DECIDED) {
+            snprintf(path, sizeof path, "%s/dream.png", argv[6]);
+            if ((f = fopen(path, "wb"))) {
+                fwrite(image, 1, t.image_len, f);
+                fclose(f);
+            }
+            printf("VERIFIED dream picture: %s\n", path);
+        } else if (t.response_len) {
+            printf("    %.*s\n", (int)(t.response_len > 300 ? 300 : t.response_len), t.response);
+        }
+        return t.stage == OK_THINK_DECIDED ? 0 : 1;
+    }
     if (argc > 7 && (!strcmp(argv[7], "plan") || !strcmp(argv[7], "diary"))) { /* the slow mind, or the diary */
         static const char *day[] = {"said: Hi! You're back!", "heard: hi okupa my name is victor and I live in mumbai",
                                     "kept: The player is called Victor", "saw: a person with glasses smiling",
@@ -229,7 +255,7 @@ int main(int argc, char **argv)
         if (t.stage == OK_THINK_DECIDED && plan)
             printf("VERIFIED goal: %s | plan: %s | feeling: %s\n", t.plan.goal, t.plan.plan, t.plan.feeling);
         else if (t.stage == OK_THINK_DECIDED)
-            printf("VERIFIED diary: %s\n", t.diary);
+            printf("VERIFIED diary: %s\n         dream: %s\n", t.diary, t.dream);
         if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
             save(argv[6], "episode.json", episode, n);
         return t.stage == OK_THINK_DECIDED ? 0 : 1;

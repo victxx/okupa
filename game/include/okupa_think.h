@@ -21,7 +21,7 @@
  * here opens sockets: the platform gives one HTTPS round trip per call. */
 
 #define OK_THINK_REQUEST 8192   /* the decision's own request */
-#define OK_THINK_RESPONSE 32768
+#define OK_THINK_RESPONSE 131072 /* a dream picture comes back as base64 */
 #define OK_THINK_SIGNATURE 4096
 #define OK_THINK_CHAT_ID 96
 
@@ -61,6 +61,11 @@ typedef struct {
     char saw[OK_MIND_TEXT + 1];   /* ok_think_see: what the camera shows */
     ok_mind_plan plan;            /* ok_think_plan: its goal for the next while */
     char diary[OK_MIND_DIARY + 1]; /* ok_think_diary: today's entry */
+    char dream[OK_MIND_DREAM + 1]; /* ok_think_diary: tonight's dream, as a picture to make */
+    /* ok_think_dream: the picture, decoded from the answer; the TEE signs
+     * sha256(request):sha256(these bytes). */
+    uint8_t *image;
+    size_t image_cap, image_len;
     char signer[43];  /* checksummed expected signer, for the episode */
     const char *kind; /* "decision", "hearing", "sight" */
     /* The exact bytes, kept for the episode and for anyone re-checking it:
@@ -116,6 +121,12 @@ ok_result ok_think_plan(ok_think *t, const ok_think_provider *p, const uint8_t d
                         const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx);
 ok_result ok_think_diary(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
                          const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx);
+
+/* A dream: the image model draws prompt as a 128x128 PNG into image (cap
+ * bytes). buf holds the request. */
+ok_result ok_think_dream(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                         const uint8_t nonce[16], const char *prompt, uint8_t *image, size_t cap, char *buf,
+                         size_t buf_cap, ok_think_fetch_fn fetch, void *fetch_ctx);
 
 /* Pictionary: the player's drawing as a PNG; t->saw is the vision model's
  * guess, one to three lower-case words (anything else is OK_THINK_ANSWER). */

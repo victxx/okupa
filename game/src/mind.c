@@ -109,7 +109,9 @@ static const char DIARY[] =
     "You are Okupa, a small monkey who lives in a Nintendo DSi, writing your diary at the end of the day. From "
     "what happened today, write one entry in the first person, in English, at most 240 characters: what you did, "
     "what the player said or did, what you learned and how you feel. Warm, a bit dramatic, no lists. Call the "
-    "player by name or \"you\" and never assume their gender. Reply with JSON only: {\"entry\": the diary entry}.";
+    "player by name or \"you\" and never assume their gender. Reply with JSON only: {\"entry\": the diary entry, "
+    "\"dream\": the dream you will have tonight from today, as a picture for an image model: what is in it, "
+    "colours and mood, at most 160 characters, simple shapes, no text in the picture}.";
 
 static ok_result build(const char *model, const char *system, int max_tokens, const ok_mind_obs *obs, int diary,
                        char *out, size_t cap, size_t *len);
@@ -329,4 +331,20 @@ ok_result ok_mind_diary_parse(const char *body, size_t n, char entry[OK_MIND_DIA
         if ((unsigned char)s[i] >= 0x20 && (unsigned char)s[i] < 0x7f) entry[o++] = s[i];
     entry[o] = 0;
     return o ? OK_OK : OK_FORMAT;
+}
+
+void ok_mind_dream_parse(const char *body, size_t n, char dream[OK_MIND_DREAM + 1])
+{
+    char s[1024];
+    ok_json obj, v;
+    size_t len, i, o = 0;
+    dream[0] = 0;
+    if (!body || !answer_object(body, n, &obj) || ok_json_member(&obj, "dream", &v) != OK_OK ||
+        ok_json_string(&v, s, sizeof s, &len) != OK_OK)
+        return;
+    for (i = 0; i < len && o < OK_MIND_DREAM; i++) /* a prompt we put in JSON ourselves: plain ASCII, no quotes */
+        if ((unsigned char)s[i] >= 0x20 && (unsigned char)s[i] < 0x7f && s[i] != '"' && s[i] != '\\' && s[i] != '<' &&
+            s[i] != '>' && s[i] != '&')
+            dream[o++] = s[i];
+    dream[o] = 0;
 }

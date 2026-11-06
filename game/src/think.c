@@ -108,6 +108,46 @@ static void begin(ok_think *t, const char *kind)
     t->kind = kind;
 }
 
+/* The picture in an image model's answer: data[0].b64_json, base64 (JSON may
+ * write "/" as "\/": the backslashes are skipped). */
+static int image_of(ok_think *t)
+{
+    ok_json root, v, item, b64;
+    uint32_t acc = 0;
+    size_t i, o = 0;
+    int k = 0;
+    if (ok_json_parse(t->response, t->response_len, &root) != OK_OK || ok_json_member(&root, "data", &v) != OK_OK ||
+        ok_json_index(&v, 0, &item) != OK_OK || ok_json_member(&item, "b64_json", &b64) != OK_OK || b64.len < 3 ||
+        b64.at[0] != '"')
+        return 0;
+    for (i = 1; i + 1 < b64.len; i++) {
+        char c = b64.at[i];
+        int d = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
+                : c == '+' ? 62 : c == '/' ? 63 : -1;
+        if (c == '\\' || c == '=') continue;
+        if (d < 0) return 0;
+        acc = acc << 6 | (uint32_t)d;
+        if (++k == 4) {
+            if (o + 3 > t->image_cap) return 0;
+            t->image[o++] = (uint8_t)(acc >> 16);
+            t->image[o++] = (uint8_t)(acc >> 8);
+            t->image[o++] = (uint8_t)acc;
+            k = 0;
+            acc = 0;
+        }
+    }
+    if (k == 2 || k == 3) { /* the padded tail */
+        if (o + (size_t)(k - 1) > t->image_cap) return 0;
+        acc <<= 6 * (4 - k);
+        t->image[o++] = (uint8_t)(acc >> 16);
+        if (k == 3) t->image[o++] = (uint8_t)(acc >> 8);
+    } else if (k) {
+        return 0;
+    }
+    t->image_len = o;
+    return o > 0;
+}
+
 static ok_result call(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
                       const uint8_t nonce[16], const char *path, const char *content_type, const char *body,
                       size_t body_len, ok_think_fetch_fn fetch, void *fetch_ctx)
@@ -151,6 +191,7 @@ static ok_result call(ok_think *t, const ok_think_provider *p, const uint8_t dev
         return OK_OK;
     }
     if (ok_http_response_read(t->wire, got, &r, &len) != OK_OK) {
+        if (got >= sizeof t->wire - 1) t->net_error = -5; /* the answer did not fit */
         stop(t, OK_THINK_NET);
         return OK_OK;
     }
@@ -195,8 +236,17 @@ static ok_result call(ok_think *t, const ok_think_provider *p, const uint8_t dev
     /* Who signed it, whatever it says (for the screens and the episode). */
     if (ok_personal_recover(t->text, OK_ZEROG_TEXT, t->sig, who) == OK_OK) ok_keys_checksum(who, t->recovered);
 
-    /* 3. Our bytes, their signature, the signer we trust. */
-    ok_sha256(t->response, t->response_len, t->resp_sha);
+    /* 3. Our bytes, their signature, the signer we trust. An image model signs
+     * the picture it made, not the JSON around it. */
+    if (t->image) {
+        if (!image_of(t)) {
+            stop(t, OK_THINK_ANSWER);
+            return OK_OK;
+        }
+        ok_sha256(t->image, t->image_len, t->resp_sha);
+    } else {
+        ok_sha256(t->response, t->response_len, t->resp_sha);
+    }
     if (!forwarded_sha(t, p->model)) {
         stop(t, OK_THINK_UNVERIFIED);
         return OK_OK;
@@ -265,7 +315,31 @@ ok_result ok_think_diary(ok_think *t, const ok_think_provider *p, const uint8_t 
              t->request_len, fetch, fetch_ctx);
     if (r == OK_OK && t->stage == OK_THINK_DECIDED && ok_mind_diary_parse(t->response, t->response_len, t->diary) != OK_OK)
         stop(t, OK_THINK_ANSWER);
+    if (r == OK_OK && t->stage == OK_THINK_DECIDED) ok_mind_dream_parse(t->response, t->response_len, t->dream);
     return r;
+}
+
+ok_result ok_think_dream(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                         const uint8_t nonce[16], const char *prompt, uint8_t *image, size_t cap, char *buf,
+                         size_t buf_cap, ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    int k;
+    if (!t) return OK_ARGUMENT;
+    begin(t, "dream");
+    if (!p || !p->model || !prompt || !*prompt || !image || !buf || strpbrk(prompt, "\"\\<>&\r\n") ||
+        strpbrk(p->model, "\"\\<>&"))
+        return OK_ARGUMENT;
+    t->image = image;
+    t->image_cap = cap;
+    /* Keys sorted, no spaces: the same bytes whether or not they are re-encoded. */
+    k = snprintf(buf, buf_cap,
+                 "{\"model\":\"%s\",\"n\":1,\"output_format\":\"png\",\"prompt\":\"%s\",\"response_format\":\"b64_json\","
+                 "\"size\":\"128x128\"}",
+                 p->model, prompt);
+    if (k < 0 || (size_t)k >= buf_cap) return OK_RANGE;
+    snprintf(t->dream, sizeof t->dream, "%s", prompt);
+    return call(t, p, device_key, now_ms, nonce, "/v1/proxy/images/generations", "application/json", buf, (size_t)k,
+                fetch, fetch_ctx);
 }
 
 /* Keeps printable ASCII only: what the okupa heard or saw goes back into its
@@ -512,7 +586,11 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
             !put(out, cap, &o, ",\"feeling\":") || !put_str(out, cap, &o, t->plan.feeling, strlen(t->plan.feeling)))
             return OK_RANGE;
     } else if (!strcmp(kind, "diary")) {
-        if (!put(out, cap, &o, ",\"entry\":") || !put_str(out, cap, &o, t->diary, strlen(t->diary))) return OK_RANGE;
+        if (!put(out, cap, &o, ",\"entry\":") || !put_str(out, cap, &o, t->diary, strlen(t->diary)) ||
+            !put(out, cap, &o, ",\"dream\":") || !put_str(out, cap, &o, t->dream, strlen(t->dream)))
+            return OK_RANGE;
+    } else if (!strcmp(kind, "dream")) {
+        if (!put(out, cap, &o, ",\"dream\":") || !put_str(out, cap, &o, t->dream, strlen(t->dream))) return OK_RANGE;
     } else if (!strcmp(kind, "sight") || !strcmp(kind, "guess")) {
         if (!put(out, cap, &o, !strcmp(kind, "guess") ? ",\"guess\":" : ",\"saw\":") ||
             !put_str(out, cap, &o, t->saw, strlen(t->saw)))
