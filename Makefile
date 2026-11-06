@@ -22,7 +22,7 @@ BEAR_SRC = $(BEAR)/src/hash/sha2small.c $(BEAR)/src/mac/hmac.c \
 BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 
 .PHONY: all test sanitize clean peer preview
-all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview
+all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-dnswalk
 
 # The host peer: sockets and entropy around the same core.
 $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
@@ -30,6 +30,11 @@ $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard cor
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
 peer: $(BUILD)/okupa-peer
+
+# Finds nodes in the EIP-1459 DNS tree with the core alone.
+$(BUILD)/okupa-dnswalk: tools/dnswalk.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
 # Host renders of the DSi screens.
 $(BUILD)/okupa-preview: tools/preview.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
