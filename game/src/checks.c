@@ -25,7 +25,8 @@ static const uint8_t ecdh_x[32] = {
 
 static int line(char lines[][33], int max, int *n, const char *name, int ok, uint32_t us)
 {
-    if (*n < max) snprintf(lines[(*n)++], 33, "%-18s %-4s %5lu ms", name, ok ? "ok" : "FAIL", (unsigned long)(us / 1000));
+    unsigned short ms = (unsigned short)(us / 1000 > 60000 ? 60000 : us / 1000);
+    if (*n < max) snprintf(lines[(*n)++], 33, "%-16s %-4s %5hu ms", name, ok ? "ok" : "FAIL", ms);
     return !ok;
 }
 
