@@ -154,6 +154,8 @@ int main(void)
     }
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
     ok_dsi_audio_start();
+    ok_ui_start_intro(&ui);
+    ok_dsi_audio_tune(OK_TUNE_INTRO);
     ok_dsi_net_start();
     ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
@@ -170,7 +172,8 @@ int main(void)
             ok_pet_update(&pet, (int64_t)now);
             last = now;
             tm = localtime(&now);
-            ok_dsi_audio_tune(pet.asleep ? OK_TUNE_SLEEP : tm->tm_hour >= 21 || tm->tm_hour < 7 ? OK_TUNE_NIGHT : OK_TUNE_DAY);
+            ok_dsi_audio_tune(ui.scene == OK_UI_SPLASH || ui.scene == OK_UI_FILM ? OK_TUNE_INTRO
+                              : pet.asleep ? OK_TUNE_SLEEP : tm->tm_hour >= 21 || tm->tm_hour < 7 ? OK_TUNE_NIGHT : OK_TUNE_DAY);
         }
         /* The okupa lives in real time: one tick per 1/60 s that passed, even
          * when drawing a frame took longer than that. */

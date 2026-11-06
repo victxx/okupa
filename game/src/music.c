@@ -25,6 +25,16 @@ static const int16_t sine[257] = {
 /* 2^(k/12), Q16. */
 static const uint32_t semitone[12] = {65536, 69433, 73562, 77936, 82570, 87480, 92682, 98193, 104032, 110218, 116772, 123715};
 
+/* "Edge of the map", for the opening: A minor, held chords and a few bells
+ * that never quite resolve. Am(add9), Fmaj7, Dm9, E7sus4 - E, twice. */
+static const uint8_t intro_chords[4][4] = {{45, 52, 59, 60}, {41, 48, 52, 57}, {38, 45, 52, 53}, {40, 47, 50, 57}};
+static const uint8_t intro_bells[64] = {
+    76, 0, 0, 0, 0, 0, 71, 0, 72, 0, 0, 0, 69, 0, 0, 0,
+    77, 0, 0, 0, 0, 0, 72, 0, 76, 0, 0, 0, 0, 0, 0, 0,
+    74, 0, 0, 0, 0, 0, 69, 0, 72, 0, 0, 0, 77, 0, 76, 0,
+    71, 0, 0, 0, 0, 0, 68, 0, 71, 0, 0, 0, 0, 0, 0, 0,
+};
+
 /* "Attic morning": eight bars in F, sixteen steps a bar; 0 = no new note. */
 static const uint8_t melody[128] = {
     69, 0, 0, 72, 0, 0, 77, 0, 76, 0, 72, 0, 74, 0, 0, 0,
@@ -110,7 +120,7 @@ static void sweep(ok_music *m, int i, int from, int to, int ms, int32_t peak)
 
 static void set_tempo(ok_music *m)
 {
-    static const uint8_t bpm[OK_TUNES] = {88, 72, 58, 70};
+    static const uint8_t bpm[OK_TUNES] = {88, 72, 58, 70, 66};
     m->step_len = m->rate * 60 / bpm[m->tune] / 4;
     m->swing = m->tune == OK_TUNE_DAY ? m->step_len / 7 : m->step_len / 12;
 }
@@ -149,7 +159,7 @@ static void step(ok_music *m)
 {
     int s = m->step, bar = s / 16, pos = s % 16, i;
     if (pos == 0 && m->next_tune != m->tune) {
-        static const int32_t loud[OK_TUNES] = {65536, 56000, 40000, 0};
+        static const int32_t loud[OK_TUNES] = {65536, 56000, 40000, 0, 60000};
         m->tune = m->next_tune;
         m->level_goal = loud[m->tune];
         set_tempo(m);
@@ -173,6 +183,16 @@ static void step(ok_music *m)
         if (pos == 0) strike(m, V_BASS, K_BASS, roots[bar], 10000, 10, 1200);
         if (pos % 8 == 6) strike(m, V_HAT, K_HAT, 0, human(m, 600), 1, 25);
         break;
+    case OK_TUNE_INTRO: {
+        int b = bar % 4;
+        if (pos == 0)
+            for (i = 0; i < 4; i++) strike(m, V_CHORD + i, K_EPIANO, intro_chords[b][i], 2600, 300, 2600);
+        if (pos == 0) strike(m, V_BASS, K_BASS, intro_chords[b][0] - 12, 9000, 60, 2400);
+        if (intro_bells[s % 64]) strike(m, V_LEAD, K_BELL, intro_bells[s % 64], human(m, 6500), 6, 1500);
+        if (b == 3 && pos == 8) strike(m, V_CHORD + 3, K_EPIANO, 56, 2400, 200, 2000); /* the sus4 falls to E: G# */
+        if (pos % 8 == 4) strike(m, V_HAT, K_HAT, 0, 500, 1, 60);
+        break;
+    }
     case OK_TUNE_SLEEP:
         if (pos == 0)
             for (i = 0; i < 4; i++) strike(m, V_CHORD + i, K_BELL, chords[bar][i], 1800, 80, 2200);
@@ -211,6 +231,13 @@ static void sfx_at(ok_music *m, int ms)
     case OK_SFX_POP:
         if (ms == 0) sweep(m, V_SFX, 79, 91, 70, 8000);
         break;
+    case OK_SFX_JINGLE: { /* the splash: a rising bell arpeggio and a low note under it */
+        static const uint8_t up[6] = {57, 64, 69, 72, 76, 81};
+        if (ms == 0) strike(m, V_SFX + 2, K_BASS, 33, 9000, 10, 1400);
+        if (ms % 110 == 0 && ms / 110 < 6) strike(m, V_SFX + (ms / 110) % 2, K_BELL, up[ms / 110], 8000, 2, 900);
+        if (ms >= 700) m->sfx = -1;
+        break;
+    }
     case OK_SFX_HELLO:
         if (ms == 0) strike(m, V_SFX, K_BELL, 84, 8000, 2, 600);
         if (ms == 130) strike(m, V_SFX + 1, K_BELL, 91, 8000, 2, 800);

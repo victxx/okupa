@@ -20,16 +20,19 @@ int main(int argc, char **argv)
     int n = 0, s;
     FILE *f;
     ok_music_init(&m, RATE);
-    for (s = 0; s < 44; s++) { /* one second at a time */
-        if (s == 12) ok_music_sfx(&m, OK_SFX_TAP);
-        if (s == 13 || s == 14 || s == 15) ok_music_sfx(&m, OK_SFX_EAT);
-        if (s == 16) ok_music_sfx(&m, OK_SFX_YAY);
-        if (s == 18) ok_music_sfx(&m, OK_SFX_BOING);
-        if (s == 19) ok_music_sfx(&m, OK_SFX_NOPE);
-        if (s == 20) ok_music_sfx(&m, OK_SFX_POP);
-        if (s == 21) ok_music_sfx(&m, OK_SFX_HELLO);
-        if (s == 22) ok_music_tune(&m, OK_TUNE_NIGHT);
-        if (s == 34) ok_music_tune(&m, OK_TUNE_SLEEP);
+    ok_music_tune(&m, OK_TUNE_INTRO);
+    ok_music_sfx(&m, OK_SFX_JINGLE);
+    for (s = 0; s < 60; s++) { /* one second at a time */
+        if (s == 16) ok_music_tune(&m, OK_TUNE_DAY);
+        if (s == 12 + 16) ok_music_sfx(&m, OK_SFX_TAP);
+        if (s == 29 || s == 30 || s == 31) ok_music_sfx(&m, OK_SFX_EAT);
+        if (s == 32) ok_music_sfx(&m, OK_SFX_YAY);
+        if (s == 34) ok_music_sfx(&m, OK_SFX_BOING);
+        if (s == 35) ok_music_sfx(&m, OK_SFX_NOPE);
+        if (s == 36) ok_music_sfx(&m, OK_SFX_POP);
+        if (s == 37) ok_music_sfx(&m, OK_SFX_HELLO);
+        if (s == 38) ok_music_tune(&m, OK_TUNE_NIGHT);
+        if (s == 50) ok_music_tune(&m, OK_TUNE_SLEEP);
         ok_music_render(&m, pcm + n, RATE);
         n += RATE;
     }

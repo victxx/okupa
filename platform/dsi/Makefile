@@ -9,7 +9,7 @@ BUILD_ID ?= unknown
 
 SECP := third_party/secp256k1
 BEAR := third_party/bearssl
-CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/icons.c game/src/room_skin.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/mind.c game/src/facts.c third_party/qrcodegen/qrcodegen.c \
+CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/mind.c game/src/facts.c third_party/qrcodegen/qrcodegen.c \
         third_party/tiny_sha3/sha3.c platform/dsi/main.c platform/dsi/net.c platform/dsi/account.c platform/dsi/audio.c game/src/music.c
 SECP_SRC := $(SECP)/src/secp256k1.c $(SECP)/src/precomputed_ecmult.c $(SECP)/src/precomputed_ecmult_gen.c
 BEAR_SRC := $(shell find $(BEAR)/src -name '*.c')

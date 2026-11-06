@@ -2,6 +2,7 @@
 #include "okupa_act.h"
 #include "okupa_text.h"
 #include "okupa_icons.h"
+#include "okupa_intro.h"
 #include "qrcodegen.h"
 #include <stdio.h>
 #include <string.h>
@@ -237,6 +238,11 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 #define BY(i) (36 + ((i) / 4) * 66)
 #define BW 54
 #define BH 58
+/* Out to the terrace and back, beside the closet. */
+#define OUT_X 140
+#define OUT_Y 8
+#define OUT_W 42
+#define OUT_H 20
 /* The closet, top right, clear of the buttons. */
 #define CLOSET_X 186
 #define CLOSET_Y 8
@@ -286,6 +292,10 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, cons
               u->pressed == 100 && u->pressed_ticks ? RGB(22, 20, 12) : RGB(31, 26, 3));
     ok_icons_draw(OK_ICON_WEAR, f, CLOSET_X + 13, CLOSET_Y + 10, 16);
     text(f, font, CLOSET_X + 25, CLOSET_Y + 7, "Wear", INK, 2);
+    round_box(f, OUT_X, OUT_Y + (u->pressed == 101 && u->pressed_ticks ? 1 : 0), OUT_W, OUT_H, 7,
+              u->pressed == 101 && u->pressed_ticks ? RGB(12, 18, 12) : RGB(17, 26, 15));
+    ok_icons_draw(OK_ICON_HOME, f, OUT_X + 11, OUT_Y + 10, 16);
+    text(f, font, OUT_X + 21, OUT_Y + 7, ok_house_where() == OK_PLACE_GARDEN ? "In" : "Out", INK, 2);
     centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(19, 17, 15), 1);
 }
 
@@ -483,6 +493,14 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
 {
     int x, y;
     const char *line = u->say ? u->say : ok_pet_line(p, hour);
+    if (u->scene == OK_UI_SPLASH) {
+        ok_intro_splash(top, bottom, u->intro_t);
+        return;
+    }
+    if (u->scene == OK_UI_FILM) {
+        ok_intro_film(top, bottom, u->intro_t);
+        return;
+    }
     icons_ready();
     rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
     for (y = 4; y < OK_UI_H; y += 8)
@@ -520,8 +538,34 @@ void ok_ui_init(ok_ui *u)
     ok_monkey_init(&u->anim, &room, 0, 0x6f6b7570u);
 }
 
+void ok_ui_start_intro(ok_ui *u)
+{
+    u->scene = OK_UI_SPLASH;
+    u->intro_t = 0;
+}
+
+/* Out to the terrace or back in: the okupa is placed in the new spot. */
+static void go(ok_ui *u, const ok_pet *p, int where)
+{
+    ok_monkey_room room;
+    ok_house_place(where);
+    if (where == OK_PLACE_GARDEN) ok_house_garden(&room);
+    else ok_house_room(&room);
+    ok_monkey_init(&u->anim, &room, p->asleep, u->anim.seed);
+    u->ready = 1;
+}
+
 int ok_ui_tick(ok_ui *u, const ok_pet *p)
 {
+    if (u->scene == OK_UI_SPLASH || u->scene == OK_UI_FILM) {
+        if (u->scene == OK_UI_SPLASH && u->intro_t == 60) u->sound = 1 + OK_SFX_JINGLE;
+        if (++u->intro_t >= (u->scene == OK_UI_SPLASH ? OK_SPLASH_TICKS : OK_FILM_TICKS)) {
+            u->scene = u->scene == OK_UI_SPLASH ? OK_UI_FILM : OK_UI_HOME;
+            u->intro_t = 0;
+        }
+        return u->intro_t % 2 == 0 ? OK_UI_CHANGED : OK_UI_NOTHING;
+    }
+    if (ok_house_where() == OK_PLACE_GARDEN && p->asleep) go(u, p, OK_PLACE_ATTIC); /* bed is indoors */
     if (!u->ready) { /* the first frame knows the loaded pet: asleep, its drawing */
         ok_monkey_room room;
         ok_house_room(&room);
@@ -587,6 +631,12 @@ void ok_ui_release(ok_ui *u)
 int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
 {
     int i;
+    if (u->scene == OK_UI_SPLASH || u->scene == OK_UI_FILM) { /* a touch skips ahead */
+        if (held) return OK_UI_NOTHING;
+        u->scene = u->scene == OK_UI_SPLASH ? OK_UI_FILM : OK_UI_HOME;
+        u->intro_t = 0;
+        return OK_UI_CHANGED;
+    }
     if (u->scene == OK_UI_SKETCH) {
         if (inside(x, y, CX, CY, 128, 128)) {
             if (!held) u->last_x = u->last_y = -1;
@@ -692,6 +742,18 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             say(u, "Thanks! I feel brand new.");
             ok_monkey_event(&u->anim, OK_EVENT_HELLO);
         }
+        return OK_UI_CHANGED;
+    }
+    if (inside(x, y, OUT_X, OUT_Y, OUT_W, OUT_H)) {
+        u->pressed = 101;
+        u->pressed_ticks = 8;
+        u->sound = 1 + OK_SFX_POP;
+        if (p->asleep) {
+            say(u, "Shh... it's asleep.");
+            return OK_UI_CHANGED;
+        }
+        go(u, p, ok_house_where() == OK_PLACE_GARDEN ? OK_PLACE_ATTIC : OK_PLACE_GARDEN);
+        say(u, ok_house_where() == OK_PLACE_GARDEN ? "Fresh air! Look at the gallery." : "Home, sweet attic.");
         return OK_UI_CHANGED;
     }
     if (inside(x, y, CLOSET_X, CLOSET_Y, CLOSET_W, CLOSET_H)) {

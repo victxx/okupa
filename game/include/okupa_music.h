@@ -6,9 +6,9 @@
 /* The okupa's music and sounds: a small synthesiser and sequencer in
  * integer C, so the console and the host make the same samples. One
  * original tune in three arrangements (day, night, a lullaby while it
- * sleeps) and short sound effects mixed over it. Mono, 16-bit. */
-enum { OK_TUNE_DAY, OK_TUNE_NIGHT, OK_TUNE_SLEEP, OK_TUNE_QUIET, OK_TUNES };
-enum { OK_SFX_TAP, OK_SFX_EAT, OK_SFX_YAY, OK_SFX_BOING, OK_SFX_NOPE, OK_SFX_POP, OK_SFX_HELLO, OK_SFXS };
+ * sleeps), a mysterious one for the opening, and short sound effects. Mono, 16-bit. */
+enum { OK_TUNE_DAY, OK_TUNE_NIGHT, OK_TUNE_SLEEP, OK_TUNE_QUIET, OK_TUNE_INTRO, OK_TUNES };
+enum { OK_SFX_TAP, OK_SFX_EAT, OK_SFX_YAY, OK_SFX_BOING, OK_SFX_NOPE, OK_SFX_POP, OK_SFX_HELLO, OK_SFX_JINGLE, OK_SFXS };
 #define OK_MUSIC_VOICES 12
 
 typedef struct {
