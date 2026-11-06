@@ -1,4 +1,7 @@
 #include "mind.h"
+#include "okupa_memory.h"
+#include "okupa_png.h"
+#include "senses.h"
 #include "okupa_facts.h"
 #include "okupa_ui.h"
 #include "okupa_keccak.h"
@@ -43,15 +46,36 @@ static int mailbox_new;
 
 static ok_think t;
 static ok_tls tls;
-static char episode[OK_THINK_RESPONSE + OK_THINK_REQUEST * 2 + 4096];
-static char memory[OK_MIND_RECENT][OK_MIND_LINE + 24];
-static int memory_count;
+static char episode[320 * 1024]; /* a hearing keeps its audio, in base64 */
+static char recent[OK_MIND_RECENT][OK_MIND_LINE + 24];
+static int recent_count;
+
+/* What it keeps for good (memory.txt), the question it is waiting on, and
+ * what its senses brought since the last decision. */
+static ok_memory facts;
+static char asked[OK_MIND_NOTE + 1];
+static uint32_t asked_at;
+static char heard_text[OK_MIND_TEXT + 1], saw_text[OK_MIND_TEXT + 1];
+static const uint8_t *clip;
+static size_t clip_len;
+static volatile int clip_waiting, look_wanted, ear_state;
+static uint32_t looked_at;
+static uint8_t photo[40 * 1024];
+static char sense_buf[OK_EAR_RATE * OK_EAR_SECONDS + 64 * 1024];
 static char chain[65]; /* sha256 of the last episode written */
 
 static struct {
     char host[96], provider[48], model[64], ip[20];
     uint8_t signer[20];
     long tz_minutes;
+    /* Ears: a speech-to-text provider (Whisper), optional. */
+    char ear_host[96], ear_provider[48], ear_model[64], ear_ip[20];
+    uint8_t ear_signer[20];
+    int have_ear;
+    /* Eyes: look through the camera every so many seconds while the player
+     * is there (0 = only when asked with R). */
+    long look_every;
+    char city[41];
 } cfg;
 
 static void line(int i, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -76,6 +100,20 @@ void ok_dsi_mind_observe(const ok_pet *p, int outside, uint32_t seconds_since_pl
 }
 
 void ok_dsi_mind_toggle(void) { paused = !paused; }
+
+int ok_dsi_mind_ear_busy(void) { return clip_waiting; }
+int ok_dsi_mind_ear_state(void) { return ear_state; }
+
+void ok_dsi_mind_hear(const uint8_t *wav, size_t len)
+{
+    if (clip_waiting || !wav) return;
+    clip = wav;
+    clip_len = len;
+    clip_waiting = 1; /* the clip stays put until the mind has sent it */
+    ear_state = 2;
+}
+
+void ok_dsi_mind_look(void) { look_wanted = 1; }
 
 int ok_dsi_mind_take(ok_mind *d)
 {
@@ -149,7 +187,8 @@ static int sock_write(void *ctx, const unsigned char *buf, size_t len)
 static int resolve(const char *host, struct in_addr *out)
 {
     struct addrinfo hints, *ai = NULL;
-    if (cfg.ip[0] && inet_aton(cfg.ip, out)) return 1;
+    const char *ip = !strcmp(host, cfg.host) ? cfg.ip : !strcmp(host, cfg.ear_host) ? cfg.ear_ip : "";
+    if (ip[0] && inet_aton(ip, out)) return 1;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -266,6 +305,7 @@ static void stopped(const char *fmt, ...)
 /* One HTTPS round trip for the shared core, on the connection the last one
  * left open when the server keeps it; a stale one is reopened once. */
 static int fd = -1;
+static char open_host[96]; /* the host the open connection goes to */
 
 static void hang_up(void)
 {
@@ -297,6 +337,7 @@ static int dial(const char *host)
         return -3;
     }
     draw(seed, sizeof seed);
+    snprintf(open_host, sizeof open_host, "%s", host);
     ok_tls_open(&tls, host, utc_now(), seed, sizeof seed, sock_read, sock_write, &fd);
     ok_wipe(seed, sizeof seed);
     line(2, "TLS 1.2 to %.20s", host);
@@ -308,6 +349,7 @@ static int fetch(void *ctx, const char *host, const char *req, size_t n, const c
 {
     int e, tries;
     (void)ctx;
+    if (fd >= 0 && strcmp(open_host, host)) hang_up(); /* another provider: another connection */
     for (tries = 0; tries < 2; tries++) {
         int reused = fd >= 0;
         if (!reused && (e = dial(host))) return e;
@@ -339,7 +381,12 @@ static int unhex(const char *s, uint8_t *out, size_t n)
     return 1;
 }
 
-static void trim(char *s) { s[strcspn(s, "\r\n \t")] = 0; }
+static void trim(char *s)
+{
+    size_t n;
+    s[strcspn(s, "\r\n")] = 0;
+    for (n = strlen(s); n && (s[n - 1] == ' ' || s[n - 1] == '\t'); n--) s[n - 1] = 0;
+}
 
 static int load_settings(uint8_t key[32])
 {
@@ -347,6 +394,7 @@ static int load_settings(uint8_t key[32])
     int have_signer = 0, ok;
     FILE *f;
     memset(&cfg, 0, sizeof cfg);
+    cfg.look_every = 120;
     snprintf(path, sizeof path, "%smind.txt", dir_path);
     if (!(f = fopen(path, "r"))) return 0;
     while (fgets(text, sizeof text, f)) {
@@ -359,9 +407,17 @@ static int load_settings(uint8_t key[32])
         else if (!strcmp(text, "ip")) snprintf(cfg.ip, sizeof cfg.ip, "%s", v);
         else if (!strcmp(text, "tz")) cfg.tz_minutes = strtol(v, NULL, 10);
         else if (!strcmp(text, "signer")) have_signer = unhex(v, cfg.signer, 20);
+        else if (!strcmp(text, "ear_host")) snprintf(cfg.ear_host, sizeof cfg.ear_host, "%s", v);
+        else if (!strcmp(text, "ear_provider")) snprintf(cfg.ear_provider, sizeof cfg.ear_provider, "%s", v);
+        else if (!strcmp(text, "ear_model")) snprintf(cfg.ear_model, sizeof cfg.ear_model, "%s", v);
+        else if (!strcmp(text, "ear_ip")) snprintf(cfg.ear_ip, sizeof cfg.ear_ip, "%s", v);
+        else if (!strcmp(text, "ear_signer")) cfg.have_ear = unhex(v, cfg.ear_signer, 20);
+        else if (!strcmp(text, "look_every")) cfg.look_every = strtol(v, NULL, 10);
+        else if (!strcmp(text, "city")) snprintf(cfg.city, sizeof cfg.city, "%.40s", v);
     }
     fclose(f);
     if (!cfg.host[0] || !cfg.provider[0] || !cfg.model[0] || !have_signer) return 0;
+    cfg.have_ear = cfg.have_ear && cfg.ear_host[0] && cfg.ear_provider[0] && cfg.ear_model[0];
     snprintf(path, sizeof path, "%smind.key", dir_path);
     if (!(f = fopen(path, "r"))) return 0;
     ok = fgets(text, sizeof text, f) != NULL;
@@ -493,16 +549,64 @@ static int wifi_ready(void)
 static void remember(const ok_mind *d)
 {
     int j;
-    for (j = OK_MIND_RECENT - 1; j > 0; j--) memcpy(memory[j], memory[j - 1], sizeof memory[0]);
-    ok_mind_memory(d, memory[0]);
-    if (memory_count < OK_MIND_RECENT) memory_count++;
+    for (j = OK_MIND_RECENT - 1; j > 0; j--) memcpy(recent[j], recent[j - 1], sizeof recent[0]);
+    ok_mind_memory(d, recent[0]);
+    if (recent_count < OK_MIND_RECENT) recent_count++;
+}
+
+/* memory.txt: one fact a line, the ones its mind chose to keep. */
+static void load_facts(void)
+{
+    static char text[OK_MIND_KNOWN * (OK_MIND_NOTE + 2) + 1];
+    char path[64];
+    size_t n = 0;
+    FILE *f;
+    snprintf(path, sizeof path, "%smemory.txt", dir_path);
+    ok_memory_init(&facts);
+    if ((f = fopen(path, "r"))) {
+        n = fread(text, 1, sizeof text - 1, f);
+        fclose(f);
+    }
+    ok_memory_load(&facts, text, n);
+}
+
+static void save_facts(void)
+{
+    static char text[OK_MIND_KNOWN * (OK_MIND_NOTE + 2) + 1];
+    char path[64];
+    size_t n;
+    FILE *f;
+    snprintf(path, sizeof path, "%smemory.txt", dir_path);
+    if (ok_memory_save(&facts, text, sizeof text, &n) != OK_OK || !(f = fopen(path, "w"))) return;
+    fwrite(text, 1, n, f);
+    fclose(f);
+}
+
+/* Waits, but not when the player has just spoken or asked it to look. */
+static void rest_frames(int frames)
+{
+    while (frames-- > 0 && !clip_waiting && !look_wanted) wait_frames(1);
+}
+
+/* A failed call: say why on both screens. */
+static void failed(void)
+{
+    if (t.stage == OK_THINK_NET || t.stage == OK_THINK_SIG_NET)
+        stopped("%s %d: %.16s", ok_think_stage_name(t.stage), t.net_error, why(t.net_error));
+    else if (t.stage == OK_THINK_HTTP)
+        stopped("HTTP %d: %.20s", t.http_status, t.response ? t.response : "");
+    else
+        stopped("%s", ok_think_stage_name(t.stage));
+    hang_up();
+    /* A certificate the clock cannot place: ask NTP again first. */
+    if (t.net_error == BR_ERR_X509_EXPIRED || t.net_error == BR_ERR_X509_TIME_UNKNOWN) clock_synced = 0;
 }
 
 static int thinker(void *arg)
 {
     uint8_t key[32], nonce[16], mac[6];
-    char did[64];
-    ok_think_provider p;
+    char did[64], why_cam[33];
+    ok_think_provider p, ear;
     ok_mind_obs obs;
     ok_pet pet;
     time_t rtc;
@@ -510,6 +614,7 @@ static int thinker(void *arg)
     uint64_t now_ms;
     uint32_t t0, ms;
     unsigned count = 0, verified = 0, fails = 0;
+    size_t n;
     int j, rest;
     ok_result r;
     (void)arg;
@@ -525,12 +630,18 @@ static int thinker(void *arg)
         return 0;
     }
     load_chain();
-    line(1, "%.32s", cfg.model);
+    load_facts();
+    line(1, "%.20s%s", cfg.model, cfg.have_ear ? " + ears" : "");
     p.host = cfg.host;
     p.provider = cfg.provider;
     p.model = cfg.model;
     memcpy(p.signer, cfg.signer, 20);
     p.generation = 0;
+    ear.host = cfg.ear_host;
+    ear.provider = cfg.ear_provider;
+    ear.model = cfg.ear_model;
+    memcpy(ear.signer, cfg.ear_signer, 20);
+    ear.generation = 0;
 
     for (;;) {
         if (paused) {
@@ -550,7 +661,52 @@ static int thinker(void *arg)
         ok_keccak_update(&pool, mac, sizeof mac);
         if (!clock_synced || frames_alive - clock_synced_at > 60u * 1800u) clock_sync();
 
-        /* What it notices, copied from the game loop. */
+        /* 1. Ears: what the player said, in words, checked. */
+        if (clip_waiting) {
+            if (cfg.have_ear) {
+                now_ms = (uint64_t)utc_now() * 1000u;
+                draw(nonce, sizeof nonce);
+                line(3, "Listening: %lu bytes to 0G", (unsigned long)clip_len);
+                r = ok_think_hear(&t, &ear, key, now_ms, nonce, clip, clip_len, sense_buf, sizeof sense_buf, fetch,
+                                  NULL);
+                if (r == OK_OK && t.stage == OK_THINK_DECIDED && t.heard[0]) {
+                    snprintf(heard_text, sizeof heard_text, "%s", t.heard);
+                    line(3, "Heard: %.25s", t.heard);
+                } else if (r == OK_OK) {
+                    failed();
+                }
+                save_episode(&ear, now_ms, count);
+            } else {
+                stopped("no ears: ear_* in mind.txt");
+            }
+            clip_waiting = 0;
+            ear_state = 0;
+        }
+
+        /* 2. Eyes: through the camera when asked, or now and then while the
+         * player is there. */
+        if (look_wanted || (cfg.look_every > 0 && seen_idle < 60 &&
+                            frames_alive - looked_at > (uint32_t)cfg.look_every * 60u)) {
+            look_wanted = 0;
+            looked_at = frames_alive;
+            if (ok_dsi_eye_snap(photo, sizeof photo, &n, why_cam)) {
+                now_ms = (uint64_t)utc_now() * 1000u;
+                draw(nonce, sizeof nonce);
+                line(3, "Looking: %lu B photo to 0G", (unsigned long)n);
+                r = ok_think_see(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sizeof sense_buf, fetch, NULL);
+                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                    snprintf(saw_text, sizeof saw_text, "%s", t.saw);
+                    line(3, "Saw: %.27s", t.saw);
+                } else if (r == OK_OK) {
+                    failed();
+                }
+                save_episode(&p, now_ms, count);
+            } else {
+                stopped("%s", why_cam);
+            }
+        }
+
+        /* 3. What it notices, copied from the game loop, and what it does. */
         pet = seen_pet;
         memset(&obs, 0, sizeof obs);
         rtc = time(NULL); /* the RTC is local time: it gives the hour the okupa lives in */
@@ -565,8 +721,14 @@ static int thinker(void *arg)
             seen_did[0] = 0;
             obs.player_did = did;
         }
-        for (j = 0; j < memory_count; j++) obs.recent[j] = memory[j];
-        obs.recent_count = memory_count;
+        if (heard_text[0]) obs.heard = heard_text;
+        if (saw_text[0]) obs.saw = saw_text;
+        if (asked[0] && frames_alive - asked_at > 60u * 180u) asked[0] = 0; /* nobody answered in 3 minutes */
+        if (asked[0]) obs.asked = asked;
+        if (cfg.city[0]) obs.city = cfg.city;
+        ok_memory_tell(&facts, &obs);
+        for (j = 0; j < recent_count; j++) obs.recent[j] = recent[j];
+        obs.recent_count = recent_count;
 
         now_ms = (uint64_t)utc_now() * 1000u;
         draw(nonce, sizeof nonce);
@@ -579,7 +741,6 @@ static int thinker(void *arg)
             break;
         }
         record_facts(&p, ms);
-        line(3, "#%u: HTTP %d in %lu ms", count, t.http_status, (unsigned long)ms);
         line(5, "Request id (0G chat id):");
         line(6, "%.32s", t.chat_id[0] ? t.chat_id : "-");
         line(7, "%.32s", strlen(t.chat_id) > 32 ? t.chat_id + 32 : "");
@@ -588,13 +749,24 @@ static int thinker(void *arg)
         if (t.stage == OK_THINK_DECIDED) {
             verified++;
             fails = 0;
-            line(9, "Does: %s", ok_mind_activity_name(t.decision.activity));
-            line(10, "Mood: %s", ok_mind_mood_name(t.decision.mood));
-            line(11, "\"%.30s\"", t.decision.line);
+            line(9, "Does: %s, %s", ok_mind_activity_name(t.decision.activity), ok_mind_mood_name(t.decision.mood));
+            line(10, "\"%.30s\"", t.decision.line);
+            line(11, "%.32s", t.decision.ask[0] ? t.decision.ask : t.decision.thought);
             line(12, "Decided by 0G, checked here");
             line(4, "Clock: %.25s", ok_facts_now.og_clock);
             ok_facts_now.og_error[0] = 0;
             remember(&t.decision);
+            /* What it heard and saw has been told: it moves on. */
+            heard_text[0] = saw_text[0] = 0;
+            if (obs.heard) asked[0] = 0; /* the player answered (or spoke over it) */
+            if (t.decision.ask[0] && !asked[0]) {
+                snprintf(asked, sizeof asked, "%s", t.decision.ask);
+                asked_at = frames_alive;
+            }
+            if (t.decision.remember[0] && ok_memory_add(&facts, t.decision.remember)) {
+                save_facts();
+                line(13, "Keeps: %.25s", t.decision.remember);
+            }
             mailbox = t.decision;
             mailbox_new = 1;
         } else {
@@ -602,26 +774,19 @@ static int thinker(void *arg)
             line(9, "Stopped at: %s", ok_think_stage_name(t.stage));
             line(10, " ");
             line(11, "Safe stop: no decision");
-            if (t.stage == OK_THINK_NET || t.stage == OK_THINK_SIG_NET)
-                stopped("%s %d: %.16s", ok_think_stage_name(t.stage), t.net_error, why(t.net_error));
-            else if (t.stage == OK_THINK_HTTP)
-                stopped("HTTP %d: %.20s", t.http_status, t.response ? t.response : "");
-            else
-                stopped("%s", ok_think_stage_name(t.stage));
-            hang_up();
-            /* A certificate the clock cannot place: ask NTP again first. */
-            if (t.net_error == BR_ERR_X509_EXPIRED || t.net_error == BR_ERR_X509_TIME_UNKNOWN) clock_synced = 0;
+            failed();
         }
+        line(3, "#%u: HTTP %d in %lu ms, %d known", count, t.http_status, (unsigned long)ms, facts.count);
         line(0, "0G mind: alive, %u/%u verified", verified, count);
         save_episode(&p, now_ms, count);
 
         /* Every 5 s while the player is around, every 20 s otherwise; after
          * failures it backs off up to a minute. 0G allows 30 requests a
-         * minute and a decision is two. */
+         * minute and a decision is two. Speaking or R cuts the wait short. */
         rest = seen_idle < 60 ? 5 : 20;
         if (fails) rest = fails >= 3 ? 60 : 10 << fails; /* each try costs a TLS handshake the game waits for */
         rest = rest * 60 - (int)(ms * 60 / 1000);
-        wait_frames(rest > 60 * 3 ? rest : 60 * 3);
+        rest_frames(rest > 60 * 3 ? rest : 60 * 3);
     }
     ok_wipe(key, sizeof key);
     return 0;

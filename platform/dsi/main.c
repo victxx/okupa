@@ -3,6 +3,7 @@
 #include "account.h"
 #include "audio.h"
 #include "mind.h"
+#include "senses.h"
 #include "net.h"
 #include "okupa_music.h"
 #include "okupa_checks.h"
@@ -206,7 +207,16 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
                                                      "*munches*",      "*plays*",     "*yawns*",     "*heads out*",
                                                      "*heads in*"};
     int move = moves[d->activity], where = OK_PLACE_ATTIC, here = ok_house_where();
+    static char note[OK_MIND_NOTE + 3];
     const char *said = d->line[0] ? d->line : doing[d->activity];
+    /* A question it asks wins the bubble, then its line; a thought shows in
+     * brackets when it says nothing (until there is a thought bubble). */
+    if (d->ask[0]) {
+        said = d->ask;
+    } else if (!d->line[0] && d->thought[0]) {
+        snprintf(note, sizeof note, "(%s)", d->thought);
+        said = note;
+    }
     if (d->activity == OK_MIND_GO_OUTSIDE) where = OK_PLACE_GARDEN;
     if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
         (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
@@ -354,6 +364,30 @@ int main(void)
         if (keysDown() || (keysHeld() & KEY_TOUCH)) last_input = now;
         ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, (uint32_t)(now - last_input),
                             !tech_on && (keysDown() & KEY_TOUCH) ? "touched the screen" : NULL);
+        /* Talk to it: hold L and speak, let go, and 0G turns it into words it
+         * answers. R: it looks at you through the camera. (On the SELECT
+         * screens L and R turn pages instead.) */
+        if (!tech_on && (keysDown() & KEY_L) && !ok_dsi_mind_ear_busy()) {
+            ok_dsi_ear_start();
+            ui.say = "I'm listening...";
+            ui.say_ticks = 60 * 6;
+        }
+        if ((keysUp() & KEY_L) && ok_dsi_ear_recording()) {
+            size_t len;
+            const uint8_t *wav = ok_dsi_ear_stop(&len);
+            if (wav) {
+                ok_dsi_mind_hear(wav, len);
+                ui.say = "Hmm, let me think...";
+            } else {
+                ui.say = "Hold L while you talk!";
+            }
+            ui.say_ticks = 60 * 4;
+        }
+        if (!tech_on && (keysDown() & KEY_R)) {
+            ok_dsi_mind_look();
+            ui.say = "Let me look at you...";
+            ui.say_ticks = 60 * 3;
+        }
         if (!tech_on && ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
             if (show_mind) ok_dsi_mind_toggle();
             show_mind = 1;
