@@ -91,7 +91,13 @@ static int http(void *ctx, const char *host, const char *head, size_t n, const c
     return *got ? 0 : -1;
 }
 
-static void pause_ms(int ms) { usleep((useconds_t)ms * 1000); }
+static void pause_ms(int ms)
+{
+    struct timespec t;
+    t.tv_sec = ms / 1000;
+    t.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&t, NULL);
+}
 static void say(const char *step) { printf("  %s\n", step); }
 
 static int unhex(const char *s, uint8_t *out, size_t n)
