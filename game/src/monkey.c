@@ -114,13 +114,13 @@ static const uint8_t stiff[OK_SPRINGS] = {
     180, 60, 60, 70, 60, 60, 110, 110, 110, 110, 250, 250, /* bob .. legs */
     90, 50, 30, 20,                                        /* tail, each joint softer */
     60, 200, 60, 40, 25, 250,                              /* ear, squash, mask, yaw, lie, ball */
-    60, 110, 110, 250, 250, 14, 10, 30,                    /* chest, elbows, foot lifts, tail tip, walking */
+    60, 110, 110, 250, 250, 14, 10, 30, 120,               /* chest, elbows, foot lifts, tail tip, walking, reach */
 };
 static const uint8_t damp[OK_SPRINGS] = {
     91, 61, 60, 65, 62, 60, 77, 77, 77, 77, 125, 125,
     43, 28, 22, 18,
     22, 56, 70, 64, 56, 179,
-    60, 77, 77, 125, 125, 16, 14, 60,
+    60, 77, 77, 125, 125, 16, 14, 60, 85,
 };
 
 static int32_t isqrt(int32_t v);
@@ -317,12 +317,12 @@ static void tail_rest(const ok_monkey_anim *a, int32_t rest[11][3])
     }
     body_to_room(a, q, rest[0]);
     for (i = 0; i < 10; i++) {
-        m3_rot(&m, 1, sway / 3 + (int)((int64_t)ok_r3d_sin((int)(a->ticks * 18u) - i * 420) * DEG(6) / 4096));
+        m3_rot(&m, 1, sway / 4 + (int)((int64_t)ok_r3d_sin((int)(a->ticks * 11u) - i * 360) * DEG(5) / 4096));
         {   /* in bed it lies along the mattress instead of curling up */
             int lie = a->s[OK_SPRING_LIE].x / Q;
             lie = lie < 0 ? 0 : lie > 100 ? 100 : lie;
             m3_rot(&m, 0, DEG(curl[i]) * (100 - lie) / 100 - DEG(4) * lie / 100 +
-                              (int)((int64_t)ok_r3d_sin((int)(a->ticks * 11u) - i * 300) * DEG(3) / 4096));
+                              (int)((int64_t)ok_r3d_sin((int)(a->ticks * 7u) - i * 300) * DEG(3) / 4096));
         }
         m3_apply(&m, step, d);
         q[0] += d[0], q[1] += d[1], q[2] += d[2];
@@ -348,9 +348,9 @@ static void tail_step(ok_monkey_anim *a)
     memcpy(a->tail_was[0], rest[0], sizeof rest[0]);
     for (i = 1; i < 11; i++) {
         int32_t next[3], d[3], len;
-        int pull = 34 - i * 2;
+        int pull = 18 - i;
         for (k = 0; k < 3; k++) {
-            next[k] = a->tail[i][k] + (a->tail[i][k] - a->tail_was[i][k]) * 86 / 100 + (rest[i][k] - a->tail[i][k]) * pull / 100;
+            next[k] = a->tail[i][k] + (a->tail[i][k] - a->tail_was[i][k]) * 90 / 100 + (rest[i][k] - a->tail[i][k]) * pull / 100;
             d[k] = next[k] - a->tail[i - 1][k];
         }
         len = isqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
@@ -542,17 +542,13 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         break;
     case OK_MOVE_EAT: {
         int bite = mt > 30 && mt < 150 ? (mt - 30) % 40 : 99;
-        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -18;
-        t[OK_SPRING_FWD_R] = 40;
+        /* The right hand is placed by inverse kinematics (REACH: 0 holding
+         * the banana by the tummy, 100 at the mouth); the left rests on the tummy. */
+        t[OK_SPRING_RAISE_L] = -18;
         t[OK_SPRING_FWD_L] = 25;
-        t[OK_SPRING_ELBOW_R] = 70;
         t[OK_SPRING_ELBOW_L] = 55;
-        if (bite < 14) {
-            t[OK_SPRING_FWD_R] = 62;
-            t[OK_SPRING_RAISE_R] = -30;
-            t[OK_SPRING_ELBOW_R] = 112;
-            t[OK_SPRING_NOD] = 8;
-        }
+        t[OK_SPRING_REACH] = bite < 16 ? 100 : 0;
+        if (bite < 16) t[OK_SPRING_NOD] = 6;
         if (bite == 12) a->bites++;
         t[OK_SPRING_NOD] += bite >= 14 && bite < 99 ? wave(k, 400, 3) : 0; /* chewing */
         if (mt > 160) {
@@ -835,17 +831,6 @@ static void wear(int which, const ok_monkey_anim *a, ok_monkey_face *f)
     }
 }
 
-static void banana(int s, int bites)
-{
-    static const int pts[4][3] = {{4, -40, 34}, {2, 6, 56}, {-12, 44, 70}, {-32, 66, 72}};
-    int i, n = 3 - (bites > 3 ? 3 : bites);
-    solid(RGB(31, 27, 8));
-    for (i = 0; i < n; i++)
-        limb(s * pts[i][0], pts[i][1], pts[i][2], s * pts[i + 1][0], pts[i + 1][1], pts[i + 1][2], 26);
-    solid(RGB(14, 9, 3));
-    if (n) blob(s * pts[n][0], pts[n][1], pts[n][2], 18, 18, 18);
-}
-
 static int32_t isqrt(int32_t v)
 {
     int32_t r = 0, bit = 1 << 30;
@@ -919,6 +904,40 @@ static void hand(const uint16_t *skin, int s, int id)
     ok_r3d_ellipsoid(P(s * 4, -28, 12), P(46, 42, 36), 8, 6);   /* palm */
     ok_r3d_ellipsoid(P(s * 4, -58, 16), P(38, 24, 30), 8, 5);   /* curled fingers */
     ok_r3d_ellipsoid(P(-s * 22, -20, 36), P(16, 24, 16), 6, 4); /* thumb */
+}
+
+/* An arm reaching a wrist point (hundredths, chest frame): the elbow found by
+ * the law of cosines, bending down, out and back like a real one. */
+static void arm_reach(const uint16_t *skin, int s, int hand_id, int sleeve_id, const int32_t wrist[3], int bites)
+{
+    static const int banana_pts[4][3] = {{0, 12, 18}, {-12, 58, 30}, {-28, 96, 34}, {-40, 122, 28}};
+    const int32_t sh[3] = {s * 140, 410, 5};
+    int32_t d[3], len, along, up, pole[3] = {s * 600, -800, -300}, pd, e[3], pl;
+    int i, n = 3 - (bites > 3 ? 3 : bites);
+    for (i = 0; i < 3; i++) d[i] = wrist[i] - sh[i];
+    len = isqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (len > 158) len = 158;
+    if (len < 20) len = 20;
+    along = (84 * 84 + len * len - 76 * 76) / (2 * len);       /* shoulder to the elbow's foot, along d */
+    up = isqrt(84 * 84 - along * along);                        /* and out from the line */
+    pd = (pole[0] * d[0] + pole[1] * d[1] + pole[2] * d[2]) / len; /* pole without its part along d */
+    for (i = 0; i < 3; i++) pole[i] -= pd * d[i] / len;
+    pl = isqrt(pole[0] * pole[0] + pole[1] * pole[1] + pole[2] * pole[2]);
+    if (pl < 1) pl = 1;
+    for (i = 0; i < 3; i++) e[i] = sh[i] + d[i] * along / len + pole[i] * up / pl;
+    part_rows(skin, OK_PART_SLEEVE, sleeve_id, 0, 50);
+    limb(e[0], e[1], e[2], sh[0], sh[1], sh[2], 44);
+    part_rows(skin, OK_PART_SLEEVE, sleeve_id, 50, 100);
+    limb(wrist[0], wrist[1], wrist[2], e[0], e[1], e[2], 38);
+    part(skin, OK_PART_HANDS, hand_id);
+    ok_r3d_ellipsoid(P(wrist[0], wrist[1] + 4, wrist[2] + 14), P(44, 40, 36), 8, 6);
+    ok_r3d_ellipsoid(P(wrist[0] - s * 26, wrist[1] + 12, wrist[2] + 36), P(16, 24, 16), 6, 4);
+    solid(RGB(31, 27, 8));
+    for (i = 0; i < n; i++)
+        limb(wrist[0] + s * banana_pts[i][0], wrist[1] + banana_pts[i][1], wrist[2] + banana_pts[i][2],
+             wrist[0] + s * banana_pts[i + 1][0], wrist[1] + banana_pts[i + 1][1], wrist[2] + banana_pts[i + 1][2], 24);
+    solid(RGB(14, 9, 3));
+    if (n) blob(wrist[0] + s * banana_pts[n][0], wrist[1] + banana_pts[n][1], wrist[2] + banana_pts[n][2], 16, 16, 16);
 }
 
 /* The face for this moment, from its mood and what it is doing. */
@@ -1052,9 +1071,12 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     z = a->z + (a->room.bed_z - a->z) * lie / 100;
     ok_r3d_push();
     ok_r3d_translate(P(x, y, z));
-    if (lie < 60) {
-        ok_r3d_material(0, 0, OK_R3D_SHADOW);
-        ok_r3d_disc(P(20, 5, 0), H(230 - lie - bob / 3), H(175 - lie - bob / 4), 12);
+    if (lie < 60) { /* a soft shadow: three layers, darker to the middle, a little off to the right */
+        int k, r = 270 - lie - bob / 2;
+        for (k = 0; k < 3; k++) {
+            ok_r3d_material(9 + k, k, OK_R3D_SHADOW);
+            ok_r3d_disc(P(26, 9 + k, -14), H(r * (100 - k * 26) / 100), H(r * 74 * (100 - k * 26) / 10000), 16);
+        }
     }
     ok_r3d_rotate_y(deg(a, OK_SPRING_YAW) * (100 - lie) / 100);
     if (lie) {
@@ -1119,6 +1141,15 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     /* Arms: shoulder, elbow, wrist, a hand with a thumb. */
     for (s = -1; s <= 1; s += 2) {
         int k = s > 0;
+        if (k && mv == OK_MOVE_EAT && a->move_t < 165) { /* the banana to the mouth, by IK */
+            int r = val(a, OK_SPRING_REACH), w[3];
+            int32_t wrist[3];
+            r = r < 0 ? 0 : r > 100 ? 100 : r;
+            w[0] = 92 + (40 - 92) * r / 100, w[1] = 290 + (412 - 290) * r / 100, w[2] = 150 + (210 - 150) * r / 100;
+            wrist[0] = w[0], wrist[1] = w[1], wrist[2] = w[2];
+            arm_reach(skin, s, hands, ++next_id, wrist, a->bites);
+            continue;
+        }
         ok_r3d_push();
         ok_r3d_translate(P(s * 140, 410, 5));
         ok_r3d_rotate_z(s * deg(a, k ? OK_SPRING_RAISE_R : OK_SPRING_RAISE_L));
@@ -1132,7 +1163,6 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         limb(s * 6, -76, 6, 0, 0, 0, 38);
         ok_r3d_translate(P(s * 6, -76, 6));
         hand(skin, s, hands);
-        if (k && mv == OK_MOVE_EAT && a->move_t < 165) banana(s, a->bites);
         ok_r3d_pop();
     }
     if (mv == OK_MOVE_PLAY) {
