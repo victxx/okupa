@@ -15,6 +15,7 @@
 #include "okupa_facts.h"
 #include "okupa_tech.h"
 #include "okupa_keccak.h"
+#include "okupa_r3d.h"
 #include "okupa_ui.h"
 #include <fat.h>
 #include <malloc.h>
@@ -51,6 +52,23 @@ static void show_now(void)
     struct tm *tm = localtime(&now);
     ok_ui_render(shown_ui, shown_pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
     present(top_bg, bottom_bg);
+}
+
+/* The renderer's divisions on the DS's hardware divider: tens of cycles
+ * instead of hundreds for a 64-bit division in software. Interrupts are
+ * held off for the few cycles it takes, so nothing else can use the
+ * divider half way through. */
+static int64_t hw_divide(int64_t n, int64_t d)
+{
+    int ime = enterCriticalSection();
+    int64_t q;
+    REG_DIVCNT = DIV_64_64;
+    REG_DIV_NUMER = n;
+    REG_DIV_DENOM = d;
+    while (REG_DIVCNT & DIV_BUSY) {}
+    q = REG_DIV_RESULT;
+    leaveCriticalSection(ime);
+    return q;
 }
 
 /* The DSi's own SD slot first, then a flashcart; never the internal memory. */
@@ -228,7 +246,7 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
 int main(void)
 {
     int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0;
-    uint32_t frame_at, late = 0, draw_us = 0;
+    uint32_t frame_at, late = 0, draw_us = 0, loop_us = 0, loop_at = 0;
     ok_look worn;
     ok_tech tech;
     time_t now = time(NULL), last = now, saved_at = now, last_input = now;
@@ -267,6 +285,7 @@ int main(void)
     }
     machine_facts(0);
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
+    ok_r3d_divider(hw_divide);
     ok_dsi_audio_start();
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
@@ -349,8 +368,8 @@ int main(void)
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
             else if (show_mind && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_mind_lines(), sizeof ui.dev);
             else if (ui.scene == OK_UI_DEV && ui.dev[OK_UI_DEV_LINES - 1][0])
-                snprintf(ui.dev[OK_UI_DEV_LINES - 4], sizeof ui.dev[0], "Frame: %lu.%lu ms to draw",
-                         (unsigned long)(draw_us / 1000), (unsigned long)(draw_us / 100 % 10));
+                snprintf(ui.dev[OK_UI_DEV_LINES - 4], sizeof ui.dev[0], "Frame: draw %u.%u, loop %u ms",
+                         (unsigned)(draw_us / 1000 % 1000), (unsigned)(draw_us / 100 % 10), (unsigned)(loop_us / 1000 % 10000));
             {
                 uint8_t hash[32];
                 if (ok_dsi_net_pending(hash))
@@ -506,6 +525,10 @@ int main(void)
             ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
             present(top, bottom);
             draw_us = (draw_us * 7 + (now_us() - start)) / 8;
+            /* From one drawn frame to the next: drawing, the game, and the
+             * network's threads, which run whenever this one waits. */
+            if (loop_at) loop_us = (loop_us * 7 + (start - loop_at)) / 8;
+            loop_at = start;
             redraw = 0;
         }
     }

@@ -20,7 +20,7 @@ BEAR = third_party/bearssl
 BEAR_SRC = $(shell find $(BEAR)/src -name '*.c')
 BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 
-.PHONY: all test sanitize clean peer preview
+.PHONY: all test sanitize clean peer preview perf
 # Keep library objects between builds.
 .SECONDARY:
 all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house $(BUILD)/okupa-music $(BUILD)/okupa-intro $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https $(BUILD)/okupa-crawl $(BUILD)/okupa-mind
@@ -76,6 +76,14 @@ $(BUILD)/okupa-house: tools/house.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ) 
 $(BUILD)/okupa-intro: tools/intro.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
+
+# What each scene costs to draw (host counts): make perf.
+$(BUILD)/okupa-perf: tools/perf.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DOK_R3D_STATS $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
+
+perf: $(BUILD)/okupa-perf
+	./$(BUILD)/okupa-perf
 
 # The music and sounds as a WAV.
 $(BUILD)/okupa-music: tools/music.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)

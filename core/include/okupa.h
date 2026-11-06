@@ -18,4 +18,8 @@ const char *ok_result_name(ok_result r);
 /* Overwrite secrets in a way the compiler may not optimise away. */
 void ok_wipe(void *p, size_t n);
 
+/* Optional: called now and then inside long computations (checking a block
+ * body) so a platform with cooperative threads can let others run. */
+extern void (*ok_yield)(void);
+
 #endif

@@ -121,6 +121,24 @@ int main(void)
     for (i = 0; i < 3000 && ok_house_where() != OK_PLACE_ATTIC; i++) ok_ui_tick(&u, &p);
     assert(ok_house_where() == OK_PLACE_ATTIC);
 
+    /* Its inner life: a thought fades, a question stays until answered or 30 s, listening shows over both. */
+    ok_ui_thought(&u, "Clouds\x01 are soft, I bet. This text is long enough to need cutting at sixty chars");
+    assert(strlen(u.thought) == 60 && u.thought[6] == '?');
+    ok_ui_ask(&u, "Lunch?");
+    ok_ui_listening(&u, 1);
+    assert(u.listening == 1);
+    ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
+    ok_ui_listening(&u, 2);
+    ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
+    ok_ui_listening(&u, 0);
+    for (i = 0; i < 400; i++) ok_ui_tick(&u, &p);
+    assert(!u.thought_ticks && u.ask_ticks);
+    ok_ui_ask(&u, NULL);
+    assert(!u.ask_ticks);
+    ok_ui_ask(&u, "Still there?");
+    for (i = 0; i < 1800; i++) ok_ui_tick(&u, &p);
+    assert(!u.ask_ticks);
+
     /* Every scene renders, with and without a font. */
     ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
     assert(top[0] & 0x8000 && bottom[OK_UI_W * OK_UI_H - 1] & 0x8000);

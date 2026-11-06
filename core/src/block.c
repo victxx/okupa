@@ -134,6 +134,7 @@ static size_t node_ref(int lo, int hi, int depth, int force, uint8_t out[33])
             memcpy(out + h + hpsn + vhn, l->v, l->vlen);
             return h + total;
         }
+        if (ok_yield && lo % 32 == 31) ok_yield();
         ok_keccak_init(&k);
         ok_keccak_update(&k, hdr, h);
         ok_keccak_update(&k, hps, hpsn);
@@ -238,6 +239,7 @@ ok_result ok_body_check_tx(const ok_rlp_item *body, const ok_header *h, const ui
             tx_lens[out->count] = tx.len;
         }
         ok_keccak256(tx_vals[out->count], tx_lens[out->count], hash);
+        if (ok_yield && out->count % 32 == 31) ok_yield();
         if (want && out->found < 0 && !memcmp(hash, want, 32)) out->found = (int32_t)out->count;
         out->count++;
     }

@@ -65,6 +65,10 @@ typedef struct {
      * the wall as last shown, hang_t the ticks into hanging hang_slot. */
     uint32_t wall_seen;
     int wall_known, hang_t, hang_slot;
+    /* The okupa's inner life, from its mind: a thought, a question for the
+     * player, and whether it is listening to the answer. */
+    char thought[61], ask[61];
+    int thought_ticks, ask_ticks, listening;
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);
@@ -76,6 +80,15 @@ void ok_ui_start_intro(ok_ui *u);
  * door first), a mood (OK_POSE_*, -1 none) shown for a while if the pet
  * itself is content, and a line (NULL or "" for none). */
 void ok_ui_direct(ok_ui *u, const ok_pet *p, int move, int where, int mood, const char *line);
+/* A thought bubble (a cloud, not speech) for about 6 s; up to 60 ASCII
+ * characters, copied (NULL or "" clears it). */
+void ok_ui_thought(ok_ui *u, const char *text);
+/* A question for the player, with a hint to hold L and answer; it stays
+ * until ok_ui_ask(u, NULL) or 30 s. Up to 60 ASCII characters, copied. */
+void ok_ui_ask(ok_ui *u, const char *question);
+/* 0 off, 1 listening (a microphone by its head while L is held; it looks
+ * up), 2 thinking the answer over (a cloud of dots). Shown over any bubble. */
+void ok_ui_listening(ok_ui *u, int state);
 /* One frame (1/60 s) passed; returns OK_UI_CHANGED when the screens need
  * redrawing (30 times a second: the okupa is always moving a little). */
 int ok_ui_tick(ok_ui *u, const ok_pet *p);
