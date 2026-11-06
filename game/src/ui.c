@@ -337,7 +337,7 @@ static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
     snprintf(head, sizeof head, "Password: %.22s", u->ap_selected >= 0 ? u->aps[u->ap_selected].ssid : "");
     text(f, font, 6, 4, head, PAPER, 1);
     frame_box(f, 6, 14, 244, 18, PAPER, INK);
-    snprintf(shown, sizeof shown, "%s", u->password + (n > 28 ? n - 28 : 0));
+    snprintf(shown, sizeof shown, "%.28s", u->password + (n > 28 ? n - 28 : 0));
     text(f, font, 10, 19, shown, INK, 1);
     for (r = 0; r < 4; r++)
         for (c = 0; c < 10; c++) {
