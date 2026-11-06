@@ -10,6 +10,7 @@
 #include "okupa_keys.h"
 #include "okupa_sha256.h"
 #include "okupa_sntp.h"
+#include "bearssl_hash.h"
 #include "okupa_think.h"
 #include <arpa/inet.h>
 #include <dswifi9.h>
@@ -47,7 +48,13 @@ static ok_mind mailbox;
 static int mailbox_new;
 
 static ok_think t;
-static ok_tls tls;
+/* One TLS state per provider host, so each keeps its session for the next
+ * connection: a resumed handshake skips the certificate chain and the key
+ * exchange, the part that would hold the ARM9 for hundreds of ms. */
+#define TLS_HOSTS 3
+static ok_tls tls_by_host[TLS_HOSTS];
+static ok_tls *tlsp = &tls_by_host[0];
+#define tls (*tlsp)
 static char episode[320 * 1024]; /* a hearing keeps its audio, in base64 */
 static char recent[OK_MIND_RECENT][OK_MIND_LINE + 24];
 static int recent_count;
@@ -259,6 +266,7 @@ static int wait_for(int fd, short events, int ms)
 static int sock_read(void *ctx, unsigned char *buf, size_t len)
 {
     int fd = *(int *)ctx, n;
+    cothread_yield(); /* between TLS records: let the game draw */
     if (!wait_for(fd, POLLIN, 60000)) return -1; /* inference can take a while */
     n = recv(fd, buf, len, 0);
     return n > 0 ? n : -1;
@@ -267,6 +275,7 @@ static int sock_read(void *ctx, unsigned char *buf, size_t len)
 static int sock_write(void *ctx, const unsigned char *buf, size_t len)
 {
     int fd = *(int *)ctx, n;
+    cothread_yield();
     if (!wait_for(fd, POLLOUT, 10000)) return -1;
     n = send(fd, buf, len, 0);
     return n > 0 ? n : -1;
@@ -397,6 +406,7 @@ static void stopped(const char *fmt, ...)
 /* One HTTPS round trip for the shared core, on the connection the last one
  * left open when the server keeps it; a stale one is reopened once. */
 static int fd = -1;
+static int resumed; /* the open connection offered to resume a session */
 static char open_host[96]; /* the host the open connection goes to */
 
 static void hang_up(void)
@@ -433,7 +443,13 @@ static int dial(const char *host)
     }
     draw(seed, sizeof seed);
     snprintf(open_host, sizeof open_host, "%s", host);
-    ok_tls_open(&tls, host, utc_now(), seed, sizeof seed, sock_read, sock_write, &fd);
+    {
+        int k, free_slot = -1;
+        for (k = 0; k < TLS_HOSTS && strcmp(tls_by_host[k].host, host); k++)
+            if (free_slot < 0 && !tls_by_host[k].host[0]) free_slot = k;
+        tlsp = &tls_by_host[k < TLS_HOSTS ? k : free_slot >= 0 ? free_slot : 0];
+    }
+    resumed = ok_tls_resume(&tls, host, utc_now(), seed, sizeof seed, sock_read, sock_write, &fd);
     ok_wipe(seed, sizeof seed);
     line(2, "TLS 1.2 to %.20s", host);
     return 0;
@@ -456,7 +472,8 @@ static int fetch(void *ctx, const char *host, const char *req, size_t n, const c
         if (!e && !reused) {
             char suite[24];
             tls_name(suite, sizeof suite);
-            feed("%.23s ok %lu ms", suite, (unsigned long)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u));
+            feed("%.23s %s %lu ms", suite, ok_tls_resumed(&tls) ? "resumed" : resumed ? "renewed" : "new",
+                 (unsigned long)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u));
         }
         if (!e) {
             if (!ok_think_keeps_open(resp, *got)) hang_up();
@@ -545,6 +562,21 @@ static void hex32(const uint8_t h[32], char out[65])
     for (i = 0; i < 32; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
 }
 
+/* A file written in 4 KB pieces, letting the game draw between them (the SD
+ * card is slow, and a big episode in one go would freeze the screen). */
+static int write_slowly(FILE *f, const void *data, size_t n)
+{
+    const uint8_t *p = (const uint8_t *)data;
+    while (n) {
+        size_t k = n < 4096 ? n : 4096;
+        if (fwrite(p, 1, k, f) != k) return 0;
+        p += k;
+        n -= k;
+        cothread_yield();
+    }
+    return 1;
+}
+
 /* The episode goes to the SD card as the next link of the chain. */
 static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned count)
 {
@@ -563,14 +595,23 @@ static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned c
         snprintf(path, sizeof path, "%sepisodes/stop-%llu.json", dir_path, (unsigned long long)now_ms);
     ok = (f = fopen(path, "wb")) != NULL;
     if (ok) {
-        ok = fwrite(episode, 1, n, f) == n;
+        ok = write_slowly(f, episode, n);
         ok = fclose(f) == 0 && ok;
     }
     if (!ok) {
         line(13, "Episode: SD write FAILED");
         return;
     }
-    ok_sha256(episode, n, hash);
+    {
+        br_sha256_context c; /* in pieces, breathing between them */
+        size_t i;
+        br_sha256_init(&c);
+        for (i = 0; i < n; i += 8192) {
+            br_sha256_update(&c, episode + i, n - i < 8192 ? n - i : 8192);
+            cothread_yield();
+        }
+        br_sha256_out(&c, hash);
+    }
     hex32(hash, chain);
     snprintf(path, sizeof path, "%sepisodes/chain.txt", dir_path);
     if ((f = fopen(path, "w"))) {
@@ -750,7 +791,7 @@ static void save_made(const char *folder, const char *name, const char *ext, con
     mkdir(path, 0700);
     snprintf(path, sizeof path, "%s%s/%s-%s.%s", dir_path, folder, today_date, o ? clean : "x", ext);
     if ((f = fopen(path, "wb"))) {
-        fwrite(data, 1, n, f);
+        write_slowly(f, data, n);
         fclose(f);
     }
 }
