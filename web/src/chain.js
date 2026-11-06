@@ -14,9 +14,9 @@ export function chainOf(net) {
   };
 }
 
-export function clients(net, privHex) {
+export function clients(net, privHex, fetchFn) {
   const chain = chainOf(net);
-  const pub = createPublicClient({ chain, transport: http(net.rpc) });
+  const pub = createPublicClient({ chain, transport: http(net.rpc, fetchFn ? { fetchFn } : {}) });
   const wallet = privHex ? createWalletClient({ chain, transport: http(net.rpc), account: privateKeyToAccount(privHex) }) : null;
   return { pub, wallet };
 }
@@ -50,10 +50,11 @@ export async function waitIncluded(net, hash, timeoutMs = 120000) {
 
 // Fetch a transaction and check it independently of whoever pointed us to it:
 // the sender is recovered from the signature, not taken from the RPC's "from".
-export async function verifiedAct(net, hash) {
-  const { pub } = clients(net);
+export async function verifiedAct(net, hash, fetchFn) {
+  const { pub } = clients(net, null, fetchFn);
   const tx = await pub.getTransaction({ hash });
   if (!tx || tx.blockNumber == null) return { ok: false, why: 'not included' };
+  if (!decode(hexToBytes(tx.input))) return { ok: false, why: 'not an Okupa act' };
   const receipt = await pub.getTransactionReceipt({ hash });
   if (receipt.status !== 'success') return { ok: false, why: 'reverted' };
   if (tx.type !== 'eip1559') return { ok: false, why: 'not type 2' };

@@ -53,8 +53,8 @@
 
     <section class="card wide">
       <h2>Visit a monkey</h2>
-      <div class="row"><input id="visitAddr" class="mono" placeholder="0x… (a DSi monkey's address)"><select id="visitNet" aria-label="Network to visit on"></select><button id="visit" class="ghost">Visit</button></div>
-      <p class="muted">Reads that address's hellos, drawings and gifts from the chain. An explorer only says where to look; each transaction is fetched and its signature, recipient and calldata checked here.</p>
+      <div class="row"><input id="visitAddr" class="mono" placeholder="0x… (a DSi monkey's address)"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
+      <p class="muted">Reads that address's hellos, drawings and gifts from the chain. An explorer only says where to look; each transaction is fetched and its signature, recipient and calldata checked here. On public networks the reads can go through anon-rpc, so the RPC and the explorer do not see who is visiting.</p>
       <div id="visitOut" class="wall"></div>
     </section>
   </main>

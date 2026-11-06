@@ -12,6 +12,7 @@ import { seal, open, checkPicture } from './seal.js';
 import * as swarm from './swarm.js';
 import * as arkiv from './arkiv.js';
 import { clients, sendAct, waitIncluded, verifiedAct } from './chain.js';
+import { ANON, anonFetch } from './anon.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -133,6 +134,9 @@ function setupNet() {
   }
   $('net').value = netId;
   $('visitNet').value = store.get('visitNet', 'sepolia');
+  for (const [id, a] of [['', { name: 'direct RPC reads' }], ...Object.entries(ANON)]) {
+    const o = document.createElement('option'); o.value = id; o.textContent = a.name; $('visitVia').append(o);
+  }
   $('net').onchange = () => { netId = $('net').value; store.set('net', netId); showNet(); };
   showNet();
 }
@@ -228,9 +232,9 @@ async function checkMailbox() {
 }
 
 // ---------- visiting a monkey (e.g. a DSi) ----------
-async function findActs(n, address) {
+async function findActs(n, address, f = fetch) {
   if (n.blockscout) {
-    const r = await fetch(`${n.blockscout}/api/v2/addresses/${address}/transactions`);
+    const r = await f(`${n.blockscout}/api/v2/addresses/${address}/transactions`);
     if (!r.ok) throw new Error(`explorer: ${r.status}`);
     const { items } = await r.json();
     return (items || []).map((t) => t.hash);
@@ -250,11 +254,14 @@ async function visit() {
   const id = $('visitNet').value, n = NETWORKS[id];
   store.set('visitNet', id);
   const out = $('visitOut'); out.replaceChildren(); out.className = 'wall';
-  const hashes = await findActs(n, address);
-  log(`Visit ${address.slice(0, 10)}… on ${n.name}: ${hashes.length} transaction(s) to check.`, 'dim');
+  const via = n.blockscout ? anonFetch($('visitVia').value) : null;
+  if (via) { log(`Reads go through ${via.name}; waiting for its sandboxed worker…`, 'dim'); await via.ready; log(`${via.name}: hash-verified worker ready.`, 'ok'); }
+  const hashes = await findActs(n, address, via?.fetch);
+  log(`Visit ${address.slice(0, 10)}… on ${n.name}: ${hashes.length} transaction(s) to check${via ? ', via ' + via.name : ', direct'}.`, 'dim');
   let hellos = 0, shown = 0;
   for (const h of hashes) {
-    const v = await verifiedAct(n, h);
+    let v;
+    try { v = await verifiedAct(n, h, via?.fetch); } catch (err) { log(`  ${h.slice(0, 12)}…: skipped (${err.shortMessage || err.message})`, 'dim'); continue; }
     if (!v.ok) continue;
     if (v.from !== address && v.to !== address) continue;
     const self = v.from === v.to;
@@ -268,7 +275,7 @@ async function visit() {
   const p = document.createElement('p'); p.className = 'muted';
   p.textContent = `${hellos} hello(s) and ${shown} picture act(s), each checked: signature recovers the sender, calldata is an Okupa act.${hashes.length ? '' : ' Nothing found.'}`;
   out.prepend(p);
-  record({ act: 'visit', address, network: id, transactions: hashes.length, hellos, pictures: shown });
+  record({ act: 'visit', address, network: id, via: via?.name ?? 'direct RPC', transactions: hashes.length, hellos, pictures: shown });
 }
 
 // ---------- dev conveniences (local stack only) ----------
