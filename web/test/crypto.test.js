@@ -62,3 +62,19 @@ test('gas: the EIP-7623 floor, same figures as the console', async () => {
   assert.equal(actGas(okupa.drawing(new Uint8Array(okupa.DRAWING_BYTES).fill(0xff))), 41720n + 2000n);
   assert.equal(actGas(okupa.drawing(new Uint8Array(okupa.DRAWING_BYTES))), 21000n + 10n * (24n + 512n) + 2000n);
 });
+
+test('big photo: 256x192 four tones, dithering covers all tones', () => {
+  const w = okupa.BIG_W, h = okupa.BIG_H, rgba = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = 4 * (y * w + x), v = Math.round((x / (w - 1)) * 255); rgba.set([v, v, v, 255], o); }
+  const px = okupa.ditherFour(rgba, w, h);
+  assert.equal(px.length, okupa.BIG_BYTES);
+  assert.equal(okupa.tone2(px, w, 0, 0), 3);       // black on the left is ink
+  assert.equal(okupa.tone2(px, w, w - 1, 0), 0);   // white on the right is paper
+  const seen = new Set(); for (let x = 0; x < w; x++) seen.add(okupa.tone2(px, w, x, 5));
+  assert.equal(seen.size, 4);
+  const file = okupa.bigPhoto(px);
+  assert.equal(file.length, 6 + 12288);
+  const d = okupa.decode(file);
+  assert.equal(d.kind, okupa.KIND.BIG_PHOTO);
+  assert.equal(d.w, 256);
+});

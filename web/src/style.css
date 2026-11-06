@@ -61,4 +61,15 @@ canvas#sketch { width: 100%; max-width: 256px; aspect-ratio: 1; image-rendering:
 #log .ok { color: var(--t0); }
 #log .bad { color: var(--t1); font-weight: 600; }
 #log .dim { color: var(--muted); }
+.big { width: 100%; max-width: 256px; aspect-ratio: 4 / 3; image-rendering: pixelated; border-radius: 6px; background: var(--bg); display: block; }
+input[type=file] { padding: 6px; }
+.cave-room { background: var(--bg); }
+.cave { display: flex; flex-wrap: wrap; gap: 18px; }
+.bigframe { all: unset; cursor: zoom-in; display: flex; flex-direction: column; gap: 6px; }
+.bigframe canvas { width: 256px; max-width: 100%; height: auto; image-rendering: pixelated; border: 8px solid var(--t3); border-radius: 4px; box-shadow: 0 0 0 1px var(--t2); }
+.bigframe .mono { font-size: 11px; color: var(--muted); }
+.bigframe:focus-visible canvas { outline: 2px solid var(--t0); }
+dialog#look { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 16px; max-width: calc(100vw - 32px); }
+dialog#look::backdrop { background: rgba(0, 0, 0, .7); }
+#lookCanvas { width: min(768px, calc(100vw - 64px)); height: auto; image-rendering: pixelated; display: block; }
 @media (max-width: 420px) { main { padding: 12px; } header { padding: 12px; } }

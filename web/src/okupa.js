@@ -11,10 +11,13 @@ export const KIND = {
   GIFT_PICTURE: 0x03,   // to a friend, drawing or photo inline
   GIFT_OBJECT: 0x04,    // to a friend, 0G root + mesh keccak (planned)
   GIFT_SWARM: 0x05,     // to a friend, picture on Swarm: ECIES-sealed reference (docs/WEB.md)
+  BIG_PHOTO: 0x06,      // never calldata: the file a big gift keeps on Swarm, 256x192 2 bpp (12 KB)
 };
 export const SIDE = 64;
 export const DRAWING_BYTES = (SIDE * SIDE) / 8;   // 1 bpp, MSB first, row-major
 export const PHOTO_BYTES = (SIDE * SIDE) / 4;     // 2 bpp, four tones, MSB first, row-major
+export const BIG_W = 256, BIG_H = 192;            // the DSi's screen
+export const BIG_BYTES = (BIG_W * BIG_H) / 4;     // 2 bpp, four tones
 export const SEALED_REF_BYTES = 113 + 64 + 32;    // ECIES(reference 64 || keccak(picture) 32)
 
 export const header = (kind) => concat(MAGIC, new Uint8Array([VERSION, kind]));
@@ -26,6 +29,7 @@ export const giftPicture = (px) => {
   if (px.length !== DRAWING_BYTES && px.length !== PHOTO_BYTES) throw new Error('picture size');
   return concat(header(KIND.GIFT_PICTURE), px);
 };
+export const bigPhoto = (px) => { need(px, BIG_BYTES); return concat(header(KIND.BIG_PHOTO), px); };
 export const giftSwarm = (sealed) => { need(sealed, SEALED_REF_BYTES); return concat(header(KIND.GIFT_SWARM), sealed); };
 
 // Exactly one known shape, or null (like ok_act_decode).
@@ -41,6 +45,7 @@ export function decode(data) {
       if (body.length === PHOTO_BYTES) return { kind, pixels: body, bpp: 2 };
       return null;
     case KIND.GIFT_SWARM: return body.length === SEALED_REF_BYTES ? { kind, sealed: body } : null;
+    case KIND.BIG_PHOTO: return body.length === BIG_BYTES ? { kind, pixels: body, bpp: 2, w: BIG_W, h: BIG_H } : null;
     default: return null;
   }
 }
@@ -67,5 +72,23 @@ export function setPixel(px, bpp, x, y, v) {
 export function toDrawing(photoPx) {
   const out = new Uint8Array(DRAWING_BYTES);
   for (let y = 0; y < SIDE; y++) for (let x = 0; x < SIDE; x++) setPixel(out, 1, x, y, getPixel(photoPx, 2, x, y) >= 2);
+  return out;
+}
+
+// Any 2 bpp picture of width w: tone 0..3.
+export const tone2 = (px, w, x, y) => { const i = y * w + x; return (px[i >> 2] >> (6 - 2 * (i & 3))) & 3; };
+
+// A photo from anywhere (RGBA, already scaled to w x h) down to the four tones: luminance,
+// ordered 4x4 Bayer dithering. 0 = paper (light) .. 3 = ink (dark). Deterministic.
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+export function ditherFour(rgba, w, h) {
+  const out = new Uint8Array((w * h) / 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const o = 4 * (y * w + x);
+    const l = (0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2]) / 255;
+    const t = Math.max(0, Math.min(3, Math.floor((1 - l) * 3 + (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16)));
+    const i = y * w + x;
+    out[i >> 2] |= t << (6 - 2 * (i & 3));
+  }
   return out;
 }

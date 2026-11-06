@@ -31,13 +31,21 @@
     </section>
 
     <section class="card">
-      <h2>Send a gift</h2>
+      <h2>Small gift</h2>
       <label>To (friend code, or a DSi address for an inline gift) <input id="to" class="mono" placeholder="0x…:04… or 0x…"></label>
       <div class="row">
         <button id="sendSwarm">Gift via Swarm + Arkiv</button>
         <button id="sendInline" class="ghost">Inline gift (DSi format)</button>
       </div>
       <p class="muted">Swarm gift: four tones, picture encrypted on Swarm, its reference sealed to your friend's key, one transaction on Ethereum, one entry in the Arkiv mailbox. Inline gift: the 64×64 one-bit drawing travels inside the transaction, the form the DSi reads.</p>
+    </section>
+
+    <section class="card">
+      <h2>Big gift</h2>
+      <label>A photo from this computer <input id="photo" type="file" accept="image/*"></label>
+      <canvas id="bigPreview" class="big" width="256" height="192" aria-label="Big picture preview, 256 by 192"></canvas>
+      <div class="row"><button id="sendBig" disabled>Send big gift via Swarm + Arkiv</button></div>
+      <p class="muted">A small gift fits in an Ethereum transaction. A big one is a 256×192 photo in four tones (12 KB), the size of a DSi screen: it lives on Swarm, encrypted, and the transaction only carries its sealed reference. Friends keep big gifts in the cave.</p>
     </section>
 
     <section class="card">
@@ -49,6 +57,11 @@
     <section class="card wide">
       <h2>Wall</h2>
       <div id="wall" class="wall"></div>
+    </section>
+
+    <section class="card wide cave-room">
+      <h2>The cave</h2>
+      <div id="cave" class="cave"></div>
     </section>
 
     <section class="card wide">
@@ -63,6 +76,7 @@
     <h2>What really happened</h2>
     <ol id="log"></ol>
   </section>
+ <dialog id="look"><canvas id="lookCanvas" width="256" height="192"></canvas><p id="lookInfo" class="mono muted"></p><button id="lookClose" class="ghost">Close</button></dialog>
   <script type="module" src="./src/app.js"></script>
 </body>
 </html>
