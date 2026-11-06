@@ -1,4 +1,5 @@
 #include "mind.h"
+#include "okupa_facts.h"
 #include "okupa_ui.h"
 #include "okupa_keccak.h"
 #include "okupa_keys.h"
@@ -320,6 +321,58 @@ static void load_chain(void)
     }
 }
 
+/* The TLS version and suite this connection agreed, short enough for the
+ * screen ("TLS1.2 ECDSA AES128-GCM"). */
+static void tls_name(char *out, size_t cap)
+{
+    br_ssl_session_parameters sp;
+    const char *kx = "?", *cipher = "?";
+    br_ssl_engine_get_session_parameters(&tls.client.eng, &sp);
+    switch (sp.cipher_suite) {
+    case BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: kx = "ECDSA", cipher = "AES128-GCM"; break;
+    case BR_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: kx = "ECDSA", cipher = "AES256-GCM"; break;
+    case BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: kx = "ECDSA", cipher = "CHACHA20"; break;
+    case BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: kx = "RSA", cipher = "AES128-GCM"; break;
+    case BR_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: kx = "RSA", cipher = "AES256-GCM"; break;
+    case BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: kx = "RSA", cipher = "CHACHA20"; break;
+    default: break;
+    }
+    if (!sp.cipher_suite) {
+        out[0] = 0;
+        return;
+    }
+    if (*kx == '?')
+        snprintf(out, cap, "TLS%u.%u suite %04x", (sp.version >> 8) - 2, (sp.version & 0xff) - 1, sp.cipher_suite);
+    else
+        snprintf(out, cap, "TLS%u.%u %s %s", (sp.version >> 8) - 2, (sp.version & 0xff) - 1, kx, cipher);
+}
+
+/* The 0G page of the technical screens: only what this decision really did.
+ * The request hash is of the bytes the TEE hashed: ours, with only the model
+ * renamed to the upstream id the signed response names. */
+static void record_facts(const ok_think_provider *p, uint32_t ms)
+{
+    ok_facts *f = &ok_facts_now;
+    snprintf(f->og_host, sizeof f->og_host, "%.47s", p->host);
+    snprintf(f->og_model, sizeof f->og_model, "%.47s", p->model);
+    snprintf(f->og_provider, sizeof f->og_provider, "%.42s", p->provider);
+    snprintf(f->og_signer, sizeof f->og_signer, "%.42s", t.recovered);
+    f->og_verified = t.stage == OK_THINK_DECIDED || t.stage == OK_THINK_ANSWER;
+    tls_name(f->og_tls, sizeof f->og_tls);
+    if (t.forwarded_len) ok_sha256(t.forwarded, t.forwarded_len, f->og_req_sha);
+    else memset(f->og_req_sha, 0, 32);
+    if (t.response) ok_sha256(t.response, t.response_len, f->og_resp_sha);
+    else memset(f->og_resp_sha, 0, 32);
+    if (t.recovered[0]) memcpy(f->og_sig, t.sig, 65);
+    else memset(f->og_sig, 0, 65);
+    snprintf(f->og_request_id, sizeof f->og_request_id, "%.47s", t.chat_id);
+    f->og_ms = ms;
+    if (t.stage == OK_THINK_DECIDED)
+        snprintf(f->og_decision, sizeof f->og_decision, "%.39s", ok_mind_activity_name(t.decision.activity));
+    else
+        snprintf(f->og_decision, sizeof f->og_decision, "sleep (safe stop: %.20s)", ok_think_stage_name(t.stage));
+}
+
 static void wait_frames(int frames)
 {
     while (frames-- > 0) cothread_yield_irq(IRQ_VBLANK);
@@ -415,6 +468,7 @@ static int thinker(void *arg)
             line(12, "Setup failed: %s", ok_result_name(r));
             break;
         }
+        record_facts(&p, ms);
         line(3, "#%u: HTTP %d in %lu ms", count, t.http_status, (unsigned long)ms);
         line(5, "Request id (0G chat id):");
         line(6, "%.32s", t.chat_id[0] ? t.chat_id : "-");

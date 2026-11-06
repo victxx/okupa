@@ -112,6 +112,11 @@ int main(void)
     assert(t.request_len == fake.req_len && !memcmp(t.request, fake.req_body, t.request_len));
     assert(!strncmp(t.request, "{\"chat_template_kwargs\":", 24)); /* keys sorted, as Go re-encodes it */
     assert(strlen(fake.last_auth) > 400);
+    {
+        char want[43];
+        ok_keys_checksum(p.signer, want);
+        assert(!strcmp(t.recovered, want)); /* the signer recovered here, not just compared */
+    }
 
     /* The episode is JSON and carries the exact bytes. */
     assert(ok_think_episode(&t, &p, 1800000000001ull, "ab12", episode, sizeof episode, &n) == OK_OK);
@@ -136,6 +141,7 @@ int main(void)
     /* The wrong signer, or a signature over other bytes: refused, the okupa naps. */
     p.signer[0] ^= 1;
     run(&p, good);
+    assert(t.recovered[0] && strcmp(t.recovered, t.signer)); /* the real signer, which is not the one we trust */
     assert(t.stage == OK_THINK_UNVERIFIED && t.decision.activity == OK_MIND_SLEEP && !t.decision.line[0]);
     p.signer[0] ^= 1;
     fake.tamper = 1;

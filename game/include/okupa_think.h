@@ -69,6 +69,8 @@ typedef struct {
     size_t forwarded_len;
     char text[OK_ZEROG_TEXT + 1];
     char signature[133]; /* "0x" + 130 hex */
+    uint8_t sig[65];     /* the same, as bytes */
+    char recovered[43];  /* who really signed the text, recovered here ("" if unreadable) */
     /* Scratch: the wire buffer for both round trips. */
     char wire[OK_THINK_RESPONSE];
     char sigwire[OK_THINK_SIGNATURE];

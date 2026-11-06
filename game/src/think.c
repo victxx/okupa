@@ -148,6 +148,25 @@ ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t de
         return OK_OK;
     }
 
+    /* Who signed it, whatever it says (for the screens and the episode). */
+    {
+        const char *h = t->signature + (t->signature[0] == '0' && t->signature[1] == 'x' ? 2 : 0);
+        uint8_t who[20];
+        int i, ok = strlen(h) == 130;
+        for (i = 0; ok && i < 65; i++) {
+            unsigned v = 0;
+            int k;
+            for (k = 0; k < 2; k++) {
+                char c = h[2 * i + k];
+                int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+                if (d < 0) ok = 0;
+                v = v << 4 | (unsigned)(d < 0 ? 0 : d);
+            }
+            t->sig[i] = (uint8_t)v;
+        }
+        if (ok && ok_personal_recover(t->text, strlen(t->text), t->sig, who) == OK_OK) ok_keys_checksum(who, t->recovered);
+    }
+
     /* 3. Our bytes, their signature, the signer we trust. */
     if (!forward(t, p->model) ||
         ok_zerog_verify((const uint8_t *)t->forwarded, t->forwarded_len, (const uint8_t *)t->response,
