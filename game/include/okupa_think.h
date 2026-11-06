@@ -162,6 +162,8 @@ int ok_think_https(ok_tls *tls, const char *host, int64_t now, const uint8_t see
                    size_t body_len, char *resp, size_t cap, size_t *got);
 int ok_think_exchange(ok_tls *tls, const char *head, size_t head_len, const char *body, size_t body_len, char *resp,
                       size_t cap, size_t *got);
+/* 1 once buf holds a whole HTTP response (Content-Length or chunked). */
+int ok_think_complete(char *buf, size_t n);
 /* 0 if the server said it closes the connection after this response. */
 int ok_think_keeps_open(const char *resp, size_t n);
 

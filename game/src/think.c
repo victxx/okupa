@@ -697,7 +697,7 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
 
 /* Whether a response is complete, without touching it (chunked bodies are
  * decoded in place later, once). */
-static int complete(char *buf, size_t n)
+int ok_think_complete(char *buf, size_t n)
 {
     ok_http_response r;
     char value[32];
@@ -724,7 +724,7 @@ int ok_think_exchange(ok_tls *tls, const char *head, size_t head_len, const char
         if (ok_tls_read(tls, resp + *got, cap - *got, &n) != OK_OK || n == 0) break; /* closed */
         *got += n;
         if (ok_yield) ok_yield(); /* each record was decrypted and checked: breathe */
-        if (complete(resp, *got)) break;
+        if (ok_think_complete(resp, *got)) break;
     }
     if (!*got) return ok_tls_error(tls) ? ok_tls_error(tls) : -1;
     resp[*got] = 0; /* cap leaves room for it */
