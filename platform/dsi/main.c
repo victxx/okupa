@@ -130,7 +130,7 @@ static int save(const ok_pet *p, const uint8_t drawing[512])
 /* The drawing on its way: its pixels and its transaction hash, kept on the SD
  * card so it still gets hung after a restart. */
 static uint8_t sent_pixels[512], sent_hash[32];
-static int sent_waiting;
+static int sent_waiting, hang_waiting;
 
 static void load_wall(ok_ui *u)
 {
@@ -289,7 +289,7 @@ int main(void)
             if (ok_dsi_net_take_included(inc_hash, &inc_block)) {
                 static char said[48];
                 if (sent_waiting && !memcmp(inc_hash, sent_hash, 32)) {
-                    hang(&ui);
+                    hang_waiting = 1; /* hung below, in front of the player (not behind SELECT) */
                     snprintf(said, sizeof said, "Block %lu has my drawing. On the wall!", (unsigned long)inc_block);
                 } else {
                     snprintf(said, sizeof said, "My hello is in block %lu!", (unsigned long)inc_block);
@@ -299,6 +299,10 @@ int main(void)
                 snprintf(ui.wallet_status, sizeof ui.wallet_status, "In block %lu", (unsigned long)inc_block);
                 redraw = 1;
             }
+        }
+        if (hang_waiting && !tech_on) {
+            hang(&ui);
+            hang_waiting = 0;
         }
         if (now != last) {
             ok_pet_update(&pet, (int64_t)now);
@@ -332,8 +336,8 @@ int main(void)
             {
                 uint8_t hash[32];
                 if (ok_dsi_net_pending(hash))
-                    snprintf(ui.wallet_status, sizeof ui.wallet_status, "Hello %02x%02x%02x%02x: %d nodes", hash[0], hash[1],
-                             hash[2], hash[3], ok_dsi_net_handed());
+                    snprintf(ui.wallet_status, sizeof ui.wallet_status, "%s %02x%02x%02x%02x: %d nodes",
+                             sent_waiting ? "Drawing" : "Hello", hash[0], hash[1], hash[2], hash[3], ok_dsi_net_handed());
             }
         }
         /* The okupa's mind on 0G lives in its own thread: tell it what the
@@ -341,8 +345,8 @@ int main(void)
          * and pauses or resumes it. */
         if (keysDown() || (keysHeld() & KEY_TOUCH)) last_input = now;
         ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, (uint32_t)(now - last_input),
-                            (keysDown() & KEY_TOUCH) ? "touched the screen" : NULL);
-        if (ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
+                            !tech_on && (keysDown() & KEY_TOUCH) ? "touched the screen" : NULL);
+        if (!tech_on && ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
             if (show_mind) ok_dsi_mind_toggle();
             show_mind = 1;
             show_net = 0;

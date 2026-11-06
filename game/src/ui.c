@@ -320,7 +320,12 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, cons
               u->pressed == 101 && u->pressed_ticks ? RGB(12, 18, 12) : RGB(17, 26, 15));
     ok_icons_draw(OK_ICON_HOME, f, OUT_X + 11, OUT_Y + 10, 16);
     text(f, font, OUT_X + 21, OUT_Y + 7, ok_house_where() == OK_PLACE_GARDEN ? "In" : "Out", INK, 2);
-    centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(19, 17, 15), 1);
+    /* Every few seconds, a pointer to the technical side for anyone watching. */
+    centred(f, font, 128, 178,
+            u->ticks / 300 % 3 == 2 ? "SELECT: how it all works"
+            : u->net_status[0]      ? u->net_status
+                                    : "Tap to look after your okupa",
+            RGB(19, 17, 15), 1);
 }
 
 /* The closet: tops, colours, things to wear. */
