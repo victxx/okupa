@@ -475,6 +475,14 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
     if (u->happy_ticks) u->happy_ticks--;
     if (u->pressed_ticks) u->pressed_ticks--;
     ok_monkey_step(&u->anim, pose(u, p), u->look.wear);
+    /* Sounds that go with what it does: each bite, each catch, each hop. */
+    if (u->anim.move != u->heard_move) u->heard_bites = 0;
+    if (u->anim.bites != u->heard_bites) u->sound = 1 + (u->anim.move == OK_MOVE_EAT ? OK_SFX_EAT : OK_SFX_POP);
+    if ((u->anim.move == OK_MOVE_HOP && u->anim.move_t == 12) || (u->anim.move == OK_MOVE_PEEK && u->anim.move_t == 150))
+        u->sound = 1 + OK_SFX_BOING;
+    if (u->anim.move == OK_MOVE_EAT && u->anim.move_t == 161) u->sound = 1 + OK_SFX_YAY;
+    u->heard_bites = u->anim.bites;
+    u->heard_move = u->anim.move;
     return u->ticks % 2 == 0 ? OK_UI_CHANGED : OK_UI_NOTHING;
 }
 
@@ -605,7 +613,9 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             if (inside(x, y, 8 + i * 31, SWATCH_Y, 26, 22)) u->look.colour = (uint8_t)i;
         for (i = 0; i < OK_WEARS; i++)
             if (inside(x, y, WEAR_X(i), WEAR_ROW(i), 76, 19)) u->look.wear = (uint8_t)i;
+        u->sound = 1 + OK_SFX_POP;
         if (inside(x, y, DONE_X, DONE_Y, 72, 20)) {
+            u->sound = 1 + OK_SFX_HELLO;
             u->scene = OK_UI_HOME;
             say(u, "Thanks! I feel brand new.");
             ok_monkey_event(&u->anim, OK_EVENT_HELLO);
@@ -623,6 +633,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         if (!inside(x, y, BX(i), BY(i), BW, BH)) continue;
         u->pressed = i + 1;
         u->pressed_ticks = 8;
+        u->sound = 1 + OK_SFX_TAP;
         switch (i) {
         case B_DRAW: u->scene = OK_UI_SKETCH; u->eraser = 0; return OK_UI_CHANGED;
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
@@ -637,8 +648,12 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             ok_monkey_event(&u->anim, !ok ? OK_EVENT_REFUSE : action == OK_DO_FEED ? OK_EVENT_FEED
                                       : action == OK_DO_PLAY ? OK_EVENT_PLAY : OK_EVENT_PET);
             if (ok) u->happy_ticks = 600;
+            u->sound = 1 + (!ok ? OK_SFX_NOPE : action == OK_DO_PET ? OK_SFX_YAY : OK_SFX_TAP);
         } else if (!ok && action == OK_DO_SLEEP) {
             ok_monkey_event(&u->anim, OK_EVENT_REFUSE);
+            u->sound = 1 + OK_SFX_NOPE;
+        } else if (ok && action == OK_DO_WAKE) {
+            u->sound = 1 + OK_SFX_HELLO;
         }
         return OK_UI_CHANGED;
     }

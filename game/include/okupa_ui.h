@@ -2,6 +2,7 @@
 #define OKUPA_UI_H
 
 #include "okupa_house.h"
+#include "okupa_music.h"
 #include "okupa_pet.h"
 #include <stdint.h>
 
@@ -45,6 +46,8 @@ typedef struct {
     uint8_t wall[64 * 64 / 8];
     int wall_set, ready, happy_ticks;
     int pressed, pressed_ticks; /* the button just tapped (1..8, 100 = Wear), for its pressed look */
+    int sound;                  /* a sound to play, OK_SFX_* + 1; the platform plays it and clears it */
+    int heard_bites, heard_move;
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);

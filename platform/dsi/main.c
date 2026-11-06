@@ -1,6 +1,8 @@
 /* Okupa on the Nintendo DSi: the room on the top screen, touch below. The
  * same core and game code as the host; this file only owns the hardware. */
+#include "audio.h"
 #include "net.h"
+#include "okupa_music.h"
 #include "okupa_checks.h"
 #include "okupa.h"
 #include "okupa_font.h"
@@ -35,6 +37,7 @@ static void present(int top, int bottom)
 /* Redraws while a long task (the network test) runs. */
 static void show_now(void)
 {
+    ok_dsi_audio_pump();
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     ok_ui_render(shown_ui, shown_pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
@@ -151,7 +154,8 @@ int main(void)
         ok_dsi_network_log(log_path);
         ok_dsi_network_peers(peers_path);
     }
-    cpuStartTiming(0); /* runs for good: the checks and the network's entropy read it */
+    cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
+    ok_dsi_audio_start();
     ok_dsi_net_start();
     ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
@@ -162,10 +166,13 @@ int main(void)
         uint32_t t;
         cothread_yield_irq(IRQ_VBLANK); /* not swiWaitForVBlank: Wi-Fi runs in another thread */
         scanKeys();
+        ok_dsi_audio_pump();
         now = time(NULL);
         if (now != last) {
             ok_pet_update(&pet, (int64_t)now);
             last = now;
+            tm = localtime(&now);
+            ok_dsi_audio_tune(pet.asleep ? OK_TUNE_SLEEP : tm->tm_hour >= 21 || tm->tm_hour < 7 ? OK_TUNE_NIGHT : OK_TUNE_DAY);
         }
         /* The okupa lives in real time: one tick per 1/60 s that passed, even
          * when drawing a frame took longer than that. */
@@ -178,6 +185,10 @@ int main(void)
             if (ok_ui_tick(&ui, &pet)) redraw = 1;
         }
         if (ticks == 8) late = 0;
+        if (ui.sound) {
+            ok_dsi_audio_sfx(ui.sound - 1);
+            ui.sound = 0;
+        }
         if (redraw) {
             snprintf(ui.net_status, sizeof ui.net_status, "%s", ok_dsi_net_summary());
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
