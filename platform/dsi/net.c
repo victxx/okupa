@@ -552,10 +552,14 @@ static void crawl(int seconds, uint8_t fork[4], int seeds_from, int seeds_to)
 
 /* ---- Sessions --------------------------------------------------------------- */
 
+/* A node that does not answer the handshake within 5 s is not worth the
+ * wait: move on. Once admitted, quiet spells of 15 s are normal. */
+static int read_ms = 5000;
+
 static int sock_read(void *ctx, uint8_t *buf, size_t n)
 {
     int fd = *(int *)ctx, k;
-    if (!wait_for(fd, POLLIN, 15000)) return OK_IO_IDLE;
+    if (!wait_for(fd, POLLIN, read_ms)) return OK_IO_IDLE;
     k = recv(fd, buf, n, 0);
     return k > 0 ? k : 0;
 }
@@ -585,6 +589,7 @@ static int hold(void *ctx)
     if (!admitted) {
         char text[33];
         admitted = 1;
+        read_ms = 15000;
         remember_peer(current_node);
         snprintf(text, sizeof text, "Online: %.24s", current_client);
         say(text);
@@ -611,7 +616,7 @@ static int dial(int i, int row)
     addr.sin_family = AF_INET;
     addr.sin_port = htons(nodes[i].tcp);
     memcpy(&addr.sin_addr.s_addr, nodes[i].ip, 4);
-    if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 8000) ||
+    if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 4000) ||
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &elen) || error) {
         close(fd);
         line(row, "%u.%u.%u.%u: no TCP", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
@@ -632,6 +637,7 @@ static int dial(int i, int row)
     current_node = i;
     current_client[0] = 0;
     admitted = 0;
+    read_ms = 5000;
     ok_session_dial(&io, priv, nodes[i].pub, &e, net->net, (uint64_t)time(NULL), "okupa/0.1 (DSi)", &rep);
     ok_wipe(priv, sizeof priv);
     ok_wipe(&e, sizeof e);
