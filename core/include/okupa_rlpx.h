@@ -2,6 +2,8 @@
 #define OKUPA_RLPX_H
 
 #include "okupa.h"
+#include "okupa_aes.h"
+#include "okupa_keccak.h"
 
 /* RLPx handshake packets in the EIP-8 format: a 2-byte big-endian size, then
  * ECIES(body || padding) with the size as authenticated data.
@@ -40,5 +42,26 @@ ok_result ok_rlpx_ack_write(const uint8_t remote_pub[64], const ok_rlpx_entropy 
 /* The whole packet, prefix included; it is decrypted in place. */
 ok_result ok_rlpx_auth_read(const uint8_t priv[32], uint8_t *packet, size_t n, ok_rlpx_remote *remote);
 ok_result ok_rlpx_ack_read(const uint8_t priv[32], uint8_t *packet, size_t n, ok_rlpx_remote *remote);
+
+/* Session secrets once auth and ack are exchanged (nonce = recipient's):
+ *   shared = keccak(ephemeral ECDH || keccak(recipient nonce || initiator nonce))
+ *   aes    = keccak(ephemeral ECDH || shared)
+ *   mac    = keccak(ephemeral ECDH || aes) */
+ok_result ok_rlpx_derive(const uint8_t eph_priv[32], const uint8_t remote_eph[64], const uint8_t init_nonce[32],
+                         const uint8_t resp_nonce[32], uint8_t aes_secret[32], uint8_t mac_secret[32]);
+
+/* Frame state: AES-256-CTR (zero IV) each way, AES-256 for the MAC seeds and
+ * a running keccak per direction, started from (mac ^ nonce) || packet. */
+typedef struct {
+    ok_aes_ctr enc, dec;
+    ok_aes mac;
+    ok_keccak egress, ingress;
+} ok_rlpx_session;
+
+/* auth and ack are the packets exactly as sent on the wire (still encrypted):
+ * keep a copy, since the readers decrypt in place. */
+ok_result ok_rlpx_session_init(ok_rlpx_session *s, int initiator, const uint8_t eph_priv[32],
+                               const uint8_t own_nonce[32], const ok_rlpx_remote *remote,
+                               const uint8_t *auth, size_t auth_len, const uint8_t *ack, size_t ack_len);
 
 #endif

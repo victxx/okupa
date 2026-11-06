@@ -1,3 +1,4 @@
+#include "okupa_keccak.h"
 #include "okupa_keys.h"
 #include "okupa_rlpx.h"
 #include <assert.h>
@@ -150,6 +151,55 @@ int main(void)
     /* An ack is not an auth. */
     assert(ok_rlpx_ack_write(pub_a, &e, buf, sizeof buf, &n) == OK_OK);
     assert(ok_rlpx_auth_read(ka, buf, n, &r) == OK_FORMAT);
-    puts("rlpx: EIP-8 auth/ack vectors (v4 and future versions) read; our packets round-trip");
+
+    /* Session secrets, from B's side of (Auth2, Ack2), then A's side must mirror them. */
+    {
+        static uint8_t auth_wire[OK_RLPX_MAX_PACKET], ack_wire[OK_RLPX_MAX_PACKET];
+        uint8_t aes[32], mac[32], want[32], ea[32], eb[32], d1[32], d2[32];
+        ok_rlpx_remote from_a, from_b;
+        ok_rlpx_session sa, sb;
+        ok_keccak k1, k2;
+        size_t auth_len, ack_len;
+
+        hex(EPH_A, ea, 32);
+        hex(EPH_B, eb, 32);
+        auth_len = hex(AUTH2, auth_wire, sizeof auth_wire);
+        ack_len = hex(ACK2, ack_wire, sizeof ack_wire);
+        memcpy(buf, auth_wire, auth_len);
+        assert(ok_rlpx_auth_read(kb, buf, auth_len, &from_a) == OK_OK);
+        memcpy(buf, ack_wire, ack_len);
+        assert(ok_rlpx_ack_read(ka, buf, ack_len, &from_b) == OK_OK);
+
+        assert(ok_rlpx_derive(eb, from_a.eph, nonce_a, nonce_b, aes, mac) == OK_OK);
+        hex("80e8632c05fed6fc2a13b0f8d31a3cf645366239170ea067065aba8e28bac487", want, 32);
+        assert(!memcmp(aes, want, 32));
+        hex("2ea74ec5dae199227dff1af715362700e989d889d7a493cb0639691efb8e5f98", want, 32);
+        assert(!memcmp(mac, want, 32));
+
+        assert(ok_rlpx_session_init(&sb, 0, eb, nonce_b, &from_a, auth_wire, auth_len, ack_wire, ack_len) == OK_OK);
+        k1 = sb.ingress;
+        ok_keccak_update(&k1, "foo", 3);
+        ok_keccak_final(&k1, d1);
+        hex("0c7ec6340062cc46f5e9f1e3cf86f8c8c403c5a0964f5df0ebd34a75ddc86db5", want, 32);
+        assert(!memcmp(d1, want, 32));
+
+        assert(ok_rlpx_session_init(&sa, 1, ea, nonce_a, &from_b, auth_wire, auth_len, ack_wire, ack_len) == OK_OK);
+        k1 = sa.egress;
+        k2 = sb.ingress;
+        ok_keccak_final(&k1, d1);
+        ok_keccak_final(&k2, d2);
+        assert(!memcmp(d1, d2, 32));
+        k1 = sa.ingress;
+        k2 = sb.egress;
+        ok_keccak_final(&k1, d1);
+        ok_keccak_final(&k2, d2);
+        assert(!memcmp(d1, d2, 32));
+        k1 = sa.egress;
+        k2 = sa.ingress;
+        ok_keccak_final(&k1, d1);
+        ok_keccak_final(&k2, d2);
+        assert(memcmp(d1, d2, 32));
+    }
+    puts("rlpx: EIP-8 auth/ack vectors (v4 and future versions) read; our packets round-trip; session secrets match");
     return 0;
 }

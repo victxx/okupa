@@ -158,3 +158,60 @@ ok_result ok_rlpx_ack_read(const uint8_t priv[32], uint8_t *packet, size_t n, ok
     memcpy(remote->nonce, k.data, 32);
     return OK_OK;
 }
+
+ok_result ok_rlpx_derive(const uint8_t eph_priv[32], const uint8_t remote_eph[64], const uint8_t init_nonce[32],
+                         const uint8_t resp_nonce[32], uint8_t aes_secret[32], uint8_t mac_secret[32])
+{
+    uint8_t buf[64];
+    ok_keccak k;
+    ok_result r;
+    if (!eph_priv || !remote_eph || !init_nonce || !resp_nonce || !aes_secret || !mac_secret) return OK_ARGUMENT;
+    if ((r = ok_ecdh(eph_priv, remote_eph, buf)) != OK_OK) return r;
+    ok_keccak_init(&k);
+    ok_keccak_update(&k, resp_nonce, 32);
+    ok_keccak_update(&k, init_nonce, 32);
+    ok_keccak_final(&k, buf + 32);
+    ok_keccak256(buf, 64, buf + 32); /* shared secret */
+    ok_keccak256(buf, 64, aes_secret);
+    memcpy(buf + 32, aes_secret, 32);
+    ok_keccak256(buf, 64, mac_secret);
+    ok_wipe(buf, sizeof buf);
+    return OK_OK;
+}
+
+static void mac_start(ok_keccak *k, const uint8_t mac_secret[32], const uint8_t nonce[32], const uint8_t *packet, size_t n)
+{
+    uint8_t x[32];
+    int i;
+    for (i = 0; i < 32; i++) x[i] = (uint8_t)(mac_secret[i] ^ nonce[i]);
+    ok_keccak_init(k);
+    ok_keccak_update(k, x, 32);
+    ok_keccak_update(k, packet, n);
+    ok_wipe(x, sizeof x);
+}
+
+ok_result ok_rlpx_session_init(ok_rlpx_session *s, int initiator, const uint8_t eph_priv[32],
+                               const uint8_t own_nonce[32], const ok_rlpx_remote *remote,
+                               const uint8_t *auth, size_t auth_len, const uint8_t *ack, size_t ack_len)
+{
+    static const uint8_t zero[16] = {0};
+    const uint8_t *init_nonce, *resp_nonce;
+    uint8_t aes_secret[32], mac_secret[32];
+    ok_result r;
+    if (!s || !eph_priv || !own_nonce || !remote || !auth || !ack) return OK_ARGUMENT;
+    init_nonce = initiator ? own_nonce : remote->nonce;
+    resp_nonce = initiator ? remote->nonce : own_nonce;
+    r = ok_rlpx_derive(eph_priv, remote->eph, init_nonce, resp_nonce, aes_secret, mac_secret);
+    if (r == OK_OK) r = ok_aes_ctr_init(&s->enc, aes_secret, 32, zero);
+    if (r == OK_OK) r = ok_aes_ctr_init(&s->dec, aes_secret, 32, zero);
+    if (r == OK_OK) r = ok_aes_init(&s->mac, mac_secret, 32);
+    if (r == OK_OK) {
+        /* The auth is MACed under the recipient's nonce, the ack under the initiator's. */
+        mac_start(initiator ? &s->egress : &s->ingress, mac_secret, resp_nonce, auth, auth_len);
+        mac_start(initiator ? &s->ingress : &s->egress, mac_secret, init_nonce, ack, ack_len);
+    }
+    ok_wipe(aes_secret, sizeof aes_secret);
+    ok_wipe(mac_secret, sizeof mac_secret);
+    if (r != OK_OK) ok_wipe(s, sizeof *s);
+    return r;
+}
