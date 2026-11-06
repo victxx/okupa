@@ -560,6 +560,7 @@ typedef struct {
 static gl_texe texes[GL_TEXES];
 static int ntex, gl_tex_cur = -1;
 static uint16_t gl_buf[32 * 64];
+static int32_t gl_shift_u, gl_shift_v; /* whole texture periods taken off a triangle's coordinates */
 
 static int pow2_at_most(int v, int cap)
 {
@@ -678,6 +679,21 @@ static void gl_tri(const vert *a, const vert *b, const vert *c)
     if (gl_dirty) gl_state();
     textured = (cur_flags & OK_R3D_TEXTURED) && gl_tex_cur >= 0;
     triangles++;
+    /* Texture coordinates go to the GPU as 12.4 texels (about +-2047):
+     * a big tiled surface (the island's earth, the lawn) runs past that and
+     * wraps into garbage. Repeating textures are periodic, so shift the
+     * whole triangle by whole texture sizes back near zero. */
+    if (textured) {
+        const gl_texe *e = &texes[gl_tex_cur];
+        int32_t pu = (int32_t)e->tw * 16, pv = (int32_t)e->th * 16, mu = 0, mv = 0;
+        for (i = 0; i < 3; i++) {
+            int32_t tu = (int32_t)(v[i]->u * e->tw / e->w), tv = (int32_t)(v[i]->v * e->th / e->h);
+            if (!i || tu < mu) mu = tu;
+            if (!i || tv < mv) mv = tv;
+        }
+        gl_shift_u = pu > 0 ? (mu >= 0 ? mu / pu : -((-mu + pu - 1) / pu)) * pu : 0;
+        gl_shift_v = pv > 0 ? (mv >= 0 ? mv / pv : -((-mv + pv - 1) / pv)) * pv : 0;
+    }
     for (i = 0; i < 3; i++) {
         const vert *p = v[i];
         int k = tone_of(p->l);
@@ -690,7 +706,7 @@ static void gl_tri(const vert *a, const vert *b, const vert *c)
             int n = 0, j;
             if (textured) {
                 const gl_texe *e = &texes[gl_tex_cur];
-                int32_t tu = (int32_t)(p->u * e->tw / e->w), tv = (int32_t)(p->v * e->th / e->h);
+                int32_t tu = (int32_t)(p->u * e->tw / e->w) - gl_shift_u, tv = (int32_t)(p->v * e->th / e->h) - gl_shift_v;
                 w[n++] = FIFO_COMMAND_PACK(FIFO_COLOR, FIFO_TEX_COORD, FIFO_VERTEX16, FIFO_NOP);
                 w[n++] = colour;
                 w[n++] = TEXTURE_PACK((t16)tu, (t16)tv);
@@ -792,11 +808,33 @@ void ok_r3d_layer_alpha(int k16)
     gl_blend_set = 1;
 }
 
+/* Cinema bars: rows top and bottom show only the 2D layer, opaque and with
+ * no blending, through the display's window 0 (so a fade of the picture
+ * never makes the bars see-through). 0 turns them off. */
+static int gl_bars_set;
+void ok_r3d_letterbox(int rows)
+{
+    if (rows <= 0) {
+        REG_DISPCNT &= ~DISPLAY_WIN0_ON;
+        return;
+    }
+    WIN0_X0 = 0;
+    WIN0_X1 = 255;
+    WIN0_Y0 = (uint8_t)rows;
+    WIN0_Y1 = (uint8_t)(192 - rows);
+    WIN_IN = 0x3f;   /* inside: every layer and the blend */
+    WIN_OUT = 0x08;  /* outside: only BG3, the 2D layer, no blend */
+    REG_DISPCNT |= DISPLAY_WIN0_ON;
+    gl_bars_set = 1;
+}
+
 void ok_r3d_swap(void)
 {
     if (!gl_on) return;
     if (!gl_blend_set) REG_BLDCNT = 0; /* no fade this frame: the 2D layer as it is */
     gl_blend_set = 0;
+    if (!gl_bars_set) REG_DISPCNT &= ~DISPLAY_WIN0_ON; /* bars only while someone asks for them */
+    gl_bars_set = 0;
     if (gl_open) gx(FIFO_END, 0, 0, 0);
     if (gx_recording) { /* drawn since ok_r3d_begin and not kept: show it now */
         gx_recording = 0;
@@ -812,6 +850,11 @@ void ok_r3d_swap(void)
 void ok_r3d_layer_alpha(int k16)
 {
     (void)k16;
+}
+
+void ok_r3d_letterbox(int rows)
+{
+    (void)rows;
 }
 
 void ok_r3d_cpu_cull(int on)

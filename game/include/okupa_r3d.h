@@ -131,6 +131,8 @@ int ok_r3d_textures(int *failed);
 void ok_r3d_see_through(void);
 /* On the hardware: the 2D layer over the 3D at k/16 this frame (a fade). */
 void ok_r3d_layer_alpha(int k16);
+/* Hardware only: rows of opaque 2D (cinema bars) at the top and bottom. */
+void ok_r3d_letterbox(int rows);
 /* On the hardware: keep what was drawn since the camera was set, and draw
  * it again under the current camera (0 if nothing is kept); forget it. */
 void ok_r3d_world_keep(void);

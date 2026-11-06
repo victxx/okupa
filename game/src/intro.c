@@ -160,9 +160,9 @@ static const struct {
     int from, to;
     const char *line;
 } captions[] = {
-    {30, 230, "Somewhere, past the edge of the map,"},
-    {290, 490, "an empty attic kept its light on..."},
-    {540, 690, "...waiting for a tiny squatter."},
+    {30, 230, "Past the edge of the map, an attic"},
+    {290, 490, "still had a light on, and Wi-Fi..."},
+    {540, 690, "...so a tiny squatter moved in."},
 };
 
 void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
@@ -182,6 +182,7 @@ void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
     ok_house_outside(top, eye, at, 300, 20, 40, t);
     /* Cinema bars, and the warm glow of the window filling the screen at the end. */
     for (i = 0; i < W * 20; i++) top[i] = top[(H - 20) * W + i] = 0x8000;
+    ok_r3d_letterbox(20); /* the bars stay solid even while the picture fades in */
     if (ok_r3d_on_hardware()) { /* over the hardware's 3D: a solid colour, blended in by the hardware */
         int in = 1000 - ease(t, 0, 50), out = ease(t, 690, OK_FILM_TICKS - 20);
         if (in > 0 || out > 0) {
@@ -198,6 +199,10 @@ void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
         int a = in - out;
         if (a > 0) big_text(bottom, &ok_sans_regular, 128, 86, captions[i].line, 1, mix(RGB(2, 2, 3), RGB(28, 27, 24), a), 0, 99);
     }
-    if (t > 700) big_text(bottom, &ok_sans_bold, 128, 70, "OKUPA", 3, mix(RGB(2, 2, 3), RGB(31, 26, 3), ease(t, 700, 760)), 0, 99);
+    if (t > 700) {
+        big_text(bottom, &ok_sans_bold, 128, 62, "OKUPA", 3, mix(RGB(2, 2, 3), RGB(31, 26, 3), ease(t, 700, 760)), 0, 99);
+        big_text(bottom, &ok_sans_regular, 128, 112, "a pet that lives on Ethereum",
+                 1, mix(RGB(2, 2, 3), RGB(24, 23, 21), ease(t, 730, 790)), 0, 99);
+    }
     big_text(bottom, &ok_sans_regular, 128, 176, "Touch to skip", 1, RGB(9, 9, 10), 0, 99);
 }

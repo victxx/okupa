@@ -177,7 +177,7 @@ static uint16_t art[OK_HOUSE_FRAMES][64 * 64];
 /* Where each frame hangs (centre x, y, half size, tilt in degrees, wood). */
 static const int16_t spots[6][5] = {
     {-1050, 520, 165, -2, 0}, {-660, 545, 150, 2, 1}, {-270, 560, 140, -1, 2},
-    {150, 545, 150, 3, 1},   {-485, 1235, 105, 2, 2}, {485, 1235, 105, -3, 0},
+    {150, 545, 150, 3, 1},   {-540, 1250, 105, 0, 2}, {540, 1250, 105, 0, 2}, /* level with the window, either side */
 };
 
 void ok_house_frame(int slot, const uint8_t *pixels)
