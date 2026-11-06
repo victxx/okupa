@@ -52,8 +52,8 @@ void ok_house_room(ok_monkey_room *room)
     memset(room, 0, sizeof *room);
     room->home_x = 250;
     room->home_z = 300;
-    room->bed_x = -620;
-    room->bed_y = 215;
+    room->bed_x = -680; /* lying on its side, the head on the pillow */
+    room->bed_y = 300;
     room->bed_z = -640;
     room->spot_x[0] = 150, room->spot_z[0] = -380; /* under the window */
     room->spot_x[1] = 520, room->spot_z[1] = -330; /* by the boxes */
@@ -110,8 +110,8 @@ static void light_at(int minute, int lights_off, light *l)
     l->day = minute >= 450 && minute < 1080;
     l->sun = minute >= 420 && minute < 1170 ? (minute - 420) * 1000 / 750 : -1;
     if (lights_off && l->night) {
-        l->amb = ok_v3_make(660, 740, 1300);
-        l->key = ok_v3_make(900, 1060, 1640);
+        l->amb = ok_v3_make(900, 980, 1560); /* moonlight: dark, but it can still be seen */
+        l->key = ok_v3_make(1000, 1160, 1760);
     }
 }
 
@@ -199,7 +199,7 @@ static struct {
     int beam_x[4], beam_y[4], beam_add, candle_x, candle_y, stars[6][2], night, day, sun, lights_off;
 } kept;
 
-static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t *drawing)
+static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t *drawing, int mask_on_floor)
 {
     int i, lit[24][2], lights = 0, on = l->night && !lights_off;
     uint16_t wood = RGB(19, 12, 7), beam_c = RGB(12, 7, 4);
@@ -279,7 +279,7 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     tex(OK_ROOM_TICKING, 10, RGB(16, 18, 24), OK_R3D_EDGE);
     box(-1350, 60, -900, -330, 205, -380);
     tex(OK_ROOM_COTTON, 0, RGB(24, 22, 19), OK_R3D_EDGE);
-    blob(-1130, 245, -640, 150, 52, 140);
+    blob(-1120, 230, -640, 140, 34, 130);
     tex(OK_ROOM_KNIT, 6, RGB(5, 8, 16), OK_R3D_EDGE);
     box(-560, 205, -880, -340, 265, -400);
     /* Cardboard boxes, a little radio on top. */
@@ -328,6 +328,26 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     box(-1290, 95, 170, -1060, 130, 315);
     tex(OK_ROOM_KNIT, 0, RGB(5, 8, 16), OK_R3D_EDGE);
     blob(900, 70, 760, 220, 75, 180);
+    if (mask_on_floor) { /* the smiley mask, tossed on the floor */
+        int k;
+        ok_r3d_push();
+        ok_r3d_translate(P(560, 22, 620));
+        ok_r3d_rotate_x(-DEG(72));
+        ok_r3d_rotate_z(DEG(24));
+        mat(RGB(31, 26, 3), OK_R3D_EDGE);
+        ok_r3d_ellipsoid(P(0, 0, 0), P(105, 105, 20), 14, 5);
+        mat(RGB(3, 3, 2), OK_R3D_EDGE);
+        ok_r3d_ellipsoid(P(-34, 28, 16), P(11, 24, 6), 6, 4);
+        ok_r3d_ellipsoid(P(34, 28, 16), P(11, 24, 6), 6, 4);
+        for (k = 0; k < 4; k++) {
+            int a0 = 200 + k * 35, a1 = a0 + 35;
+            limb_house((int)((int64_t)ok_r3d_cos(DEG(a0)) * 56 / 4096), (int)((int64_t)ok_r3d_sin(DEG(a0)) * 56 / 4096) + 4, 18,
+                       (int)((int64_t)ok_r3d_cos(DEG(a1)) * 56 / 4096), (int)((int64_t)ok_r3d_sin(DEG(a1)) * 56 / 4096) + 4, 18, 7);
+        }
+        limb_house(-100, 10, -6, -170, -40, -10, 7); /* its elastic, trailing */
+        limb_house(-170, -40, -10, -150, -110, -10, 7);
+        ok_r3d_pop();
+    }
     ok_r3d_tile(0);
     ok_r3d_finish();
     /* Light that is not geometry: the bulbs' glow, the candle, the sunbeam. */
@@ -370,12 +390,13 @@ static void dot(uint16_t *f, int x, int y, uint16_t c)
 void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const uint8_t *drawing, const ok_look *look,
                    const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
 {
-    int m = (hour % 24) * 60 + minute % 60, key = m / 5 * 2 + (lights_off != 0), i;
+    int mask_on_floor = look->wear != OK_WEAR_SMILEY;
+    int m = (hour % 24) * 60 + minute % 60, key = (m / 5 * 2 + (lights_off != 0)) * 2 + mask_on_floor, i;
     uint32_t s = sum(drawing), t = a->ticks;
     light l;
     light_at(m, lights_off, &l);
     if (!kept.valid || kept.key != key || kept.art_sum != s) {
-        room(frame, &l, lights_off, drawing);
+        room(frame, &l, lights_off, drawing, mask_on_floor);
         kept.valid = 1;
         kept.key = key;
         kept.art_sum = s;
@@ -384,6 +405,13 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
     ok_r3d_camera(ok_v3_make(0, U(2100), U(4600)), ok_v3_make(0, U(650), 0), 340);
     apply(&l);
     ok_monkey_draw(look, skin, a, face);
+    /* In bed, the knitted blanket over it, up to the shoulders. */
+    if (a->s[OK_SPRING_LIE].x / 256 > 55) {
+        tex(OK_ROOM_KNIT, 0, RGB(5, 8, 16), OK_R3D_EDGE);
+        ok_r3d_ellipsoid(P(a->room.bed_x + 90, 318 + (int)((int64_t)ok_r3d_sin((int)(a->ticks * 10u)) * 6 / 4096), a->room.bed_z + 20),
+                         P(300, 132, 250), 12, 7);
+        ok_r3d_tile(0);
+    }
     ok_r3d_finish();
     if (kept.sun) beam(frame, kept.beam_x, kept.beam_y, kept.beam_add, 1); /* standing in the sun, it is lit too */
     ok_monkey_face_draw(frame, face);

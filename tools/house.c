@@ -26,7 +26,7 @@ static void still(const char *dir, const char *name, int hour, int minute, int m
     static ok_monkey_anim a;
     ok_monkey_room room;
     ok_monkey_face face;
-    ok_look look = {OK_WEAR_SMILEY, OK_TOP_HOODIE, 0};
+    ok_look look = {OK_WEAR_NONE, OK_TOP_HOODIE, 0};
     char path[512];
     int i;
     ok_house_room(&room);
@@ -51,7 +51,7 @@ static void film(const char *dir)
     };
     ok_monkey_room room;
     ok_monkey_face face;
-    ok_look look = {OK_WEAR_SMILEY, OK_TOP_HOODIE, 0};
+    ok_look look = {OK_WEAR_NONE, OK_TOP_HOODIE, 0};
     char path[512];
     int t, k = 0, mood = OK_POSE_IDLE, n = 0;
     ok_house_room(&room);

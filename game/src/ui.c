@@ -464,7 +464,7 @@ void ok_ui_init(ok_ui *u)
     ok_monkey_room room;
     memset(u, 0, sizeof *u);
     u->last_x = u->last_y = -1;
-    u->look.wear = OK_WEAR_SMILEY;
+    u->look.wear = OK_WEAR_NONE; /* the smiley mask lies on the floor until it is worn */
     ok_house_room(&room);
     ok_monkey_init(&u->anim, &room, 0, 0x6f6b7570u);
 }
