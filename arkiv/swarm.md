@@ -2,7 +2,7 @@
 
 | Lives on | What | Why there |
 |---|---|---|
-| Swarm | The picture: 64×64, four tones, 1030 B, uploaded with `Swarm-Encrypt: true` | Content-addressed and censorship-resistant storage. The picture can be bigger than a transaction should carry |
+| Swarm | The picture, uploaded with `Swarm-Encrypt: true`: a small one (64×64, 1030 B) or a big one for the cave (256×192, four tones, 12 KB, made from any photo) | Content-addressed and censorship-resistant storage. The picture can be bigger than a transaction should carry |
 | Arkiv | The mailbox entry, with the **sealed** Swarm reference in the `sealed` field | Queryable by recipient without scanning a chain; signed by the sender |
 | Ethereum | The gift itself: `OKPA 01 05` + the same sealed reference | The permanent record of who gave what to whom |
 

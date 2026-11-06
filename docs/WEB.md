@@ -41,6 +41,7 @@ new kind.
 | `02` | photo | `OKPA 01 02` + 64×64 2 bpp (1024 B) | web. On Swarm it is the picture file itself |
 | `03` | gift picture, inline | `OKPA 01 03` + drawing or photo | web now; the DSi later. This is the web → DSi form |
 | **`05`** | **gift picture on Swarm (proposed)** | `OKPA 01 05` + seal (209 B) | web |
+| **`06`** | **big photo (proposed, never calldata)** | The file on Swarm: `OKPA 01 06` + 256×192 2 bpp (12,288 B) | web cave; DSi cave later |
 
 **The seal (kind 05)**
 - Plaintext (96 B): Swarm encrypted reference (chunk address 32 ‖ decryption key 32) ‖ `keccak256(picture)` (32).
@@ -64,6 +65,29 @@ new kind.
 - **Owner:** the sender's own key, the same secp256k1 key as on Ethereum. Arkiv's chain sets `$owner`, which ties the entry to a signer.
 - **Expiry:** 7 days on the testnet, 1 day locally. A mailbox is a notification, not the record; the gift stays on Ethereum forever.
 - **Reference:** Arkiv entities are public. The prize page warns about this too: an encrypted Swarm reference contains its key. So Arkiv holds only the seal, never the raw reference.
+
+## Two kinds of gift: small on the wall, big in the cave
+
+| | Small gift | Big gift |
+|---|---|---|
+| Picture | 64×64 drawing | 256×192 photo in four tones (the DSi's screen size), dithered from any image on the sender's computer |
+| Where the picture lives | Inside the Ethereum transaction (`OKPA 01 03`) | On Swarm, encrypted (`OKPA 01 06`, 12 KB) |
+| What the transaction carries | The picture | The sealed Swarm reference (`OKPA 01 05`, 215 B): the same size as a small Swarm gift |
+| Cost on mainnet today | ≈ €0.014 | ≈ €0.010 + a share of a Swarm postage batch (≈ €0.06 for 30 days, holding thousands of pictures) |
+| Found through | The chain (the DSi following blocks), or Arkiv | Arkiv (web), or the chain (DSi) |
+| Hangs | On the wall | In **the cave**, a darker room for big pictures, opened full size |
+
+The rule is easy to say:
+- the chain carries the act;
+- Swarm carries the bulk;
+- Arkiv is the mailbox.
+
+A big gift is something the DSi cannot make itself, since it has no web and no photo
+library. A friend on another platform can give it one.
+
+Tested locally: monkey A turned an image into a big picture, sent it, and monkey B found it
+in Arkiv, checked it, opened it and put it in the cave. Evidence:
+`run/web-cave-20261107/evidence.json`, tx `0x72870234…261c`, entity `0x50edc786…dd7a`.
 
 ## What the receiver checks before showing anything
 
@@ -111,31 +135,56 @@ new kind.
 | Web → DSi inline gift (kind 03, 1 bpp) | **Real** (local, to the DSi stand-in's address) | tx `0xb5a28169…cd8a` |
 | Visit on Sepolia/mainnet | Works through Blockscout (finds) + RPC (verifies). No real DSi act on a public chain was available to show at the time of writing | |
 | anon-rpc reads for visits | **Real**: passthrough (mainnet specifier) and Nox mixnet (Sepolia specifier) work. Tor failed tonight (demo gateway timeout) | `run/web-anonrpc-20261106/evidence.json` |
-| Same flow on public testnets (Sepolia + Swarm testnet + Arkiv Rabdi) | **Next.** Not done. Needs: Sepolia ETH for each web monkey; tGLM from the Rabdi faucet (wallet sign-in + CAPTCHA, which only a person can do); a Bee light node on the Swarm testnet with sBZZ for a postage batch | |
+| Same flow in public (Ethereum mainnet + Swarm mainnet + Arkiv Rabdi) | **Next.** Code ready. Waiting for funds: mainnet ETH for each monkey, tGLM from the Rabdi faucet (sign-in + CAPTCHA, by a person), xDAI + xBZZ for the Bee node | |
+| Big gift → the cave (web ↔ web) | **Real** (local) | `run/web-cave-20261107/` |
+| Mainnet sends with cost shown and approval asked first; gas from the EIP-7623 floor | **Real** (tested with a refusal; nothing sent) | |
+| Bee light node on Swarm mainnet | Running, waiting for xDAI + xBZZ | node `0x5AC1Fd51…16FE` |
 | DSi reads gifts sent to it | **Design only**, see below | |
 | Kind 05 in `core/` | **Next.** Proposed here; `core/` not touched | |
 
 Nothing was sent to any public network, and no real funds were spent.
 
-## Design: the DSi receiving a gift (not built)
+## How the DSi takes part (design; not built tonight)
 
-The DSi cannot use kind 05 without reaching a Swarm gateway, so it accepts **inline gifts
-(kind 03)** only. They are self-contained in the transaction, like its own drawings.
+A monkey is an Ethereum account that speaks `OKPA 01 xx`. A DSi monkey and a web monkey
+are friends in the same way two DSi monkeys would be.
 
-1. **Where to look.** A gift to the DSi is a transaction *to* its address. The DSi does not
-   scan the chain. It asks the Arkiv mailbox for `to = me AND chain = id` and gets
-   (tx hash, block number) pairs. Rabdi's RPC is HTTPS JSON-RPC, and it negotiates TLS 1.2
-   with ECDHE-ECDSA (checked with `openssl s_client`), which the console's BearSSL already
-   speaks to 0G. So this read could be direct, needing only a pinned root, with no gateway
-   of ours. Not tried on hardware. Arkiv is a hint here, never a source of truth.
-2. **Check it over P2P.**
-   - For each hint, the DSi asks several eth/69 peers for that block's header and body. This is the same path as `ok_block` and its inclusion check on `main`.
-   - It recomputes the header hash and `transactionsRoot`, finds the transaction, and recovers the sender.
-   - It checks `to == me`, value 0 and an `OKPA 01 03` payload.
-   - Receipts (`GetReceipts`, `receiptsRoot`) prove success.
-   - Like the console's own inclusion check, this trusts that several independent peers do not lie at once. It does not verify consensus.
-3. **Friends only.** It shows the gift only if the sender is in its friends list (a QR friend code), as `docs/PLAN.md` says.
-4. **Without Arkiv.** The DSi can still find gifts by following new blocks while it holds a session. Arkiv only saves it from scanning blocks it missed while switched off.
+| Step | DSi | Web | Built |
+|---|---|---|---|
+| Become friends | Shows its friend code as a QR (address + public key) | Scans or pastes it | DSi shows an address QR today; the public key needs to be added |
+| Web visits DSi | — | Reads its hellos and drawings from the chain, checks each signature | **Yes** |
+| Small gift web → DSi | Follows new blocks over P2P (as for its own inclusion check), finds an `OKPA 01 03` transaction to itself from a friend, hangs it | Sends it | Web side **yes**; DSi side next (`core/` + `game/`) |
+| Small gift DSi → web | Signs `OKPA 01 03` to the friend's address and gossips it over devp2p | Finds it in a visit, or in Arkiv if someone indexed it | DSi side next |
+| Big gift web → DSi | Sees the `OKPA 01 05` transaction in a block, opens the seal with its key (the ECIES it already has), fetches the encrypted chunks from a public Swarm gateway over HTTPS, decrypts them on the console, checks the keccak, shows the photo in its cave | Sends it | Web side **yes**; DSi side later |
+| Gifts that arrived while it was off | Asks Arkiv `to = me` over HTTPS for (tx, block) hints, then checks each block over P2P | — | Later |
+
+Notes:
+- **TLS.** `api.gateway.ethswarm.org` and Rabdi's RPC both negotiate TLS 1.2, checked with `openssl s_client`. That is what the console's BearSSL already uses for 0G; each needs a pinned root. Not tried on hardware.
+- **The DSi fetches chunks, not the picture.** It never sends the decryption key: it asks for the encrypted chunks by address and decrypts them itself. Swarm encrypts chunks with a Keccak-based keystream, and the core already has Keccak. So a gateway can withhold a picture, but it cannot read or change it.
+- **Arkiv is only a hint.** Every gift is checked against block bodies from several independent peers: header hash, `transactionsRoot`, then `receiptsRoot` for success. Like the console's own inclusion check, this trusts that the peers do not all lie together. It does not verify consensus.
+- **Friends only.** The DSi shows a gift only if the sender is in its friends list.
+- **The sending path stays pure.** The DSi still signs and gossips over devp2p only. Swarm and Arkiv are used for reading bulk bytes and hints, never for sending.
+
+## Booth demo for the Swarm and Arkiv teams (about 2 minutes)
+
+Two laptops (or two browser windows), monkey A and monkey B, and the DSi on the table.
+
+1. **Friends (10 s).** B shows its friend code; A pastes it.
+2. **Small gift (20 s).** A draws a 64×64 picture and sends it. The transaction carries the picture itself. B presses **Check mailbox** and it hangs on the wall.
+3. **Big gift (40 s).** A drops in a photo from the laptop. It becomes 256×192 in four tones and is uploaded to Swarm, encrypted. Show the log:
+   - the Swarm chunk address (the key half stays secret);
+   - the 215 B sealed transaction;
+   - the Arkiv entity.
+
+   B checks the mailbox and the photo appears in **the cave**. Click it to see it full size.
+4. **"Can Arkiv lie?" (20 s).** Run `node web/scripts/lab.mjs forge <B> <tx>` and check again. Two fake entries are rejected with the reason shown: the index can hide, never forge.
+5. **"Is it really private?" (15 s).** Open the Swarm chunk address in a gateway: noise. Open the Arkiv entity in the explorer: a sealed blob. Only B's key opens it.
+6. **The DSi (15 s).** Visit the DSi's address from the web and show its hellos and drawings, signed on the console and sent with no RPC. Close with: "Next, the DSi opens the cave."
+
+**What to have ready:**
+- the Bee light node on Swarm mainnet with a postage batch;
+- both monkeys funded with mainnet ETH and Rabdi tGLM;
+- a fallback: the local stack (`web/scripts/stack.sh up`), in case the venue Wi-Fi blocks something.
 
 ## Prize fit (ETHGlobal Mumbai, Arkiv)
 
