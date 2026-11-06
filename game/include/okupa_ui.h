@@ -12,7 +12,11 @@
 #define OK_UI_H 192
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
-       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING };
+       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING,
+       /* Buttons the platform may act on (the okupa has already said a hint):
+        * look through the camera, listen through the microphone, a game
+        * (it guesses the sketchbook's drawing), its letters, a friend. */
+       OK_UI_PHOTO, OK_UI_TALK, OK_UI_GAMES, OK_UI_MAIL, OK_UI_FRIEND };
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
 #define OK_UI_WALL 6 /* framed drawings, each hung only once seen in a block */
@@ -45,7 +49,8 @@ typedef struct {
     ok_monkey_anim anim;
     ok_look look;
     int ready, happy_ticks;
-    int pressed, pressed_ticks; /* the button just tapped (1..8, 100 = Wear), for its pressed look */
+    int pressed, pressed_ticks; /* the button just tapped (1..12, 100 Wear, 101 Out, 102.. a tab), for its pressed look */
+    int page;                   /* the home screen's menu: 0 care, 1 more */
     int sound;                  /* a sound to play, OK_SFX_* + 1; the platform plays it and clears it */
     int heard_bites, heard_move;
     uint32_t intro_t;           /* ticks into the splash or the opening film */
@@ -69,6 +74,13 @@ typedef struct {
      * player, and whether it is listening to the answer. */
     char thought[61], ask[61];
     int thought_ticks, ask_ticks, listening;
+    /* What its mind makes: the name of the thing on the floor, a drawing of
+     * its own (in a gilt frame), last night's dream (BGR555, up to 128x128). */
+    char thing_name[21], thing_line[48];
+    uint8_t own[64 * 64 / 8];
+    int own_set;
+    uint16_t dream[128 * 128];
+    int dream_w, dream_h, dream_ticks;
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);
@@ -89,6 +101,23 @@ void ok_ui_ask(ok_ui *u, const char *question);
 /* 0 off, 1 listening (a microphone by its head while L is held; it looks
  * up), 2 thinking the answer over (a cloud of dots). Shown over any bubble. */
 void ok_ui_listening(ok_ui *u, int state);
+/* The okupa's mind steers its body: walk to x, z (0..100 across the floor
+ * of where it is, left to right and back to front as seen on screen; -1
+ * stays) at the next break, look at a thing (OK_GAZE_* from okupa_monkey.h,
+ * or -1 for its own glances) and move with an energy 0..100 (50 as ever,
+ * -1 too) until the next call. */
+void ok_ui_body(ok_ui *u, int x, int z, int gaze, int energy);
+/* Something it made: up to 16 boxes {x, y, z, w, h, d, colour} on a 16-cube
+ * grid (y up from the floor, colour 0..15), set down by it on the floor,
+ * with a name (up to 20 characters). A new one replaces the old; n 0 clears. */
+void ok_ui_drop_object(ok_ui *u, const uint8_t boxes[][7], int n, const char *name);
+/* A 64x64 drawing it made itself (the ok_drawing_get layout): hung in the
+ * next free frame on the attic wall in a gilt frame, or on the terrace's
+ * last easel when the wall is full. The player's sketchbook is untouched. */
+void ok_ui_okupa_drawing(ok_ui *u, const uint8_t pixels[512]);
+/* Last night's dream: a picture of DS colours (w, h up to 128), shown on the
+ * top screen in a dream cloud for about 20 s or until the player taps. */
+void ok_ui_dream(ok_ui *u, const uint16_t *rgb15, int w, int h);
 /* One frame (1/60 s) passed; returns OK_UI_CHANGED when the screens need
  * redrawing (30 times a second: the okupa is always moving a little). */
 int ok_ui_tick(ok_ui *u, const ok_pet *p);

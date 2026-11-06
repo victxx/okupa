@@ -28,15 +28,43 @@ ok_result ok_act_drawing(const uint8_t pixels[OK_DRAWING_BYTES], uint8_t *out, s
     return r;
 }
 
+static int printable(const uint8_t *s, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+        if (s[i] < 0x20 || s[i] >= 0x7f) return 0;
+    return 1;
+}
+
+ok_result ok_act_letter(const char *text, uint8_t *out, size_t cap, size_t *len)
+{
+    size_t n;
+    ok_result r;
+    if (!text) return OK_ARGUMENT;
+    n = strlen(text);
+    if (!n || n > OK_LETTER_MAX || !printable((const uint8_t *)text, n)) return OK_ARGUMENT;
+    r = header(OK_ACT_LETTER, n, out, cap, len);
+    if (r == OK_OK) memcpy(out + OK_ACT_HEADER, text, n);
+    return r;
+}
+
 ok_result ok_act_decode(const uint8_t *data, size_t n, ok_act *act)
 {
     if (!data || !act) return OK_ARGUMENT;
     act->drawing = NULL;
+    act->text = NULL;
+    act->text_len = 0;
     if (n < OK_ACT_HEADER || memcmp(data, magic, 4) || data[4] != 1) return OK_FORMAT;
     act->kind = data[5];
     if (act->kind == OK_ACT_HELLO && n == OK_ACT_HEADER) return OK_OK;
     if (act->kind == OK_ACT_DRAWING && n == OK_ACT_HEADER + OK_DRAWING_BYTES) {
         act->drawing = data + OK_ACT_HEADER;
+        return OK_OK;
+    }
+    if (act->kind == OK_ACT_LETTER && n > OK_ACT_HEADER && n <= OK_ACT_HEADER + OK_LETTER_MAX &&
+        printable(data + OK_ACT_HEADER, n - OK_ACT_HEADER)) {
+        act->text = (const char *)data + OK_ACT_HEADER;
+        act->text_len = n - OK_ACT_HEADER;
         return OK_OK;
     }
     return OK_FORMAT;

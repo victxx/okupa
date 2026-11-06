@@ -128,14 +128,15 @@ static void note_tx(const ok_tx *tx, const uint8_t *raw, size_t len, const uint8
     }
 }
 
-/* A zero-value transaction to itself carrying an Okupa act (hello, or a
- * drawing when pixels is given), signed here with the console's key. */
-int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
-                       uint8_t hash[32])
+/* A zero-value transaction to itself carrying an Okupa act, signed here with
+ * the console's key. The fees are capped: a 0.1 gwei tip and at most 2 gwei a
+ * unit of gas (today's base fee is far below), on a gas limit just above what
+ * the act needs, so the most it can ever cost is gas_limit x 2 gwei. */
+static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_t act_len, uint64_t gas_limit,
+                    const uint8_t *to, const char *kind, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])
 {
     char text[80] = {0};
-    uint8_t priv[32], pub[64], act[OK_ACT_MAX];
-    size_t act_len;
+    uint8_t priv[32], pub[64];
     unsigned i, v;
     ok_tx tx;
     FILE *f;
@@ -143,29 +144,52 @@ int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels,
     if (!key_path || !(f = fopen(key_path, "r"))) return 0;
     if (fgets(text, sizeof text, f)) {
         for (i = 0; i < 32 && sscanf(text + 2 * i, "%2x", &v) == 1; i++) priv[i] = (uint8_t)v;
-        if (i == 32 && ok_keys_public(priv, pub) == OK_OK &&
-            (pixels ? ok_act_drawing(pixels, act, sizeof act, &act_len) : ok_act_hello(act, sizeof act, &act_len)) == OK_OK) {
+        if (i == 32 && ok_keys_public(priv, pub) == OK_OK) {
             uint32_t t0;
             memset(&tx, 0, sizeof tx);
             tx.chain_id = chain_id;
             tx.nonce = nonce;
             tx.max_priority_fee = 100000000ull; /* 0.1 gwei */
             tx.max_fee = 2000000000ull;         /* 2 gwei */
-            /* A hello uses 21 210; a drawing about 21 000 + 16 x 518, or the calldata floor (with room for a higher one). */
-            tx.gas_limit = pixels ? 60000 : 30000;
-            ok_keys_address(pub, tx.to); /* to itself */
+            tx.gas_limit = gas_limit;
+            if (to) memcpy(tx.to, to, 20); /* a letter to a friend's address */
+            else ok_keys_address(pub, tx.to); /* to itself */
             tx.data = act;
             tx.data_len = act_len;
             t0 = cpuGetTiming();
             ok = ok_tx_sign(&tx, priv, out, cap, len, hash) == OK_OK;
-            if (ok) note_tx(&tx, out, *len, hash, (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33514u),
-                            pixels ? "drawing" : "hello");
+            if (ok) note_tx(&tx, out, *len, hash, (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33514u), kind);
         }
     }
     fclose(f);
     ok_wipe(priv, sizeof priv);
     ok_wipe(text, sizeof text);
     return ok;
+}
+
+/* A hello, or a drawing when pixels is given. A hello uses 21 210 gas; a
+ * drawing about 21 000 + 16 x 518, or the calldata floor (with room for a
+ * higher one). */
+int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
+                       uint8_t hash[32])
+{
+    uint8_t act[OK_ACT_MAX];
+    size_t act_len;
+    if ((pixels ? ok_act_drawing(pixels, act, sizeof act, &act_len) : ok_act_hello(act, sizeof act, &act_len)) != OK_OK)
+        return 0;
+    return sign_act(chain_id, nonce, act, act_len, pixels ? 60000 : 30000, NULL, pixels ? "drawing" : "hello", out, cap, len,
+                    hash);
+}
+
+/* A letter the okupa's mind wrote: up to 140 bytes need at most 21 000 +
+ * 40 x 146 = 26 840 gas (the calldata floor); 40 000 leaves room. */
+int ok_dsi_account_letter(uint64_t chain_id, uint64_t nonce, const char *text, const uint8_t *to, uint8_t *out,
+                          size_t cap, size_t *len, uint8_t hash[32])
+{
+    uint8_t act[OK_ACT_HEADER + OK_LETTER_MAX];
+    size_t act_len;
+    if (ok_act_letter(text, act, sizeof act, &act_len) != OK_OK) return 0;
+    return sign_act(chain_id, nonce, act, act_len, 40000, to, "letter", out, cap, len, hash);
 }
 
 int ok_dsi_account_hello(uint64_t chain_id, uint64_t nonce, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])

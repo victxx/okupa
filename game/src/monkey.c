@@ -139,6 +139,18 @@ static const uint8_t damp[OK_SPRINGS] = {
 
 static int32_t isqrt(int32_t v);
 
+static int eases(int i)
+{
+    switch (i) {
+    case OK_SPRING_LEAN: case OK_SPRING_ROLL: case OK_SPRING_NOD: case OK_SPRING_TURN: case OK_SPRING_TILT:
+    case OK_SPRING_RAISE_L: case OK_SPRING_RAISE_R: case OK_SPRING_FWD_L: case OK_SPRING_FWD_R: case OK_SPRING_MASK:
+    case OK_SPRING_CHEST: case OK_SPRING_ELBOW_L: case OK_SPRING_ELBOW_R:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static uint32_t rnd(ok_monkey_anim *a)
 {
     uint32_t x = a->seed ? a->seed : 0x9e3779b9u;
@@ -170,6 +182,7 @@ static void start(ok_monkey_anim *a, int move)
 void ok_monkey_init(ok_monkey_anim *a, const ok_monkey_room *room, int asleep, uint32_t seed)
 {
     memset(a, 0, sizeof *a);
+    a->energy = 50;
     a->room = *room;
     a->seed = seed | 1;
     a->x = a->goal_x = room->home_x;
@@ -210,6 +223,11 @@ void ok_monkey_direct(ok_monkey_anim *a, int move)
 
 static void pick(ok_monkey_anim *a, int wear)
 {
+    if (a->go_pending) { /* somewhere to be first */
+        a->go_pending = 0;
+        start(a, OK_MOVE_GO);
+        return;
+    }
     if (a->directed) {
         start(a, a->directed - 1);
         a->directed = 0;
@@ -250,7 +268,7 @@ static int walk(ok_monkey_anim *a, int32_t gx, int32_t gz)
          * planted foot stays where it was put. */
         int ang = ok_r3d_atan2(dx, dz), yaw = (int)((int64_t)a->s[OK_SPRING_YAW].x * OK_TURN / (360 * Q));
         int off = ((ang - yaw) & (OK_TURN - 1)) > OK_TURN / 2 ? OK_TURN - ((ang - yaw) & (OK_TURN - 1)) : (ang - yaw) & (OK_TURN - 1);
-        int32_t blend = a->s[OK_SPRING_WALK].x / Q, speed = 6 * (blend < 0 ? 0 : blend > 100 ? 100 : blend) / 100;
+        int32_t blend = a->s[OK_SPRING_WALK].x / Q, speed = 6 * (blend < 0 ? 0 : blend > 100 ? 100 : blend) * (a->energy + 50) / 10000;
         if (off > OK_TURN / 6) speed = speed / 3; /* mostly turning on the spot */
         if (d < 40 && speed > 2) speed = 2;     /* arriving */
         a->x += (int32_t)((int64_t)ok_r3d_sin(ang) * speed / 4096);
@@ -267,9 +285,21 @@ static int walk(ok_monkey_anim *a, int32_t gx, int32_t gz)
 static void done(ok_monkey_anim *a, int min, int range)
 {
     start(a, OK_MOVE_IDLE);
-    a->next_idle = a->directed ? 20 : 240 + 2 * (min + below(a, range)); /* a move asked for goes next */
+    a->next_idle = a->directed ? 20 : (240 + 2 * (min + below(a, range))) * 100 / (a->energy + 50); /* a move asked for goes next; lively, sooner */
 }
 
+
+void ok_monkey_body(ok_monkey_anim *a, int go, int32_t x, int32_t z, int gaze, const int32_t at[3], int energy)
+{
+    if (go) {
+        a->room.home_x = x;
+        a->room.home_z = z;
+        a->go_pending = 1;
+    }
+    a->gaze_mode = gaze >= 0 && gaze < OK_GAZES ? gaze + 1 : 0;
+    if (a->gaze_mode) a->gaze_at[0] = at[0], a->gaze_at[1] = at[1], a->gaze_at[2] = at[2];
+    a->energy = energy < 0 ? 50 : energy > 100 ? 100 : energy;
+}
 
 /* ----------------------------------------------------------------- tail */
 
@@ -411,7 +441,16 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
 
     /* Glances: every second or three it looks somewhere else, quickly, the way
      * eyes jump, and the head follows on its spring. */
-    if (--a->gaze_t <= 0) {
+    if (a->gaze_mode) { /* looking at something it was told to: the head turns to it, within reach */
+        int32_t dx = a->gaze_at[0] - a->x, dy = a->gaze_at[1] - 600, dz = a->gaze_at[2] - a->z, flat;
+        int yaw = ok_r3d_atan2(dx, dz) * 360 / OK_TURN, body = a->s[OK_SPRING_YAW].x / Q, d;
+        flat = isqrt(dx / 4 * (dx / 4) + dz / 4 * (dz / 4)) * 4;
+        d = ((yaw - body) % 360 + 540) % 360 - 180;
+        a->gaze_turn = d > 30 ? 30 : d < -30 ? -30 : d;
+        d = -(ok_r3d_atan2(dy, flat > 0 ? flat : 1) * 360 / OK_TURN);
+        if (d < -180) d += 360;
+        a->gaze_nod = d > 20 ? 20 : d < -20 ? -20 : d;
+    } else if (--a->gaze_t <= 0) {
         a->gaze_turn = below(a, 29) - 14;
         a->gaze_nod = below(a, 11) - 5;
         a->gaze_t = 50 + below(a, 160);
@@ -660,6 +699,13 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         a->x = a->room.bed_x;
         a->z = a->room.bed_z + 420;
         break;
+    case OK_MOVE_GO:
+        yaw_free = 0;
+        if (walk(a, a->room.home_x, a->room.home_z)) {
+            start(a, OK_MOVE_IDLE);
+            a->next_idle = a->directed ? 10 : 60;
+        }
+        break;
     case OK_MOVE_TO_DOOR:
         yaw_free = 0;
         if (!a->at_door && walk(a, a->room.door_x, a->room.door_z)) a->at_door = 1;
@@ -723,9 +769,24 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         while (d > 180 * Q) d -= 360 * Q, a->s[OK_SPRING_YAW].x += 360 * Q;
         while (d < -180 * Q) d += 360 * Q, a->s[OK_SPRING_YAW].x -= 360 * Q;
     }
+    /* The pose's targets glide to a new pose (ease in, ease out) instead of
+     * jumping; the springs then follow them. Feet, squash, the ball, the
+     * tail and the turn keep their own, quicker targets. */
+    if (!a->eased_ready) {
+        for (i = 0; i < OK_SPRINGS; i++) a->eased[i] = t[i] * Q;
+        a->eased_ready = 1;
+    }
     for (i = 0; i < OK_SPRINGS; i++) {
         ok_spring *s = &a->s[i];
-        s->v += (t[i] * Q - s->x) * stiff[i] / 2048 - s->v * damp[i] / 256;
+        int32_t goal = t[i] * Q;
+        if (eases(i)) {
+            a->eased[i] += (goal - a->eased[i]) / 7;
+            goal = a->eased[i];
+        }
+        {
+            int k = eases(i) ? stiff[i] * (a->energy + 50) / 100 : stiff[i]; /* energy: quicker or lazier poses */
+            s->v += (goal - s->x) * (k > 255 ? 255 : k) / 2048 - s->v * damp[i] / 256;
+        }
         s->x += s->v;
     }
 
@@ -757,12 +818,12 @@ static int solid(uint16_t c)
 
 static void blob(int x, int y, int z, int rx, int ry, int rz)
 {
-    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 8, 5);
+    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 5, 3);
 }
 
 static void limb(int x0, int y0, int z0, int x1, int y1, int z1, int r)
 {
-    ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), H(r), 6);
+    ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), H(r), 4);
 }
 
 static int val(const ok_monkey_anim *a, int s)
@@ -937,8 +998,8 @@ static void part_rows(const uint16_t *skin, int which, int id, int from, int to)
 static void hand(const uint16_t *skin, int s, int id)
 {
     part(skin, OK_PART_HANDS, id);
-    ok_r3d_ellipsoid(P(s * 4, -28, 12), P(46, 42, 36), 8, 6);   /* palm */
-    ok_r3d_ellipsoid(P(s * 4, -58, 16), P(38, 24, 30), 8, 5);   /* curled fingers */
+    ok_r3d_ellipsoid(P(s * 4, -28, 12), P(46, 42, 36), 5, 3);   /* palm */
+    ok_r3d_ellipsoid(P(s * 4, -58, 16), P(38, 24, 30), 5, 3);   /* curled fingers */
     ok_r3d_ellipsoid(P(-s * 22, -20, 36), P(16, 24, 16), 6, 4); /* thumb */
 }
 
@@ -1025,70 +1086,78 @@ static void stroke(int x0, int y0, int z0, int x1, int y1, int z1, int r)
 
 static void face3d(const uint16_t *skin, const ok_monkey_face *f)
 {
-    int s;
+    int s, hz = ok_r3d_on_hardware() ? 24 : 0; /* further out on the hardware, whose depth is coarser */
     for (s = -1; s <= 1; s += 2) {
-        int x = s * 72 + f->look * 8, y = 644;
+        int x = s * 72 + f->look * 8, y = 644, x0, y0, x1, y1;
+        int32_t d0, d1;
+        /* An eye turned away from the camera (the far one, in profile) is
+         * not drawn: it would show past the edge of the head. */
+        if (ok_r3d_project(P(x, y, 200 + hz), &x0, &y0, &d0) && ok_r3d_project(P(x + s * 80, y, 250 + hz), &x1, &y1, &d1) && d1 <= d0) continue;
         switch (f->eyes) {
         case 'j': /* smiling eyes, ^ ^ */
             solid(INK3);
-            stroke(x - 26, y - 8, 220, x - 12, y + 6, 226, 7);
-            stroke(x - 12, y + 6, 226, x + 12, y + 6, 226, 7);
-            stroke(x + 12, y + 6, 226, x + 26, y - 8, 220, 7);
+            stroke(x - 26, y - 8, 220 + hz, x - 12, y + 6, 226 + hz, 7);
+            stroke(x - 12, y + 6, 226 + hz, x + 12, y + 6, 226 + hz, 7);
+            stroke(x + 12, y + 6, 226 + hz, x + 26, y - 8, 220 + hz, 7);
             break;
         case 's': /* asleep, u u */
             solid(INK3);
-            stroke(x - 26, y + 4, 220, x - 12, y - 8, 226, 7);
-            stroke(x - 12, y - 8, 226, x + 12, y - 8, 226, 7);
-            stroke(x + 12, y - 8, 226, x + 26, y + 4, 220, 7);
+            stroke(x - 26, y + 4, 220 + hz, x - 12, y - 8, 226 + hz, 7);
+            stroke(x - 12, y - 8, 226 + hz, x + 12, y - 8, 226 + hz, 7);
+            stroke(x + 12, y - 8, 226 + hz, x + 26, y + 4, 220 + hz, 7);
             break;
         case 'b': /* a blink */
             solid(INK3);
-            stroke(x - 24, y - 4, 224, x + 24, y - 4, 224, 6);
+            stroke(x - 24, y - 4, 224 + hz, x + 24, y - 4, 224 + hz, 6);
             break;
         default:
-            solid(INK3);
-            ok_r3d_ellipsoid(P(x, y - 6, 204), P(34, 46, 24), 6, 4);
-            ok_r3d_material(WHITE, ++next_id, OK_R3D_UNLIT);
-            ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 227), P(11, 12, 5), 4, 3);
-            ok_r3d_ellipsoid(P(x + 9, y - 20, 226), P(5, 5, 4), 4, 2); /* a second, small glint */
+            { /* a white eye with a small dark pupil and a glint: friendly, not a black hole */
+                int dy = f->eyes == 'u' ? 8 : f->eyes == 'd' ? -10 : 0, px = x + f->look * 5, fz = hz ? 10 : 0;
+                ok_r3d_material(RGB(31, 31, 29), ++next_id, OK_R3D_UNLIT | OK_R3D_EDGE);
+                ok_r3d_ellipsoid(P(x, y - 6, 197 + hz), P(34, 46, 24), 6, 4); /* sunk in, so it never stands out in profile */
+                solid(INK3);
+                ok_r3d_ellipsoid(P(px, y - 10 + dy, 214 + hz + fz), P(26, 33, 8), 6, 3);
+                ok_r3d_material(WHITE, ++next_id, OK_R3D_UNLIT);
+                ok_r3d_ellipsoid(P(px - 8, y + 4 + dy, 222 + hz + 2 * fz), P(8, 9, 3), 4, 2);
+            }
             if (f->eyes == 'h') { /* heavy lids */
                 part(skin, OK_PART_HEAD, f->head_id);
-                ok_r3d_ellipsoid(P(x, y + 22, 210), P(36, 26, 24), 8, 5);
+                ok_r3d_ellipsoid(P(x, y + 22, 210 + hz), P(36, 26, 24), 6, 3);
             }
             if (f->eyes == 'd') { /* worried brows, high in the middle */
                 solid(RGB(9, 5, 3));
-                stroke(x + s * 26, y + 50, 226, x - s * 18, y + 62, 228, 7);
+                stroke(x + s * 26, y + 50, 226 + hz, x - s * 18, y + 62, 228 + hz, 7);
             }
         }
     }
     solid(RGB(13, 7, 5)); /* a small soft nose */
-    ok_r3d_ellipsoid(P(0, 582, 236), P(20, 12, 8), 8, 4);
+    ok_r3d_ellipsoid(P(0, 582, 232 + hz), P(20, 12, 7), 8, 4);
     solid(INK3);
     switch (f->mouth) {
     case 'O':
     case 'y': {
         int tall = f->mouth == 'y' ? 30 : 22;
-        ok_r3d_ellipsoid(P(0, 522, 224), P(f->mouth == 'y' ? 22 : 30, tall, 12), 8, 6);
+        ok_r3d_ellipsoid(P(0, 522, 219 + hz), P(f->mouth == 'y' ? 22 : 30, tall, 12), 8, 6);
         ok_r3d_material(RGB(30, 12, 13), ++next_id, 0);
-        ok_r3d_ellipsoid(P(0, 522 - tall / 2, 231), P(16, 9, 6), 6, 4); /* tongue */
+        ok_r3d_ellipsoid(P(0, 522 - tall / 2, 226 + hz), P(16, 9, 6), 6, 4); /* tongue */
         break;
     }
-    case 'c': ok_r3d_ellipsoid(P(0, 524, 226), P(18, 14, 10), 6, 4); break;
-    case '.': ok_r3d_ellipsoid(P(0, 524, 228), P(12, 10, 6), 6, 4); break;
-    case '-': stroke(-24, 526, 229, 24, 526, 229, 5); break;
+    case 'c': ok_r3d_ellipsoid(P(0, 524, 221 + hz), P(18, 14, 10), 6, 4); break;
+    case '.': ok_r3d_ellipsoid(P(0, 524, 223 + hz), P(12, 10, 6), 6, 4); break;
+    case '-': stroke(-24, 526, 224 + hz, 24, 526, 224 + hz, 5); break;
     case 'w':
-        stroke(-28, 522, 228, -10, 532, 230, 5);
-        stroke(-10, 532, 230, 10, 522, 230, 5);
-        stroke(10, 522, 230, 28, 532, 228, 5);
+        stroke(-28, 522, 223 + hz, -10, 532, 225 + hz, 5);
+        stroke(-10, 532, 225 + hz, 10, 522, 225 + hz, 5);
+        stroke(10, 522, 225 + hz, 28, 532, 223 + hz, 5);
         break;
     default: /* a little smile */
-        stroke(-32, 540, 226, -14, 524, 231, 6);
-        stroke(-14, 524, 231, 14, 524, 231, 6);
-        stroke(14, 524, 231, 32, 540, 226, 6);
+        stroke(-32, 540, 221 + hz, -14, 524, 226 + hz, 6);
+        stroke(-14, 524, 226 + hz, 14, 524, 226 + hz, 6);
+        stroke(14, 524, 226 + hz, 32, 540, 221 + hz, 6);
     }
     ok_r3d_material(f->blush ? RGB(31, 13, 15) : RGB(31, 17, 17), ++next_id, 0); /* cheeks */
-    ok_r3d_ellipsoid(P(-118, 592, 182), P(30, 15, 10), 6, 4);
-    ok_r3d_ellipsoid(P(118, 592, 182), P(30, 15, 10), 6, 4);
+    ok_r3d_ellipsoid(P(-118, 592, 182 + hz), P(30, 15, 10), 6, 4);
+    ok_r3d_ellipsoid(P(118, 592, 182 + hz), P(30, 15, 10), 6, 4);
 }
 
 void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
@@ -1104,9 +1173,9 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     /* The tail, from its simulated chain (room coordinates). */
     if (a->tail_ready) {
         part_rows(skin, OK_PART_TAIL, 230, 0, 60);
-        for (i = 0; i < 10; i += 2) /* five links over the eleven points: cheap, still curvy */
-            ok_r3d_capsule(P(a->tail[i][0], a->tail[i][1], a->tail[i][2]), P(a->tail[i + 2][0], a->tail[i + 2][1], a->tail[i + 2][2]),
-                           H(30 - i * 3 / 2), 5);
+        for (i = 0; i < 9; i += 3) /* three links over the eleven points: cheap, still curvy */
+            ok_r3d_capsule(P(a->tail[i][0], a->tail[i][1], a->tail[i][2]), P(a->tail[i + 3][0], a->tail[i + 3][1], a->tail[i + 3][2]),
+                           H(30 - i * 3 / 2), 4);
     }
     /* Where it is: standing in the room, or on the bed. */
     x = a->x + (a->room.bed_x - a->x) * lie / 100;
@@ -1116,9 +1185,9 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(x, y, z));
     if (lie < 60) { /* a soft shadow: three layers, darker to the middle, a little off to the right */
         int k, r = 270 - lie - bob / 2;
-        for (k = 0; k < 3; k++) {
+        for (k = ok_r3d_on_hardware() ? 1 : 0; k < 3; k += ok_r3d_on_hardware() ? 3 : 1) { /* one layer on the hardware */
             ok_r3d_material(9 + k, k, OK_R3D_SHADOW);
-            ok_r3d_disc(P(26, 9 + k, -14), H(r * (100 - k * 26) / 100), H(r * 74 * (100 - k * 26) / 10000), 16);
+            ok_r3d_disc(P(26, 9 + k, -14), H(r * (100 - k * 26) / 100), H(r * 74 * (100 - k * 26) / 10000), 10);
         }
     }
     ok_r3d_rotate_y(deg(a, OK_SPRING_YAW) * (100 - lie) / 100);
@@ -1151,7 +1220,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         ok_r3d_rotate_z(s * DEG(9));
         ok_r3d_rotate_x(thigh - knee); /* the foot stays level */
         part(skin, OK_PART_HANDS, hands);
-        ok_r3d_ellipsoid(P(s * 6, -24, 30), P(56, 28, 86), 8, 5);
+        ok_r3d_ellipsoid(P(s * 6, -24, 30), P(56, 28, 86), 5, 3);
         ok_r3d_ellipsoid(P(-s * 36, -28, 84), P(20, 18, 26), 6, 4); /* the big toe, monkey-style */
         ok_r3d_pop();
     }
@@ -1164,7 +1233,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(0, -170, 0));
     /* One whole body, round at the tummy, breathing. */
     part_rows(skin, OK_PART_TOP, ++next_id, 0, 100);
-    ok_r3d_ellipsoid(P(0, 318, 6), P(166, 160 + wave(a->ticks, 17, 3), 140), 10, 6);
+    ok_r3d_ellipsoid(P(0, 318, 6), P(166, 160 + wave(a->ticks, 17, 3), 140), 7, 4);
     /* The shoulders and head bend over it: sighs, a stretch. */
     ok_r3d_push();
     ok_r3d_translate(P(0, 295, 0));
@@ -1236,8 +1305,8 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(0, -450, 0));
     face->head_id = ++next_id;
     part(skin, OK_PART_HEAD, face->head_id);
-    ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 12, 9);
-    ok_r3d_ellipsoid(P(0, 728, 118), P(150, 38, 80), 10, 5);   /* brow */
+    ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 8, 5);
+    ok_r3d_ellipsoid(P(0, 728, 118), P(150, 38, 80), 8, 4);   /* brow */
     if (bare) { /* a tuft of hair */
         limb(0, 845, 20, -14, 880, 46, 15);
         limb(26, 840, 10, 40, 870, 30, 12);
@@ -1258,11 +1327,14 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     /* A heart-shaped face: two lobes round the eyes over one soft disc, and a
      * gentle muzzle low on it. */
     part(skin, OK_PART_EYES, face->mask_id);
-    blob(-78, 650, 124, 92, 98, 96);
-    blob(78, 650, 124, 92, 98, 96);
-    ok_r3d_ellipsoid(P(0, 572, 118), P(150, 124, 116), 8, 5);
-    part(skin, OK_PART_MUZZLE, face->mask_id);
-    blob(0, 538, 156, 100, 66, 76); /* a smaller, rounder snout */
+    {
+        int fz = ok_r3d_on_hardware() ? 16 : 0; /* the face a little proud of the head on the hardware's coarser depth */
+        blob(-78, 650, 124 + fz, 92, 98, 96);
+        blob(78, 650, 124 + fz, 92, 98, 96);
+        ok_r3d_ellipsoid(P(0, 572, 118 + fz), P(150, 124, 116), 8, 5);
+        part(skin, OK_PART_MUZZLE, face->mask_id);
+        blob(0, 538, 156 + fz, 100, 66, 76); /* a smaller, rounder snout */
+    }
     face3d(skin, face);
     wear(look->wear, a, face);
     for (i = 0; i < 2; i++) /* where glasses go */

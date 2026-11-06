@@ -69,6 +69,7 @@ static struct {
 } known[MAX_KNOWN];
 static int known_count;
 static time_t boot_time;
+volatile const char *ok_dsi_net_where = "not started";
 
 uint32_t ok_dsi_uptime(void)
 {
@@ -84,6 +85,7 @@ static void next_frame(void)
 
 static void pause_seconds(int seconds)
 {
+    ok_dsi_net_where = "pause";
     int frames;
     for (frames = 0; frames < seconds * 60; frames++) next_frame();
 }
@@ -91,18 +93,39 @@ static void pause_seconds(int seconds)
 /* Network lines for the Dev screen; each also goes to a log on the SD card,
  * closed every time, so the last step before a crash can be read later. */
 static void line(int i, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+/* The SD card log is kept in memory and written every 15 s (or when the
+ * buffer fills): opening a file per line cost milliseconds each time and
+ * competed with the game and the mind for the card. */
+static char log_buf[4096];
+static size_t log_len;
+static time_t log_flushed;
+
+static void flush_log(void)
+{
+    FILE *f;
+    volatile const char *was = ok_dsi_net_where;
+    ok_dsi_net_where = "SD log write";
+    if (log_len && log_path[0] && (f = fopen(log_path, "a"))) {
+        fwrite(log_buf, 1, log_len, f);
+        fclose(f);
+    }
+    log_len = 0;
+    log_flushed = time(NULL);
+    ok_dsi_net_where = was;
+}
+
 static void line(int i, const char *fmt, ...)
 {
     va_list ap;
-    FILE *f;
+    int n;
     if (i < 0 || i >= LINES) return;
     va_start(ap, fmt);
     vsnprintf(lines[i], 33, fmt, ap);
     va_end(ap);
-    if (log_path[0] && (f = fopen(log_path, "a"))) {
-        fprintf(f, "%lu %s\n", (unsigned long)time(NULL), lines[i]);
-        fclose(f);
-    }
+    if (log_len > sizeof log_buf - 64) flush_log();
+    n = snprintf(log_buf + log_len, sizeof log_buf - log_len, "%lu %s\n", (unsigned long)time(NULL), lines[i]);
+    if (n > 0) log_len += (size_t)n < sizeof log_buf - log_len ? (size_t)n : sizeof log_buf - log_len - 1;
+    if (time(NULL) - log_flushed >= 15) flush_log();
 }
 
 static void say(const char *text)
@@ -260,7 +283,9 @@ static void draw_key(uint8_t key[32])
 static int wifi_init(void)
 {
     static int initialised;
+    ok_dsi_net_where = "Wifi_InitDefault";
     if (!initialised) initialised = Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE);
+    ok_dsi_net_where = "after Wifi init";
     return initialised;
 }
 
@@ -340,6 +365,7 @@ static Wifi_AccessPoint found_ap[24];
 static int scan(void)
 {
     int frames, n, i;
+    ok_dsi_net_where = "scan";
     Wifi_EnableWifi();
     Wifi_ScanMode();
     for (frames = 0; frames < 60 * 3; frames++) next_frame();
@@ -380,6 +406,7 @@ static int wifi_up(void)
         line(0, "Wi-Fi: console settings");
         Wifi_AutoConnect();
     }
+    ok_dsi_net_where = "wait_online";
     return wait_online(report_wifi);
 }
 
@@ -467,6 +494,9 @@ static int wait_for(int fd, short events, int ms)
         struct pollfd p = {fd, events, 0};
         int rc = poll(&p, 1, 0);
         stir();
+        /* Even when data is already there, let the game run first: a busy
+         * peer can keep a socket readable for minutes. */
+        cothread_yield();
         if (rc > 0) return (p.revents & events) != 0;
         if (rc < 0) return 0;
         next_frame();
@@ -481,6 +511,7 @@ static int lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *le
     size_t qn;
     int fd, tries, ok = 0;
     (void)ctx;
+    ok_dsi_net_where = "dns lookup";
     if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) return 0;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     memset(&addr, 0, sizeof addr);
@@ -641,7 +672,9 @@ static void crawl(int seconds, uint8_t fork[4], int seeds_from, int seeds_to)
         ok_v4_crawl_add_node(&c, nodes[i].pub, &at);
     }
     while ((now = time(NULL)) - start < seconds && !ui_wifi) {
+        ok_dsi_net_where = "crawl step";
         ok_v4_crawl_step(&c, (uint32_t)now);
+        ok_dsi_net_where = "crawl wait";
         stir();
         if (frames++ % 30 == 0)
             line(3, "v4 %lds: %d seen %u rx %u ok", (long)(now - start), c.count, c.received, c.found_count);
@@ -666,6 +699,7 @@ static int read_ms = 5000;
 static int sock_read(void *ctx, uint8_t *buf, size_t n)
 {
     int fd = *(int *)ctx, k;
+    ok_dsi_net_where = "session read";
     if (!wait_for(fd, POLLIN, read_ms)) return OK_IO_IDLE;
     k = recv(fd, buf, n, 0);
     if (k > 0) ok_facts_now.bytes_in += (uint32_t)k;
@@ -675,6 +709,7 @@ static int sock_read(void *ctx, uint8_t *buf, size_t n)
 static int sock_write(void *ctx, const uint8_t *buf, size_t n)
 {
     int fd = *(int *)ctx, k;
+    ok_dsi_net_where = "session write";
     if (!wait_for(fd, POLLOUT, 15000)) return 0;
     k = send(fd, buf, n, 0);
     if (k > 0) ok_facts_now.bytes_out += (uint32_t)k;
@@ -704,7 +739,9 @@ static int hold(void *ctx)
         say(text);
         line(LINES - 1, "%s", text);
     }
-    return !ui_wifi && online();
+    /* Stay only while there is a letter to see into a block: a held mainnet
+     * peer gossips non-stop, and that costs the game frames for nothing. */
+    return !ui_wifi && online() && pending_len;
 }
 
 /* ---- What the technical screens show ------------------------------------------ */
@@ -834,6 +871,7 @@ static int dial(int i, int row)
 
     line(row, "%u.%u.%u.%u: connecting", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
     begin_peer_fact(i);
+    ok_dsi_net_where = "tcp connect";
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return 0;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     memset(&addr, 0, sizeof addr);
@@ -877,11 +915,14 @@ static int dial(int i, int row)
     current_client[0] = 0;
     admitted = 0;
     read_ms = 5000;
+    ok_dsi_net_where = "session";
     ok_session_dial(&io, priv, nodes[i].pub, &e, net->net, (uint64_t)time(NULL), "okupa/0.1 (DSi)", &rep);
+    ok_dsi_net_where = "closing socket";
     ok_wipe(priv, sizeof priv);
     ok_wipe(&e, sizeof e);
     shutdown(fd, SHUT_WR);
     close(fd);
+    ok_dsi_net_where = "after dial";
     /* A node that reached Status can take a transaction even if it is full
      * (it is handed over before it hangs up): worth remembering. */
     if (rep.status) remember_peer(i);
@@ -961,6 +1002,23 @@ static void let_others_run(void)
     cothread_yield();
 }
 
+/* Rests up to seconds, but wakes at once when a new letter is waiting. */
+static void rest(int seconds)
+{
+    int k;
+    for (k = 0; k < seconds; k++) {
+        if (pending_len && !handed) return;
+        pause_seconds(1);
+    }
+}
+
+/* After a node let us in: with a letter still on its way, try again soon;
+ * with nothing to send, rest so the game keeps the CPU. */
+static void after_admission(void)
+{
+    rest(pending_len ? 5 : 300);
+}
+
 static int postman(void *arg)
 {
     static ok_dnsdisc_walk w;
@@ -1001,7 +1059,18 @@ static int postman(void *arg)
         node_count = 0;
         ready_peers = load_peers();
         line(2, "%s, known peers: %d", net->name, ready_peers);
-        if (try_nodes(0, node_count)) continue;
+        if (!pending_len && ready_peers >= 3) { /* enough nodes known to take letters: no need to look now */
+            char text[48];
+            snprintf(text, sizeof text, "Ready: %d nodes take letters", ready_peers);
+            say(text);
+            line(LINES - 1, "Resting: nothing to send");
+            rest(300);
+            continue;
+        }
+        if (try_nodes(0, node_count)) {
+            after_admission();
+            continue;
+        }
 
         /* 2. The signed DNS list: its nodes are the busiest, so they seed the
          * crawl and are only tried last. */
@@ -1028,8 +1097,10 @@ static int postman(void *arg)
         say("Searching for nodes");
         crawl(45, fork, dns_from, dns_to);
         ok_facts_now.candidates = node_count;
-        if (try_nodes(from, node_count)) continue;
-        if (try_nodes(dns_from, dns_to)) continue;
+        if (try_nodes(from, node_count) || try_nodes(dns_from, dns_to)) {
+            after_admission();
+            continue;
+        }
 
         if (ready_peers) {
             char text[48];
@@ -1038,8 +1109,13 @@ static int postman(void *arg)
         } else {
             say(pending_len && handed ? "Letter out, nodes full: again" : "All nodes full, trying more");
         }
-        line(LINES - 1, "All busy, again in 20 s");
-        pause_seconds(20);
+        /* Nothing to send and a few nodes known to take letters: rest, so
+         * the game gets the CPU. A new letter wakes the postman early. */
+        {
+            int wait = pending_len || ready_peers < 3 ? 20 : 300;
+            line(LINES - 1, "Again in %d s", wait);
+            rest(wait);
+        }
     }
     return 0;
 }

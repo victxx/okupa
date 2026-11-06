@@ -12,6 +12,8 @@
 void ok_dsi_net_start(void);
 /* Seconds since the network started (the live feed's clock). */
 uint32_t ok_dsi_uptime(void);
+/* What the postman is doing right now (for the freeze watchdog). */
+extern volatile const char *ok_dsi_net_where;
 /* One short line for the home screen ("Online: ...", "Looking for a node"). */
 const char *ok_dsi_net_summary(void);
 /* Fourteen lines of detail for the Dev screen. */
