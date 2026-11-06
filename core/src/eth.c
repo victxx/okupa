@@ -16,6 +16,19 @@ const ok_eth_network ok_sepolia = {
     sepolia_times, sizeof sepolia_times / sizeof sepolia_times[0],
 };
 
+/* Mainnet from go-ethereum v1.17.7 (`geth dumpgenesis --mainnet`): every
+ * block fork from Homestead to Gray Glacier, then Shanghai to BPO2. */
+static const uint64_t mainnet_blocks[] = {1150000, 1920000, 2463000, 2675000, 4370000, 7280000,
+                                          9069000, 9200000, 12244000, 12965000, 13773000, 15050000};
+static const uint64_t mainnet_times[] = {1681338455, 1710338135, 1746612311, 1764798551, 1765290071, 1767747671};
+const ok_eth_network ok_mainnet = {
+    1,
+    {0xd4, 0xe5, 0x67, 0x40, 0xf8, 0x76, 0xae, 0xf8, 0xc0, 0x10, 0xb8, 0x6a, 0x40, 0xd5, 0xf5, 0x67,
+     0x45, 0xa1, 0x18, 0xd0, 0x90, 0x6a, 0x34, 0xe6, 0x9a, 0xec, 0x8c, 0x0d, 0xb1, 0xcb, 0x8f, 0xa3},
+    mainnet_blocks, sizeof mainnet_blocks / sizeof mainnet_blocks[0],
+    mainnet_times, sizeof mainnet_times / sizeof mainnet_times[0],
+};
+
 uint32_t ok_crc32(uint32_t crc, const void *data, size_t n)
 {
     const uint8_t *p = data;

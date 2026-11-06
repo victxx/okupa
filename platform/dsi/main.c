@@ -1,5 +1,6 @@
 /* Okupa on the Nintendo DSi: the room on the top screen, touch below. The
  * same core and game code as the host; this file only owns the hardware. */
+#include "account.h"
 #include "audio.h"
 #include "net.h"
 #include "okupa_music.h"
@@ -18,7 +19,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40], wifi_path[40], log_path[40], peers_path[40], look_path[40];
+static char save_path[40], temp_path[40], net_dir[40], key_path[40], look_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -57,9 +58,8 @@ static int open_storage(void)
         mkdir(save_path, 0700);
         snprintf(save_path, sizeof save_path, "%sokupa/save.bin", roots[i]);
         snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
-        snprintf(wifi_path, sizeof wifi_path, "%sokupa/wifi.txt", roots[i]);
-        snprintf(log_path, sizeof log_path, "%sokupa/net-log.txt", roots[i]);
-        snprintf(peers_path, sizeof peers_path, "%sokupa/peers.txt", roots[i]);
+        snprintf(net_dir, sizeof net_dir, "%sokupa/", roots[i]);
+        snprintf(key_path, sizeof key_path, "%sokupa/account.key", roots[i]);
         snprintf(look_path, sizeof look_path, "%sokupa/look.txt", roots[i]);
         return 1;
     }
@@ -150,9 +150,7 @@ int main(void)
             save_status = "Save: new okupa on SD";
         }
         load_look(&ui.look);
-        ok_dsi_wifi_store(wifi_path);
-        ok_dsi_network_log(log_path);
-        ok_dsi_network_peers(peers_path);
+        ok_dsi_net_files(net_dir);
     }
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
     ok_dsi_audio_start();
@@ -195,6 +193,12 @@ int main(void)
             else if (ui.scene == OK_UI_DEV && ui.dev[OK_UI_DEV_LINES - 1][0])
                 snprintf(ui.dev[OK_UI_DEV_LINES - 4], sizeof ui.dev[0], "Frame: %lu.%lu ms to draw",
                          (unsigned long)(draw_us / 1000), (unsigned long)(draw_us / 100 % 10));
+            {
+                uint8_t hash[32];
+                if (ok_dsi_net_pending(hash))
+                    snprintf(ui.wallet_status, sizeof ui.wallet_status, "Hello %02x%02x%02x%02x: %d nodes", hash[0], hash[1],
+                             hash[2], hash[3], ok_dsi_net_handed());
+            }
         }
         if (keysHeld() & KEY_TOUCH) {
             int r;
@@ -223,6 +227,22 @@ int main(void)
                 ok_dsi_wifi_connect(ssid, ui.password, ui.wifi_status, show_now);
                 ok_wipe(ui.password, sizeof ui.password);
                 ui.password_len = 0;
+            }
+            if (r == OK_UI_WALLET_OPEN) {
+                snprintf(ui.wallet_network, sizeof ui.wallet_network, "%s", ok_dsi_net_name());
+                ok_dsi_account_open(storage ? key_path : NULL, &ui);
+            }
+            if (r == OK_UI_WALLET_SCRIBBLE) ok_dsi_account_scribble(touch.px, touch.py, &ui);
+            if (r == OK_UI_WALLET_HELLO && storage) {
+                /* One hello at a time: while one is waiting, pressing again
+                 * just keeps handing out the same bytes. */
+                uint8_t tx[512], hash[32];
+                size_t len;
+                if (!ok_dsi_net_pending(hash)) {
+                    uint64_t nonce = ok_dsi_net_take_nonce();
+                    if (ok_dsi_account_hello(ok_dsi_net_chain_id(), nonce, tx, sizeof tx, &len, hash))
+                        ok_dsi_net_send(tx, len, hash);
+                }
             }
             if (r == OK_UI_RUN_NETWORK) show_net = 1; /* the postman is always running: just show it */
             if (r != OK_UI_NOTHING) redraw = 1;

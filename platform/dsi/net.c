@@ -22,13 +22,33 @@
  * never waits for the network. Cothreads are cooperative: the game loop and
  * the postman only switch at yields, so plain shared variables are safe. */
 
-#define TREE "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net"
+/* The network the console lives on: mainnet unless network.txt on the SD
+ * card says "sepolia". Each has its own signed DNS list, bootnodes and file
+ * of peers that let us in. */
+typedef struct {
+    const char *name;
+    const ok_eth_network *net;
+    const char *tree;
+    const char *const *boot;
+    const int *boots;
+} profile;
+static const profile mainnet = {"mainnet", &ok_mainnet,
+                                "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net",
+                                ok_mainnet_bootnodes, &ok_mainnet_bootnode_count};
+static const profile sepolia = {"sepolia", &ok_sepolia,
+                                "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net",
+                                ok_sepolia_bootnodes, &ok_sepolia_bootnode_count};
+static const profile *net = &mainnet;
 #define MAX_NODES 64 /* public nodes are often full: try many */
 #define MAX_KNOWN 6  /* Wi-Fi networks remembered */
 #define LINES 14
 
 static char lines[LINES][33], summary[33] = "Network: starting";
-static const char *log_path, *peers_path, *wifi_path;
+static char log_path[48], peers_path[48], wifi_path[48], pending_path[48], nonce_path[48];
+static uint8_t pending[1200], pending_hash[32];
+static size_t pending_len;
+static int handed;
+static const uint8_t *pending_list[1] = {pending};
 static volatile int ui_wifi; /* the player is scanning or connecting: stand back */
 static struct in_addr dns_server;
 static uint16_t dns_id = 0x4f4b;
@@ -37,6 +57,7 @@ static struct {
     uint16_t tcp;
 } nodes[MAX_NODES];
 static int node_count;
+static int ready_peers; /* remembered nodes that reached Status: they can take a transaction */
 static struct {
     char ssid[33], password[64];
 } known[MAX_KNOWN];
@@ -66,7 +87,7 @@ static void line(int i, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(lines[i], 33, fmt, ap);
     va_end(ap);
-    if (log_path && (f = fopen(log_path, "a"))) {
+    if (log_path[0] && (f = fopen(log_path, "a"))) {
         fprintf(f, "%lu %s\n", (unsigned long)time(NULL), lines[i]);
         fclose(f);
     }
@@ -77,8 +98,79 @@ static void say(const char *text)
     snprintf(summary, sizeof summary, "%.32s", text);
 }
 
-void ok_dsi_network_log(const char *path) { log_path = path; }
-void ok_dsi_network_peers(const char *path) { peers_path = path; }
+static void load_known_networks(void);
+
+void ok_dsi_net_files(const char *dir)
+{
+    char path[48], text[16] = {0};
+    FILE *f;
+    snprintf(path, sizeof path, "%snetwork.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        if (fgets(text, sizeof text, f) && !strncmp(text, "sepolia", 7)) net = &sepolia;
+        fclose(f);
+    }
+    snprintf(log_path, sizeof log_path, "%snet-log.txt", dir);
+    snprintf(peers_path, sizeof peers_path, "%speers-%s.txt", dir, net->name);
+    snprintf(wifi_path, sizeof wifi_path, "%swifi.txt", dir);
+    snprintf(pending_path, sizeof pending_path, "%spending-%s.hex", dir, net->name);
+    snprintf(nonce_path, sizeof nonce_path, "%snonce-%s.txt", dir, net->name);
+    load_known_networks();
+    /* A transaction still waiting from last time: same bytes, same hash. */
+    if ((f = fopen(pending_path, "r"))) {
+        char hex[2 * sizeof pending + 4];
+        size_t n = 0;
+        unsigned v;
+        if (fgets(hex, sizeof hex, f))
+            while (n < sizeof pending && sscanf(hex + 2 * n, "%2x", &v) == 1) pending[n++] = (uint8_t)v;
+        fclose(f);
+        if (n > 1) {
+            pending_len = n;
+            ok_keccak256(pending, n, pending_hash);
+        }
+    }
+}
+
+uint64_t ok_dsi_net_chain_id(void) { return net->net->network_id; }
+int ok_dsi_net_handed(void) { return handed; }
+
+int ok_dsi_net_pending(uint8_t hash[32])
+{
+    if (pending_len && hash) memcpy(hash, pending_hash, 32);
+    return pending_len != 0;
+}
+
+uint64_t ok_dsi_net_take_nonce(void)
+{
+    unsigned long long nonce = 0;
+    FILE *f = fopen(nonce_path, "r");
+    if (f) {
+        if (fscanf(f, "%llu", &nonce) != 1) nonce = 0;
+        fclose(f);
+    }
+    if ((f = fopen(nonce_path, "w"))) {
+        fprintf(f, "%llu\n", nonce + 1);
+        fclose(f);
+    }
+    return nonce;
+}
+
+void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32])
+{
+    FILE *f;
+    size_t i;
+    if (n > sizeof pending) return;
+    memcpy(pending, tx, n);
+    memcpy(pending_hash, hash, 32);
+    pending_len = n;
+    handed = 0;
+    if ((f = fopen(pending_path, "w"))) {
+        for (i = 0; i < n; i++) fprintf(f, "%02x", pending[i]);
+        fprintf(f, "\n");
+        fclose(f);
+    }
+}
+
+const char *ok_dsi_net_name(void) { return net->name; }
 const char *ok_dsi_net_summary(void) { return summary; }
 const char (*ok_dsi_net_lines(void))[33] { return (const char (*)[33])lines; }
 
@@ -160,13 +252,12 @@ static void start_connect(const char *ssid, const char *password)
 
 /* Remembered networks: pairs of lines (name, password) in plain text on the
  * SD card, like the console's own settings; most recent first. */
-void ok_dsi_wifi_store(const char *path)
+static void load_known_networks(void)
 {
     char ssid[40], password[72];
     FILE *f;
-    wifi_path = path;
     known_count = 0;
-    if (!path || !(f = fopen(path, "r"))) return;
+    if (!(f = fopen(wifi_path, "r"))) return;
     while (known_count < MAX_KNOWN && fgets(ssid, sizeof ssid, f)) {
         if (!fgets(password, sizeof password, f)) password[0] = 0;
         ssid[strcspn(ssid, "\r\n")] = 0;
@@ -189,7 +280,7 @@ static void remember_network(const char *ssid, const char *password)
     snprintf(known[0].ssid, sizeof known[0].ssid, "%s", ssid);
     snprintf(known[0].password, sizeof known[0].password, "%s", password ? password : "");
     if (j == known_count && known_count < MAX_KNOWN) known_count++;
-    if (!wifi_path || !(f = fopen(wifi_path, "w"))) return;
+    if (!wifi_path[0] || !(f = fopen(wifi_path, "w"))) return;
     for (i = 0; i < known_count; i++) fprintf(f, "%s\n%s\n", known[i].ssid, known[i].password);
     fclose(f);
 }
@@ -372,11 +463,12 @@ static int lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *le
 
 /* ---- Candidate nodes ------------------------------------------------------ */
 
+/* One node per IP address: some hosts run several and would fill the list. */
 static int add_node(const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
 {
     int i;
     for (i = 0; i < node_count; i++)
-        if (!memcmp(nodes[i].pub, pub, 64)) return 0;
+        if (!memcmp(nodes[i].pub, pub, 64) || !memcmp(nodes[i].ip, ip, 4)) return 0;
     if (node_count >= MAX_NODES || !tcp) return 0;
     memcpy(nodes[node_count].pub, pub, 64);
     memcpy(nodes[node_count].ip, ip, 4);
@@ -396,7 +488,7 @@ static int load_peers(void)
 {
     char text[200];
     int added = 0;
-    FILE *f = peers_path ? fopen(peers_path, "r") : NULL;
+    FILE *f = peers_path[0] ? fopen(peers_path, "r") : NULL;
     if (!f) return 0;
     while (fgets(text, sizeof text, f)) {
         uint8_t pub[64], ip[4];
@@ -422,7 +514,7 @@ static void remember_peer(int i)
     char text[200], have[200];
     FILE *f;
     int k, n;
-    if (!peers_path) return;
+    if (!peers_path[0]) return;
     n = snprintf(text, sizeof text, "enode://");
     for (k = 0; k < 64; k++) n += snprintf(text + n, sizeof text - (size_t)n, "%02x", nodes[i].pub[k]);
     snprintf(text + n, sizeof text - (size_t)n, "@%u.%u.%u.%u:%u\n", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2],
@@ -438,6 +530,7 @@ static void remember_peer(int i)
     if ((f = fopen(peers_path, "a"))) {
         fputs(text, f);
         fclose(f);
+        ready_peers++;
     }
 }
 
@@ -476,7 +569,7 @@ static void crawl_found(void *ctx, const ok_enr *e)
     add_node(e->pub, e->ip, e->tcp);
 }
 
-static void crawl(int seconds, uint8_t fork[4])
+static void crawl(int seconds, uint8_t fork[4], int seeds_from, int seeds_to)
 {
     static ok_v4_crawl c;
     struct sockaddr_in any;
@@ -496,15 +589,21 @@ static void crawl(int seconds, uint8_t fork[4])
     c.found = crawl_found;
     ok_v4_crawl_init(&c, priv, fork, (uint32_t)seed[0] << 24 | (uint32_t)seed[1] << 16 | (uint32_t)seed[2] << 8 | seed[3]);
     ok_wipe(priv, sizeof priv);
-    for (i = 0; i < ok_sepolia_bootnode_count; i++) ok_v4_crawl_add_enr(&c, ok_sepolia_bootnodes[i]);
+    for (i = 0; i < *net->boots; i++) ok_v4_crawl_add_enr(&c, net->boot[i]);
+    for (i = seeds_from; i < seeds_to; i++) { /* nodes from the DNS list: their UDP port is usually the TCP one */
+        ok_v4_endpoint at;
+        memcpy(at.ip, nodes[i].ip, 4);
+        at.tcp = at.udp = nodes[i].tcp;
+        ok_v4_crawl_add_node(&c, nodes[i].pub, &at);
+    }
     while ((now = time(NULL)) - start < seconds && !ui_wifi) {
         ok_v4_crawl_step(&c, (uint32_t)now);
         stir();
         if (frames++ % 30 == 0)
-            line(3, "v4 %lds: %d seen %u rx %u Sep", (long)(now - start), c.count, c.received, c.found_count);
+            line(3, "v4 %lds: %d seen %u rx %u ok", (long)(now - start), c.count, c.received, c.found_count);
         next_frame();
     }
-    line(3, "v4: %d seen %u rx %u bond %u Sep", c.count, c.received, c.bonded, c.found_count);
+    line(3, "v4: %d seen %u rx %u bond %u ok", c.count, c.received, c.bonded, c.found_count);
     ok_wipe(c.priv, sizeof c.priv);
     close(udp_fd);
     udp_fd = -1;
@@ -512,10 +611,14 @@ static void crawl(int seconds, uint8_t fork[4])
 
 /* ---- Sessions --------------------------------------------------------------- */
 
+/* A node that does not answer the handshake within 5 s is not worth the
+ * wait: move on. Once admitted, quiet spells of 15 s are normal. */
+static int read_ms = 5000;
+
 static int sock_read(void *ctx, uint8_t *buf, size_t n)
 {
     int fd = *(int *)ctx, k;
-    if (!wait_for(fd, POLLIN, 15000)) return OK_IO_IDLE;
+    if (!wait_for(fd, POLLIN, read_ms)) return OK_IO_IDLE;
     k = recv(fd, buf, n, 0);
     return k > 0 ? k : 0;
 }
@@ -545,6 +648,7 @@ static int hold(void *ctx)
     if (!admitted) {
         char text[33];
         admitted = 1;
+        read_ms = 15000;
         remember_peer(current_node);
         snprintf(text, sizeof text, "Online: %.24s", current_client);
         say(text);
@@ -571,7 +675,7 @@ static int dial(int i, int row)
     addr.sin_family = AF_INET;
     addr.sin_port = htons(nodes[i].tcp);
     memcpy(&addr.sin_addr.s_addr, nodes[i].ip, 4);
-    if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 8000) ||
+    if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 4000) ||
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &elen) || error) {
         close(fd);
         line(row, "%u.%u.%u.%u: no TCP", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
@@ -587,23 +691,39 @@ static int dial(int i, int row)
     io.write = sock_write;
     io.log = sock_log;
     io.hold = hold;
+    if (pending_len) {
+        io.txs = pending_list;
+        io.tx_lens = &pending_len;
+        io.tx_count = 1;
+    }
     io.ctx = &fd;
     current_row = row;
     current_node = i;
     current_client[0] = 0;
     admitted = 0;
-    ok_session_dial(&io, priv, nodes[i].pub, &e, &ok_sepolia, (uint64_t)time(NULL), "okupa/0.1 (DSi)", &rep);
+    read_ms = 5000;
+    ok_session_dial(&io, priv, nodes[i].pub, &e, net->net, (uint64_t)time(NULL), "okupa/0.1 (DSi)", &rep);
     ok_wipe(priv, sizeof priv);
     ok_wipe(&e, sizeof e);
     shutdown(fd, SHUT_WR);
     close(fd);
+    /* A node that reached Status can take a transaction even if it is full
+     * (it is handed over before it hangs up): worth remembering. */
+    if (rep.status) remember_peer(i);
+    if (rep.tx_written) {
+        char text[48];
+        handed++;
+        snprintf(text, sizeof text, "Hello handed to %d nodes", handed);
+        say(text);
+        line(LINES - 1, "%s", text);
+    }
     if (rep.outcome == OK_SESSION_PASS) {
         line(row, "%u.%u.%u.%u: was online", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
         return 1;
     }
     if (rep.outcome == OK_SESSION_DISCONNECTED)
-        line(row, "%u.%u.%u.%u: %s", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3],
-             rep.disconnect == 4 ? "full" : "disconnect");
+        line(row, "%u.%u.%u.%u: %s%s", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3],
+             rep.disconnect == 4 ? "full" : "disconnect", rep.status ? " after Status" : "");
     else
         line(row, "%u.%u.%u.%u: %s%s", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3],
              ok_session_outcome_name(rep.outcome), rep.handshake ? " (rlpx ok)" : "");
@@ -650,7 +770,7 @@ static int postman(void *arg)
     static ok_dnsdisc_walk w;
     uint8_t fork[4], mac[6];
     uint64_t next;
-    int from;
+    int from, dns_from, dns_to;
     (void)arg;
     ok_keccak_init(&pool);
     stir();
@@ -671,34 +791,43 @@ static int postman(void *arg)
             line(0, "Wi-Fi: %s", inet_ntoa(ip));
         }
         pick_dns();
-        ok_forkid(&ok_sepolia, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
+        ok_forkid(net->net, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
 
         /* 1. Peers that let us in before: usually instant. */
         node_count = 0;
-        line(2, "Known peers: %d", load_peers());
+        ready_peers = load_peers();
+        line(2, "%s, known peers: %d", net->name, ready_peers);
         if (try_nodes(0, node_count)) continue;
 
-        /* 2. The signed DNS list. */
-        from = node_count;
+        /* 2. The signed DNS list: its nodes are the busiest, so they seed the
+         * crawl and are only tried last. */
+        dns_from = node_count;
         w.lookup = lookup;
         w.found = dns_found;
         say("Reading the node list");
-        ok_dnsdisc_walk_tree(&w, TREE, fork, 32);
+        ok_dnsdisc_walk_tree(&w, net->tree, fork, 24);
         if (!w.seq && dns_server.s_addr != htonl(0x01010101)) {
             dns_server.s_addr = htonl(0x01010101);
             line(1, "DNS: 1.1.1.1 (fallback)");
-            ok_dnsdisc_walk_tree(&w, TREE, fork, 32);
+            ok_dnsdisc_walk_tree(&w, net->tree, fork, 24);
         }
-        line(2, w.seq ? "DNS list: %d nodes" : "DNS list: no answer (%d)", node_count - from);
-        if (try_nodes(from, node_count)) continue;
+        dns_to = node_count;
+        line(2, w.seq ? "DNS list: %d nodes" : "DNS list: no answer (%d)", dns_to - dns_from);
 
-        /* 3. Lesser-known nodes through discovery v4. */
+        /* 3. Lesser-known nodes through discovery v4: these have room more often. */
         from = node_count;
-        say("Searching for more nodes");
-        crawl(30, fork);
+        say("Searching for nodes");
+        crawl(30, fork, dns_from, dns_to);
         if (try_nodes(from, node_count)) continue;
+        if (try_nodes(dns_from, dns_to)) continue;
 
-        say("Nodes busy, retrying soon");
+        if (ready_peers) {
+            char text[48];
+            snprintf(text, sizeof text, "Ready: %d nodes take letters", ready_peers);
+            say(text);
+        } else {
+            say("Nodes busy, retrying soon");
+        }
         line(LINES - 1, "All busy, again in 20 s");
         pause_seconds(20);
     }

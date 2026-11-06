@@ -2,6 +2,7 @@
 #include "okupa_act.h"
 #include "okupa_text.h"
 #include "okupa_icons.h"
+#include "qrcodegen.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -349,12 +350,59 @@ static void dev(frame f, const uint8_t (*font)[8], const ok_ui *u)
     int i;
     centred(f, font, 128, 6, "Dev: the core on this console", PAPER, 1);
     for (i = 0; i < OK_UI_DEV_LINES; i++) mono(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
-    frame_box(f, 6, 166, 80, 22, PAPER, INK);
-    centred(f, font, 46, 173, "Network", INK, 1);
-    frame_box(f, 92, 166, 78, 22, PAPER, INK);
-    centred(f, font, 131, 173, "Wi-Fi", INK, 1);
-    frame_box(f, 176, 166, 74, 22, PAPER, INK);
-    centred(f, font, 213, 173, "Back", INK, 1);
+    frame_box(f, 4, 166, 60, 22, PAPER, INK);
+    centred(f, font, 34, 173, "Net", INK, 1);
+    frame_box(f, 66, 166, 58, 22, PAPER, INK);
+    centred(f, font, 95, 173, "Wi-Fi", INK, 1);
+    frame_box(f, 126, 166, 62, 22, PAPER, INK);
+    centred(f, font, 157, 173, "Wallet", INK, 1);
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, "Back", INK, 1);
+}
+
+/* The console's wallet: scribble to create the key, then its address. */
+#define SCRIBBLE_X 8
+#define SCRIBBLE_Y 30
+#define SCRIBBLE_W 240
+#define SCRIBBLE_H 100
+static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    char head[33];
+    snprintf(head, sizeof head, "Wallet (%.10s)", u->wallet_network[0] ? u->wallet_network : "mainnet");
+    centred(f, font, 128, 6, head, PAPER, 1);
+    if (!u->wallet_ready) {
+        frame_box(f, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H, PAPER, INK);
+        centred(f, font, 128, SCRIBBLE_Y + 40, "Scribble here", MUTED, 1);
+        centred(f, font, 128, SCRIBBLE_Y + 54, "to make the key", MUTED, 1);
+        frame_box(f, 8, 138, 240, 12, RGB(24, 23, 21), INK);
+        rect(f, 10, 140, 236 * (u->wallet_progress > 100 ? 100 : u->wallet_progress) / 100, 8, RGB(9, 22, 10));
+        centred(f, font, 128, 154, "Your strokes are its randomness", PAPER, 1);
+    } else {
+        /* An EIP-681 link as a QR code, so a phone wallet can just scan it. */
+        static uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(6)], tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
+        char a[23], b[21], link[64];
+        int size, x, y, scale, left, topq;
+        snprintf(a, sizeof a, "%.22s", u->wallet_address);
+        snprintf(b, sizeof b, "%.20s", u->wallet_address + 22);
+        centred(f, font, 128, 18, a, PAPER, 1);
+        centred(f, font, 128, 28, b, PAPER, 1);
+        snprintf(link, sizeof link, "ethereum:%.42s", u->wallet_address);
+        if (qrcodegen_encodeText(link, tmp, qr, qrcodegen_Ecc_MEDIUM, 1, 6, qrcodegen_Mask_AUTO, true)) {
+            size = qrcodegen_getSize(qr);
+            scale = 120 / (size + 4);
+            left = 128 - (size + 4) * scale / 2;
+            topq = 40;
+            rect(f, left, topq, (size + 4) * scale, (size + 4) * scale, RGB(31, 31, 31));
+            for (y = 0; y < size; y++)
+                for (x = 0; x < size; x++)
+                    if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
+        }
+        centred(f, font, 128, 144, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
+        frame_box(f, 4, 166, 120, 22, PAPER, INK);
+        centred(f, font, 64, 173, "Send hello", INK, 1);
+    }
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, "Back", INK, 1);
 }
 
 /* Wi-Fi list: one row per network, strongest first. */
@@ -395,7 +443,7 @@ static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
     snprintf(head, sizeof head, "Password: %.22s", u->ap_selected >= 0 ? u->aps[u->ap_selected].ssid : "");
     text(f, font, 6, 4, head, PAPER, 1);
     frame_box(f, 6, 14, 244, 18, PAPER, INK);
-    snprintf(shown, sizeof shown, "%s", u->password + (n > 28 ? n - 28 : 0));
+    snprintf(shown, sizeof shown, "%.28s", u->password + (n > 28 ? n - 28 : 0));
     text(f, font, 10, 19, shown, INK, 1);
     for (r = 0; r < 4; r++)
         for (c = 0; c < 10; c++) {
@@ -450,6 +498,9 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
     } else if (u->scene == OK_UI_PASSWORD) {
         password(bottom, font, u);
         line = "Psst. I won't peek.";
+    } else if (u->scene == OK_UI_WALLET) {
+        wallet(bottom, font, u);
+        line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
     } else if (u->scene == OK_UI_CLOSET) {
         closet(bottom, font, u);
         if (!u->say) line = "How do I look?";
@@ -561,14 +612,25 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         }
         return OK_UI_NOTHING;
     }
+    if (u->scene == OK_UI_WALLET) {
+        if (!u->wallet_ready && inside(x, y, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H)) return OK_UI_WALLET_SCRIBBLE;
+        if (u->wallet_ready && !held && inside(x, y, 4, 166, 120, 22)) return OK_UI_WALLET_HELLO;
+        if (held || !inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;
+        u->scene = OK_UI_DEV;
+        return OK_UI_CHANGED;
+    }
     if (held) return OK_UI_NOTHING;
     if (u->scene == OK_UI_DEV) {
-        if (inside(x, y, 6, 166, 80, 22)) return OK_UI_RUN_NETWORK;
-        if (inside(x, y, 92, 166, 78, 22)) {
+        if (inside(x, y, 4, 166, 60, 22)) return OK_UI_RUN_NETWORK;
+        if (inside(x, y, 66, 166, 58, 22)) {
             u->scene = OK_UI_WIFI;
             return OK_UI_WIFI_SCAN;
         }
-        if (!inside(x, y, 176, 166, 74, 22)) return OK_UI_NOTHING;
+        if (inside(x, y, 126, 166, 62, 22)) {
+            u->scene = OK_UI_WALLET;
+            return OK_UI_WALLET_OPEN;
+        }
+        if (!inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;
         u->scene = OK_UI_HOME;
         return OK_UI_CHANGED;
     }

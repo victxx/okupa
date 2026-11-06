@@ -86,5 +86,11 @@ int main(int argc, char **argv)
     strcpy(u.password, "okupa123");
     u.password_len = 8;
     shot(dir, "wifi-password", &u, &p, 15);
+    u.scene = OK_UI_WALLET;
+    u.wallet_progress = 45;
+    shot(dir, "wallet-scribble", &u, &p, 15);
+    u.wallet_ready = 1;
+    strcpy(u.wallet_address, "0x9d8A62f656a8d1615C1294fd71e9CFb3E4855A4F");
+    shot(dir, "wallet", &u, &p, 15);
     return 0;
 }

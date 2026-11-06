@@ -1,11 +1,14 @@
 /* Host peer: the core's session (RLPx handshake, Hello, eth/69 Status,
  * Ping/Pong, Disconnect) over a socket. Sockets and entropy live here, never
- * in core/. It sends no transactions.
+ * in core/. It sends a transaction only when given one with --tx.
  *
  *   build/okupa-peer enode://<128 hex>@<ipv4>:<port>   dial a node (we initiate)
  *   build/okupa-peer --listen <port>                  answer one dial (for tests)
  *   build/okupa-peer --listen <port> --key <hex file>  with a fixed identity
  *   build/okupa-peer --hold <seconds> enode://...     stay connected after admission
+ *   build/okupa-peer --mainnet enode://...            Ethereum mainnet instead of Sepolia
+ *   build/okupa-peer --tx <hex> enode://...           hand over a signed transaction after Status
+ *                                                     (only to nodes you run: it broadcasts it)
  */
 #include "okupa_keys.h"
 #include "okupa_session.h"
@@ -97,6 +100,10 @@ static int sock_write(void *ctx, const uint8_t *buf, size_t n)
 }
 
 static time_t hold_until;
+static uint8_t tx[4096];
+static size_t tx_len;
+static const uint8_t *tx_list[1] = {tx};
+static const ok_eth_network *net = &ok_sepolia;
 static int hold_on(void *ctx)
 {
     (void)ctx;
@@ -143,9 +150,14 @@ static int dial(const char *enode, const uint8_t priv[32])
     io.write = sock_write;
     io.log = sock_log;
     io.hold = hold_until ? hold_on : NULL;
+    if (tx_len) {
+        io.txs = tx_list;
+        io.tx_lens = &tx_len;
+        io.tx_count = 1;
+    }
     io.ctx = &fd;
     fresh(&e);
-    ok_session_dial(&io, priv, remote_pub, &e, &ok_sepolia, (uint64_t)time(NULL), CLIENT, &rep);
+    ok_session_dial(&io, priv, remote_pub, &e, net, (uint64_t)time(NULL), CLIENT, &rep);
     ok_wipe(&e, sizeof e);
     close(fd);
     return rep.outcome == OK_SESSION_PASS;
@@ -176,7 +188,7 @@ static int listen_once(unsigned port, const uint8_t priv[32], const uint8_t pub[
     io.log = sock_log;
     io.ctx = &fd;
     fresh(&e);
-    ok_session_answer(&io, priv, &e, &ok_sepolia, (uint64_t)time(NULL), CLIENT, &rep);
+    ok_session_answer(&io, priv, &e, net, (uint64_t)time(NULL), CLIENT, &rep);
     ok_wipe(&e, sizeof e);
     close(fd);
     return rep.outcome == OK_SESSION_PASS;
@@ -199,6 +211,14 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--listen") && i + 1 < argc) listen_port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--key") && i + 1 < argc) key = argv[++i];
+        else if (!strcmp(argv[i], "--mainnet")) net = &ok_mainnet;
+        else if (!strcmp(argv[i], "--tx") && i + 1 < argc) {
+            /* A signed transaction in hex, handed over as soon as Status arrives. */
+            const char *h = argv[++i];
+            size_t n = strlen(h) / 2;
+            if (n > sizeof tx || !unhex(h, tx, n)) die("--tx: hex of a signed transaction");
+            tx_len = n;
+        }
         else if (!strcmp(argv[i], "--hold") && i + 1 < argc) hold_until = time(NULL) + atoi(argv[++i]);
         else enode = argv[i];
     }

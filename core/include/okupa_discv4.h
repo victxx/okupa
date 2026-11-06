@@ -80,10 +80,15 @@ typedef struct {
 void ok_v4_crawl_init(ok_v4_crawl *c, const uint8_t priv[32], const uint8_t want_fork[4], uint32_t seed);
 /* Start from a node record ("enr:..."), e.g. a network's bootnodes. */
 ok_result ok_v4_crawl_add_enr(ok_v4_crawl *c, const char *text);
+/* Or from a node we already know (e.g. from the DNS list); UDP port = TCP port. */
+void ok_v4_crawl_add_node(ok_v4_crawl *c, const uint8_t id[64], const ok_v4_endpoint *at);
 void ok_v4_crawl_step(ok_v4_crawl *c, uint32_t now);
 
-/* Sepolia's bootnodes as go-ethereum v1.17.7 ships them (params/bootnodes.go). */
+/* Bootnodes as go-ethereum v1.17.7 ships them (params/bootnodes.go, the EF
+ * NodeOps records). */
 extern const char *const ok_sepolia_bootnodes[];
 extern const int ok_sepolia_bootnode_count;
+extern const char *const ok_mainnet_bootnodes[];
+extern const int ok_mainnet_bootnode_count;
 
 #endif

@@ -52,12 +52,12 @@ int main(void)
 
     /* Dev asks the platform to run the checks; Back returns. */
     assert(ok_ui_touch(&u, &p, 221, 130, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
-    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
+    assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Wi-Fi from Dev: search, pick a secured network, type its password. */
     assert(ok_ui_touch(&u, &p, 221, 130, 0, t) == OK_UI_RUN_CHECKS);
-    assert(ok_ui_touch(&u, &p, 130, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
+    assert(ok_ui_touch(&u, &p, 90, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
     u.ap_count = 2;
     strcpy(u.aps[0].ssid, "iPhone de Okupa");
     u.aps[0].secure = 1;
@@ -81,6 +81,21 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 100, 30, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_PASSWORD);
     assert(ok_ui_touch(&u, &p, 60, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_WIFI); /* Cancel */
     ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DEV);
+
+    /* Wallet: scribbling (held or not) feeds the key until it is ready. */
+    assert(ok_ui_touch(&u, &p, 150, 176, 0, t) == OK_UI_WALLET_OPEN && u.scene == OK_UI_WALLET);
+    assert(ok_ui_touch(&u, &p, 100, 60, 0, t) == OK_UI_WALLET_SCRIBBLE);
+    assert(ok_ui_touch(&u, &p, 120, 70, 1, t) == OK_UI_WALLET_SCRIBBLE);
+    u.wallet_progress = 40;
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    u.wallet_ready = 1;
+    strcpy(u.wallet_address, "0x9d8A62f656a8d1615C1294fd71e9CFb3E4855A4F");
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 100, 60, 0, t) == OK_UI_NOTHING);
+    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_WALLET_HELLO);
+    assert(ok_ui_touch(&u, &p, 50, 176, 1, t) == OK_UI_NOTHING);
+    assert(ok_ui_touch(&u, &p, 200, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 

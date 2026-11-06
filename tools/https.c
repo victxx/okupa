@@ -1,6 +1,7 @@
 /* HTTPS with the core alone (BearSSL TLS + our HTTP), the way the console will
  * talk to 0G. Only the TCP socket and the entropy live here.
  *   build/okupa-https <host> <path> [json body]   (POST if a body is given) */
+#define _POSIX_C_SOURCE 200809L /* getaddrinfo with -std=c99 */
 #include "okupa_http.h"
 #include "okupa_tls.h"
 #include <netdb.h>
