@@ -40,9 +40,9 @@ Open two monkeys. Two origins means two separate keys:
 
 1. On each monkey, press **Fund from local dev chains**. The dev nodes' unlocked accounts send it 1 coin each, on Geth and on Arkiv.
 2. On B, copy the **Friend code** (`0xADDRESS:PUBLICKEY`).
-3. On A, draw, paste B's code in **To**, then press **Gift via Swarm + Arkiv**. What really happened is listed at the bottom of the page.
-4. On B, press **Check mailbox**. The gift is found in Arkiv, checked on chain, its seal opened, fetched from Swarm, hash-checked, then hung on the wall.
-5. **Inline gift (DSi format)** puts a 64×64 one-bit drawing inside the transaction (`OKPA 01 03`). The DSi reads that form.
+3. On A, draw, paste B's code in **To**, then press **Send privately**. What really happened is listed at the bottom of the page.
+4. On B, press **Check**. The gift is found in Arkiv, checked on chain, its seal opened, fetched from Swarm, hash-checked, then hung on the wall.
+5. **Send small gift** puts a 64×64 one-bit drawing inside the transaction (`OKPA 01 03`). The DSi reads that form.
 6. **Visit a monkey** shows any address's hellos, drawings and gifts:
    - On local, it scans recent blocks.
    - On Sepolia/mainnet, Blockscout finds the transactions and RPC checks each one.

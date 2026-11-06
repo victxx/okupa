@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/../.."
 LD=${WASM_LD:-$(command -v wasm-ld || echo /opt/homebrew/opt/lld/bin/wasm-ld)}
 OUT=build/web/scene; mkdir -p $OUT web/public
-SRC="web/scene/scene.c game/src/house.c game/src/monkey.c game/src/r3d.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c core/src/act.c"
+SRC="web/scene/scene.c game/src/house.c game/src/monkey.c game/src/r3d.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/sky_art.c game/src/plant_art.c core/src/act.c"
 for f in $SRC; do
   clang --target=wasm32 -std=c99 -O2 -ffreestanding -fno-builtin -nostdlibinc -isystem web/scene/include \
     -isystem "$(clang -print-resource-dir)/include" -Icore/include -Igame/include -c $f -o $OUT/$(basename $f .c).o

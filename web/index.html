@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="#home"><span class="dot" aria-hidden="true"></span>Okupa</a>
+    <a class="brand" href="#home">Okupa</a>
     <nav aria-label="Sections">
       <a href="#gift">Give</a><a href="#mailbox">Mailbox</a><a href="#cave-room">Cave</a><a href="#visit-room">Visit</a><a href="#log-room">Log</a>
     </nav>
@@ -16,39 +16,34 @@
   </header>
 
   <section id="home" class="hero">
-    <div class="screen-wrap">
-      <canvas id="scene" width="256" height="192" aria-label="Your okupa in its attic. Click to pet it."></canvas>
-      <p id="sceneNote" class="screen-note">Drawn by the console's own renderer (C, compiled to WebAssembly). Click to pet.</p>
-    </div>
+    <canvas id="scene" width="256" height="192" aria-label="Your okupa in its attic. Click to pet it."></canvas>
     <aside class="who">
       <p class="eyebrow">Your okupa</p>
       <h1 id="addr" class="mono">…</h1>
-      <p class="muted">It lives in this browser: its key was made here and never leaves. Another browser is another okupa. Friends anywhere (a DSi, another browser) can give it things.</p>
       <label>Friend code <input id="mycode" readonly class="mono"></label>
       <p class="muted" id="balance"></p>
       <button id="fund" class="ghost" hidden>Fund from local dev chains</button>
-      <p id="netlabel" class="band"></p>
+      <p id="netlabel" class="muted small"></p>
     </aside>
   </section>
 
   <main>
     <section id="gift" class="card span2">
-      <div class="card-head"><h2>Give a gift</h2><label class="to">To <input id="to" class="mono" placeholder="friend code 0x…:04…  (or a DSi address for a small inline gift)"></label></div>
+      <h2>Give a gift</h2>
+      <label>To <input id="to" class="mono" placeholder="friend code 0x…:04…, or a DSi address"></label>
       <div class="two">
-        <div class="pane">
-          <h3>Small gift <span class="tag">on Ethereum</span></h3>
-          <p class="muted">A 64×64 drawing that travels inside the transaction. It hangs on your friend's attic wall, on a DSi too.</p>
+        <div>
+          <h3>Small <span class="tag">64×64 · on Ethereum</span></h3>
           <canvas id="sketch" width="256" height="256" aria-label="64 by 64 drawing"></canvas>
           <div class="row" id="tones"></div>
           <div class="row">
             <button id="sendInline">Send small gift</button>
-            <button id="sendSwarm" class="ghost">Send privately via Swarm</button>
+            <button id="sendSwarm" class="ghost">Send privately</button>
             <button id="clear" class="ghost">New page</button>
           </div>
         </div>
-        <div class="pane">
-          <h3>Big gift <span class="tag">on Swarm</span></h3>
-          <p class="muted">A photo from this computer, turned into 256×192 in four tones: something a DSi could never fetch itself. Encrypted on Swarm; the transaction only carries its sealed reference. It goes to your friend's cave.</p>
+        <div>
+          <h3>Big <span class="tag">a photo · to the cave</span></h3>
           <canvas id="bigPreview" class="big" width="256" height="192" aria-label="Big picture preview, 256 by 192"></canvas>
           <div class="row">
             <label class="file">Choose a photo<input id="photo" type="file" accept="image/*"></label>
@@ -59,27 +54,23 @@
     </section>
 
     <section id="mailbox" class="card">
-      <div class="card-head"><h2>Mailbox</h2><button id="check">Check</button></div>
-      <p class="muted">Arkiv says where to look; every gift is checked on Ethereum before it is hung.</p>
+      <div class="head"><h2>Mailbox</h2><button id="check" class="ghost">Check</button></div>
       <ol id="mail" class="list"></ol>
-      <h3>On the wall</h3>
       <div id="wall" class="wall"></div>
     </section>
 
-    <section id="cave-room" class="card cave-room">
+    <section id="cave-room" class="card">
       <h2>The cave</h2>
-      <p class="muted">Where big pictures from friends are kept. Click one to look closer.</p>
       <div id="cave" class="cave"></div>
     </section>
 
     <section id="visit-room" class="card span2">
       <h2>Visit an okupa</h2>
-      <div class="row"><input id="visitAddr" class="mono" placeholder="0x… (a DSi okupa's address)"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
-      <p class="muted">Its hellos, drawings and gifts, read from the chain. An explorer only says where to look; each transaction's signature, recipient and calldata are checked here. Reads can go through anon-rpc.</p>
+      <div class="row"><input id="visitAddr" class="mono" placeholder="0x… address"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
       <div id="visitOut" class="wall"></div>
     </section>
 
-    <section id="log-room" class="card span2 log">
+    <section id="log-room" class="card span2">
       <h2>What really happened</h2>
       <ol id="log"></ol>
     </section>

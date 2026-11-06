@@ -137,7 +137,7 @@ function renderWall(animateNewest = false) {
   const w = $('wall'); w.replaceChildren();
   const hung = store.get(wallKey(), []);
   hangInAttic(animateNewest);
-  if (!hung.length) { w.textContent = 'Nothing hung yet.'; w.className = 'wall muted'; return; }
+  if (!hung.length) { w.textContent = 'Nothing on the wall yet.'; w.className = 'wall muted'; return; }
   w.className = 'wall';
   for (const h of hung) w.append(frame(hexToBytes(h.pixels), h.bpp, [`from ${h.from.slice(0, 10)}…`, `${h.how}`, `tx ${h.tx.slice(0, 12)}…`]));
 }
@@ -172,7 +172,7 @@ function setupNet() {
   $('net').onchange = () => { netId = $('net').value; store.set('net', netId); showNet(); };
   showNet();
 }
-function showNet() { if ($('fund')) $('fund').hidden = !net().devFaucet; $('netlabel').textContent = net().label + ' A browser cannot open TCP, so this monkey reads and sends through JSON-RPC (the DSi talks devp2p directly).'; renderWall(); renderCave(); refreshBalance(); }
+function showNet() { if ($('fund')) $('fund').hidden = !net().devFaucet; $('netlabel').textContent = net().label; renderWall(); renderCave(); refreshBalance(); }
 
 // ---------- sending ----------
 async function busy(btn, fn) {
@@ -298,7 +298,7 @@ const caveKey = () => `cave.${net().chainId}`;
 function renderCave() {
   const w = $('cave'); w.replaceChildren();
   const items = store.get(caveKey(), []);
-  if (!items.length) { w.textContent = 'Dark and empty. Big pictures from friends end up here.'; w.className = 'cave muted'; return; }
+  if (!items.length) { w.textContent = 'Empty. Big pictures from friends end up here.'; w.className = 'cave muted'; return; }
   w.className = 'cave';
   for (const it of items) {
     const f = document.createElement('button'); f.className = 'bigframe';
@@ -373,7 +373,7 @@ async function devFund() {
 // ---------- boot ----------
 $('addr').textContent = account.address;
 startScene($('scene')).then((sc) => { scene = sc; hangInAttic(false); })
-  .catch((e) => { $('sceneNote').textContent = `The attic could not start here (${e.message}).`; });
+  .catch((e) => { log(`The attic could not start here (${e.message}).`, 'bad'); });
 $('mycode').value = friendCode;
 $('mycode').onclick = () => { $('mycode').select(); navigator.clipboard?.writeText(friendCode).catch(() => {}); };
 setupSketch();
@@ -382,6 +382,8 @@ $('sendSwarm').onclick = (e) => busy(e.target, sendSwarmGift);
 $('sendInline').onclick = (e) => busy(e.target, sendInlineGift);
 $('sendBig').onclick = (e) => busy(e.target, sendBigGift);
 $('photo').onchange = (e) => { const f = e.target.files?.[0]; if (f) loadPhoto(f).catch((err) => log(`✗ ${err.message}`, 'bad')); };
+$('to').value = store.get('to', '');
+$('to').oninput = () => store.set('to', $('to').value.trim());
 $('lookClose').onclick = () => $('look').close();
 $('check').onclick = (e) => busy(e.target, checkMailbox);
 $('visit').onclick = (e) => busy(e.target, visit);
