@@ -138,6 +138,12 @@ int main(void)
             redraw = 1;
             snprintf(ui.net_status, sizeof ui.net_status, "%s", ok_dsi_net_summary());
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
+            {
+                uint8_t hash[32];
+                if (ok_dsi_net_pending(hash))
+                    snprintf(ui.wallet_status, sizeof ui.wallet_status, "Hello %02x%02x%02x%02x: %d nodes", hash[0], hash[1],
+                             hash[2], hash[3], ok_dsi_net_handed());
+            }
         }
         if (keysHeld() & KEY_TOUCH) {
             int r;
@@ -172,6 +178,17 @@ int main(void)
                 ok_dsi_account_open(storage ? key_path : NULL, &ui);
             }
             if (r == OK_UI_WALLET_SCRIBBLE) ok_dsi_account_scribble(touch.px, touch.py, &ui);
+            if (r == OK_UI_WALLET_HELLO && storage) {
+                /* One hello at a time: while one is waiting, pressing again
+                 * just keeps handing out the same bytes. */
+                uint8_t tx[512], hash[32];
+                size_t len;
+                if (!ok_dsi_net_pending(hash)) {
+                    uint64_t nonce = ok_dsi_net_take_nonce();
+                    if (ok_dsi_account_hello(ok_dsi_net_chain_id(), nonce, tx, sizeof tx, &len, hash))
+                        ok_dsi_net_send(tx, len, hash);
+                }
+            }
             if (r == OK_UI_RUN_NETWORK) show_net = 1; /* the postman is always running: just show it */
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {

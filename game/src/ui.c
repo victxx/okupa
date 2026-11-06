@@ -293,7 +293,9 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
                 for (x = 0; x < size; x++)
                     if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
         }
-        centred(f, font, 100, 172, "Scan to send ETH", PAPER, 1);
+        centred(f, font, 128, 144, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
+        frame_box(f, 4, 166, 120, 22, PAPER, INK);
+        centred(f, font, 64, 173, "Send hello", INK, 1);
     }
     frame_box(f, 190, 166, 62, 22, PAPER, INK);
     centred(f, font, 221, 173, "Back", INK, 1);
@@ -461,6 +463,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (u->scene == OK_UI_WALLET) {
         if (!u->wallet_ready && inside(x, y, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H)) return OK_UI_WALLET_SCRIBBLE;
+        if (u->wallet_ready && !held && inside(x, y, 4, 166, 120, 22)) return OK_UI_WALLET_HELLO;
         if (held || !inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;
         u->scene = OK_UI_DEV;
         return OK_UI_CHANGED;

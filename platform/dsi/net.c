@@ -44,7 +44,11 @@ static const profile *net = &mainnet;
 #define LINES 14
 
 static char lines[LINES][33], summary[33] = "Network: starting";
-static char log_path[48], peers_path[48], wifi_path[48];
+static char log_path[48], peers_path[48], wifi_path[48], pending_path[48], nonce_path[48];
+static uint8_t pending[1200], pending_hash[32];
+static size_t pending_len;
+static int handed;
+static const uint8_t *pending_list[1] = {pending};
 static volatile int ui_wifi; /* the player is scanning or connecting: stand back */
 static struct in_addr dns_server;
 static uint16_t dns_id = 0x4f4b;
@@ -108,7 +112,62 @@ void ok_dsi_net_files(const char *dir)
     snprintf(log_path, sizeof log_path, "%snet-log.txt", dir);
     snprintf(peers_path, sizeof peers_path, "%speers-%s.txt", dir, net->name);
     snprintf(wifi_path, sizeof wifi_path, "%swifi.txt", dir);
+    snprintf(pending_path, sizeof pending_path, "%spending-%s.hex", dir, net->name);
+    snprintf(nonce_path, sizeof nonce_path, "%snonce-%s.txt", dir, net->name);
     load_known_networks();
+    /* A transaction still waiting from last time: same bytes, same hash. */
+    if ((f = fopen(pending_path, "r"))) {
+        char hex[2 * sizeof pending + 4];
+        size_t n = 0;
+        unsigned v;
+        if (fgets(hex, sizeof hex, f))
+            while (n < sizeof pending && sscanf(hex + 2 * n, "%2x", &v) == 1) pending[n++] = (uint8_t)v;
+        fclose(f);
+        if (n > 1) {
+            pending_len = n;
+            ok_keccak256(pending, n, pending_hash);
+        }
+    }
+}
+
+uint64_t ok_dsi_net_chain_id(void) { return net->net->network_id; }
+int ok_dsi_net_handed(void) { return handed; }
+
+int ok_dsi_net_pending(uint8_t hash[32])
+{
+    if (pending_len && hash) memcpy(hash, pending_hash, 32);
+    return pending_len != 0;
+}
+
+uint64_t ok_dsi_net_take_nonce(void)
+{
+    unsigned long long nonce = 0;
+    FILE *f = fopen(nonce_path, "r");
+    if (f) {
+        if (fscanf(f, "%llu", &nonce) != 1) nonce = 0;
+        fclose(f);
+    }
+    if ((f = fopen(nonce_path, "w"))) {
+        fprintf(f, "%llu\n", nonce + 1);
+        fclose(f);
+    }
+    return nonce;
+}
+
+void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32])
+{
+    FILE *f;
+    size_t i;
+    if (n > sizeof pending) return;
+    memcpy(pending, tx, n);
+    memcpy(pending_hash, hash, 32);
+    pending_len = n;
+    handed = 0;
+    if ((f = fopen(pending_path, "w"))) {
+        for (i = 0; i < n; i++) fprintf(f, "%02x", pending[i]);
+        fprintf(f, "\n");
+        fclose(f);
+    }
 }
 
 const char *ok_dsi_net_name(void) { return net->name; }
@@ -632,6 +691,11 @@ static int dial(int i, int row)
     io.write = sock_write;
     io.log = sock_log;
     io.hold = hold;
+    if (pending_len) {
+        io.txs = pending_list;
+        io.tx_lens = &pending_len;
+        io.tx_count = 1;
+    }
     io.ctx = &fd;
     current_row = row;
     current_node = i;
@@ -646,6 +710,13 @@ static int dial(int i, int row)
     /* A node that reached Status can take a transaction even if it is full
      * (it is handed over before it hangs up): worth remembering. */
     if (rep.status) remember_peer(i);
+    if (rep.tx_written) {
+        char text[48];
+        handed++;
+        snprintf(text, sizeof text, "Hello handed to %d nodes", handed);
+        say(text);
+        line(LINES - 1, "%s", text);
+    }
     if (rep.outcome == OK_SESSION_PASS) {
         line(row, "%u.%u.%u.%u: was online", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
         return 1;

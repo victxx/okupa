@@ -93,6 +93,8 @@ int main(void)
     strcpy(u.wallet_address, "0x9d8A62f656a8d1615C1294fd71e9CFb3E4855A4F");
     ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
     assert(ok_ui_touch(&u, &p, 100, 60, 0, t) == OK_UI_NOTHING);
+    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_WALLET_HELLO);
+    assert(ok_ui_touch(&u, &p, 50, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
