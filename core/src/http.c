@@ -2,13 +2,14 @@
 #include <stdio.h>
 #include <string.h>
 
-ok_result ok_http_request(const char *method, const char *host, const char *path, const char *headers,
-                          const char *body, size_t body_len, char *out, size_t cap, size_t *len)
+static ok_result request(const char *method, const char *host, const char *path, const char *headers,
+                         const char *body, size_t body_len, const char *connection, char *out, size_t cap,
+                         size_t *len)
 {
     int k;
     if (!method || !host || !path || !out || !len || (!body && body_len)) return OK_ARGUMENT;
-    k = snprintf(out, cap, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: okupa/0.1\r\nConnection: close\r\n%s",
-                 method, path, host, headers ? headers : "");
+    k = snprintf(out, cap, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: okupa/0.1\r\nConnection: %s\r\n%s",
+                 method, path, host, connection, headers ? headers : "");
     if (k < 0 || (size_t)k >= cap) return OK_RANGE;
     if (body) {
         int m = snprintf(out + k, cap - (size_t)k, "Content-Length: %lu\r\n\r\n", (unsigned long)body_len);
@@ -23,6 +24,18 @@ ok_result ok_http_request(const char *method, const char *host, const char *path
     }
     out[*len] = 0; /* for logs; the length is what counts */
     return OK_OK;
+}
+
+ok_result ok_http_request(const char *method, const char *host, const char *path, const char *headers,
+                          const char *body, size_t body_len, char *out, size_t cap, size_t *len)
+{
+    return request(method, host, path, headers, body, body_len, "close", out, cap, len);
+}
+
+ok_result ok_http_request_alive(const char *method, const char *host, const char *path, const char *headers,
+                                const char *body, size_t body_len, char *out, size_t cap, size_t *len)
+{
+    return request(method, host, path, headers, body, body_len, "keep-alive", out, cap, len);
 }
 
 static int lower(int c) { return c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c; }
