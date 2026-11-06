@@ -19,6 +19,8 @@ static uint32_t crc(uint32_t c, const uint8_t *p, size_t n)
     return c;
 }
 
+uint32_t ok_png_crc(const uint8_t *p, size_t n) { return crc(0xffffffffu, p, n) ^ 0xffffffffu; }
+
 static void be32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)(v >> 24);

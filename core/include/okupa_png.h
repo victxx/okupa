@@ -15,4 +15,13 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
  * PNG, each pixel scale x scale (1..4). */
 ok_result ok_png_drawing(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len);
 
+/* Reads a PNG back (8-bit grey, RGB or RGBA, not interlaced): any deflate
+ * blocks, every scanline filter, CRCs and Adler-32 checked. Pixels become DS
+ * colours (BGR555, bit 15 set). scratch must hold the compressed data plus
+ * height * (1 + width * channels) bytes. */
+ok_result ok_png_read_rgb15(const uint8_t *png, size_t n, uint16_t *out, size_t max_pixels, int *w, int *h,
+                            uint8_t *scratch, size_t scratch_cap);
+/* PNG's CRC-32 of a chunk's type and data. */
+uint32_t ok_png_crc(const uint8_t *p, size_t n);
+
 #endif
