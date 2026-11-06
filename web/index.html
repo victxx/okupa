@@ -3,80 +3,189 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Okupa</title>
+  <title>Okupa: a tiny squatter living in your Nintendo DSi</title>
+  <meta name="description" content="A companion game for the Nintendo DSi that joins Ethereum by itself, peer to peer, with no server in between. Its mind runs on 0G.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%232b2a28'/><rect x='4' y='4' width='8' height='8' fill='%23e9e5dc'/></svg>">
   <link rel="stylesheet" href="./src/style.css">
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="#home">Okupa</a>
+    <a class="brand" href="#home" aria-label="Okupa"><canvas id="logoSmall" aria-hidden="true"></canvas></a>
     <nav aria-label="Sections">
-      <a href="#gift">Give</a><a href="#mailbox">Mailbox</a><a href="#cave-room">Cave</a><a href="#visit-room">Visit</a><a href="#log-room">Log</a>
+      <a href="#story">Story</a><a href="#how">How it works</a><a href="#play">Play</a><a href="#friends">Web friends</a>
     </nav>
-    <select id="net" aria-label="Network"></select>
+    <a class="button ghost sm" href="https://github.com/victxx/okupa" rel="noopener">GitHub</a>
   </header>
 
   <section id="home" class="hero">
-    <canvas id="scene" width="256" height="192" aria-label="Your okupa in its attic. Click to pet it."></canvas>
-    <aside class="who">
-      <p class="eyebrow">Your okupa</p>
-      <h1 id="addr" class="mono">…</h1>
-      <label>Friend code <input id="mycode" readonly class="mono"></label>
-      <p class="muted" id="balance"></p>
-      <button id="fund" class="ghost" hidden>Fund from local dev chains</button>
-      <p id="netlabel" class="muted small"></p>
-    </aside>
+    <div class="pitch">
+      <h1 class="logo"><canvas id="logo" role="img" aria-label="OKUPA"></canvas></h1>
+      <p class="tagline">A tiny squatter living in your Nintendo&nbsp;DSi.</p>
+      <p class="lead">It moved into your console and won't leave. It has an attic, its own days and a mind on 0G. When it sends something, the DSi itself carries it to Ethereum, peer to peer. No server, no RPC.</p>
+      <div class="row">
+        <a class="button" href="./download/okupa.nds" download>Download for DSi</a>
+        <a class="button ghost" href="#how">How it works</a>
+      </div>
+      <p class="muted small" id="romInfo">Built from main.</p>
+    </div>
+    <figure class="screen">
+      <canvas id="scene" width="256" height="192" aria-label="The okupa in its attic. Click to pet it."></canvas>
+      <figcaption class="muted small">Live. This is the DSi's own renderer, compiled to WebAssembly: the same C, the same 256×192 pixels. Click to pet it.</figcaption>
+    </figure>
+  </section>
+
+  <section class="tldr" aria-label="In short">
+    <div><b>2009 handheld</b><span>133 MHz ARM9, 16 MB RAM</span></div>
+    <div><b>Straight to Ethereum</b><span>devp2p from the console, no RPC</span></div>
+    <div><b>Signs on the DSi</b><span>a transaction in 30 ms</span></div>
+    <div><b>Mind on 0G</b><span>each decision TEE-signed and checked</span></div>
   </section>
 
   <main>
-    <section id="gift" class="card span2">
-      <h2>Give a gift</h2>
-      <label>To <input id="to" class="mono" placeholder="friend code 0x…:04…, or a DSi address"></label>
-      <div class="two">
+    <section id="story" class="block">
+      <p class="eyebrow">The story</p>
+      <h2>A pet that needs nobody's permission.</h2>
+      <div class="cols">
         <div>
-          <h3>Small <span class="tag">64×64 · on Ethereum</span></h3>
-          <canvas id="sketch" width="256" height="256" aria-label="64 by 64 drawing"></canvas>
-          <div class="row" id="tones"></div>
-          <div class="row">
-            <button id="sendInline">Send small gift</button>
-            <button id="sendSwarm" class="ghost">Send privately</button>
-            <button id="clear" class="ghost">New page</button>
-          </div>
+          <h3>What</h3>
+          <p>A cozy companion game. You feed it, play with it and draw for it. It hangs your drawings on its wall, dreams, makes little things and writes you letters. Its mind runs on 0G and decides what it does next.</p>
         </div>
         <div>
-          <h3>Big <span class="tag">a photo · to the cave</span></h3>
-          <canvas id="bigPreview" class="big" width="256" height="192" aria-label="Big picture preview, 256 by 192"></canvas>
-          <div class="row">
-            <label class="file">Choose a photo<input id="photo" type="file" accept="image/*"></label>
-            <button id="sendBig" disabled>Send big gift</button>
-          </div>
+          <h3>Why</h3>
+          <p>Ethereum promises that anyone can take part without asking. We wanted to test that at the very edge. If a 2009 handheld can find nodes, sign and hand over its own transactions, with no company in the middle, then anything can.</p>
+        </div>
+        <div>
+          <h3>When and where</h3>
+          <p>Built for ETHGlobal Mumbai, November 2026, from an empty repository. It runs on a real Nintendo DSi, on macOS and Linux, and in this page.</p>
         </div>
       </div>
     </section>
 
-    <section id="mailbox" class="card">
-      <div class="head"><h2>Mailbox</h2><button id="check" class="ghost">Check</button></div>
-      <ol id="mail" class="list"></ol>
-      <div id="wall" class="wall"></div>
+    <section id="how" class="block">
+      <p class="eyebrow">How it works</p>
+      <h2>One small C core, everywhere.</h2>
+      <div class="cards">
+        <article>
+          <h3>Ethereum, peer to peer</h3>
+          <p>The DSi finds nodes through Ethereum's DNS lists and discv4, does the RLPx handshake, speaks eth/69 and hands its signed transaction to each node it reaches. Nobody relays for it.</p>
+        </article>
+        <article>
+          <h3>Its own key</h3>
+          <p>The key is made on the console from your stylus scribbles, timed by the DSi's 33 MHz clock. It never leaves the SD card. Keccak, secp256k1, RLP and EIP-1559 all run on the ARM9.</p>
+        </article>
+        <article>
+          <h3>A mind on 0G</h3>
+          <p>Each decision is chosen from a closed set and signed by a TEE. The console checks that signature in C, over its own bytes, before acting. If 0G can't be verified, the okupa naps; it never pretends.</p>
+        </article>
+        <article>
+          <h3>Did it land?</h3>
+          <p>The core asks peers for new blocks, re-hashes each header and rebuilds the transaction trie to find its own hash. That is how the okupa checks inclusion without trusting anyone.</p>
+        </article>
+      </div>
+      <div class="proof">
+        <h3>Real today</h3>
+        <ul class="checks">
+          <li><span class="ok">✓</span><span>The core runs on a real DSi: public key 23 ms, sign a transaction 30 ms, ECDH 43 ms.</span></li>
+          <li><span class="ok">✓</span><span>The DSi joins Wi-Fi, verifies Ethereum's DNS node list and completes RLPx handshakes with public nodes.</span></li>
+          <li><span class="ok">✓</span><span>Verified decisions from 0G mainnet, checked in C (request id <span class="mono">b499b8ea…</span>).</span></li>
+          <li><span class="ok">✓</span><span>Two web okupas exchanged three gifts on Ethereum mainnet:
+            <a href="https://etherscan.io/tx/0x5c20ad2c25651b828e1062240824c7f39a463a29c08bed00c13ba468d2e8d98a" rel="noopener">drawing</a>,
+            <a href="https://etherscan.io/tx/0x2bed6768a06f2751fce96999c4cbd83ebf5c9d5677b32909fe0b11c0f1bd7f4c" rel="noopener">private drawing</a>,
+            <a href="https://etherscan.io/tx/0xaa04cef6609ade1f6c7a1fbe823a4cb818f9663c6fefd2faee02f2ef58315477" rel="noopener">photo</a>.</span></li>
+          <li><span class="next">→</span><span>Next: a DSi-signed drawing included on mainnet, and the DSi hanging gifts from web friends.</span></li>
+        </ul>
+      </div>
     </section>
 
-    <section id="cave-room" class="card">
-      <h2>The cave</h2>
-      <div id="cave" class="cave"></div>
+    <section id="play" class="block">
+      <p class="eyebrow">Play</p>
+      <h2>Put it on your DSi.</h2>
+      <ol class="steps">
+        <li><b>Download</b><span>okupa.nds and the README.</span></li>
+        <li><b>Copy</b><span>okupa.nds to the SD card, for example /roms/nds/.</span></li>
+        <li><b>Start</b><span>it from your homebrew menu. It makes sd:/okupa/ by itself.</span></li>
+      </ol>
+      <div class="files">
+        <a class="file-row" href="./download/okupa.nds" download><span class="ext">NDS</span><span><b>okupa.nds</b><small id="romLine">The game</small></span><span class="go">↓</span></a>
+        <a class="file-row" href="./download/README.txt" download><span class="ext">TXT</span><span><b>README.txt</b><small>Install, what it keeps on the SD, Wi-Fi, mainnet or Sepolia</small></span><span class="go">↓</span></a>
+        <a class="file-row" href="https://github.com/victxx/okupa" rel="noopener"><span class="ext">GIT</span><span><b>github.com/victxx/okupa</b><small>Source and the latest builds</small></span><span class="go">↗</span></a>
+      </div>
     </section>
 
-    <section id="visit-room" class="card span2">
-      <h2>Visit an okupa</h2>
-      <div class="row"><input id="visitAddr" class="mono" placeholder="0x… address"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
-      <div id="visitOut" class="wall"></div>
-    </section>
+    <section id="friends" class="block">
+      <p class="eyebrow">Web friends</p>
+      <h2>Have an okupa in your browser too.</h2>
+      <p class="muted wide">A browser can't open raw sockets, so this one talks to Ethereum through an RPC. The DSi doesn't need that. Its key is made here and stays here. Small drawings travel inside one transaction, in the DSi's own format. Photos are too big for that: they go encrypted to Swarm, and an Arkiv mailbox says where to look.</p>
 
-    <section id="log-room" class="card span2">
-      <h2>What really happened</h2>
-      <ol id="log"></ol>
+      <div class="panel" id="you">
+        <div class="head"><h3>Your web okupa</h3><select id="net" aria-label="Network"></select></div>
+        <div class="kv"><span>Address</span><span id="addr" class="mono">…</span></div>
+        <label>Friend code <input id="mycode" readonly class="mono" title="Click to copy"></label>
+        <p class="muted small" id="balance"></p>
+        <p class="muted small" id="netlabel"></p>
+        <button id="fund" class="ghost" hidden>Fund from local dev chains</button>
+      </div>
+
+      <div class="panel" id="gift">
+        <h3>Give a gift</h3>
+        <label class="to">To <input id="to" class="mono" placeholder="friend code 0x…:04…, or a DSi address for a drawing"></label>
+        <div class="tabs" role="tablist">
+          <button role="tab" id="tabSmall" aria-selected="true" aria-controls="paneSmall">Drawing <small>64×64</small></button>
+          <button role="tab" id="tabBig" aria-selected="false" aria-controls="paneBig">Photo <small>256×192</small></button>
+        </div>
+        <div id="paneSmall" role="tabpanel">
+          <div class="pane-body">
+            <canvas id="sketch" width="256" height="256" aria-label="64 by 64 drawing"></canvas>
+            <div class="pane-side">
+              <p class="muted">Draw with the four tones. It hangs on your friend's attic wall, on a DSi too.</p>
+              <div class="row" id="tones"></div>
+              <div class="choice"><button id="sendInline">Send in the transaction</button><small>The picture travels inside one Ethereum transaction. A DSi can read it.</small></div>
+              <div class="choice"><button id="sendSwarm" class="ghost">Send privately</button><small>Encrypted on Swarm; only your friend can open it. Browsers only for now.</small></div>
+              <button id="clear" class="link">New page</button>
+            </div>
+          </div>
+        </div>
+        <div id="paneBig" role="tabpanel" hidden>
+          <div class="pane-body">
+            <canvas id="bigPreview" class="big" width="256" height="192" aria-label="Photo preview, 256 by 192"></canvas>
+            <div class="pane-side">
+              <p class="muted">A photo from this computer, in the game's four tones. It is encrypted on Swarm and goes to your friend's archive.</p>
+              <label class="file button ghost">Choose a photo<input id="photo" type="file" accept="image/*"></label>
+              <div class="choice"><button id="sendBig" disabled>Send photo</button><small id="beeNote"></small></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="received">
+        <div class="head"><h3>Received</h3><button id="check" class="ghost">Check mailbox</button></div>
+        <ol id="mail" class="list"></ol>
+        <div class="received">
+          <div><h4>On the wall <small>drawings</small></h4><div id="wall" class="wall"></div></div>
+          <div><h4>Archive <small>photos</small></h4><div id="cave" class="archive"></div></div>
+        </div>
+      </div>
+
+      <div class="panel" id="visit-room">
+        <h3>Visit an okupa</h3>
+        <p class="muted">Paste any okupa's address to see its hellos, drawings and gifts. Each one is checked here against the chain. <button id="tryVisit" class="link">Try the mainnet one</button></p>
+        <div class="row"><input id="visitAddr" class="mono" placeholder="0x… address"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
+        <div id="visitOut" class="wall"></div>
+      </div>
+
+      <details class="panel" id="log-room">
+        <summary>What really happened</summary>
+        <ol id="log"></ol>
+      </details>
     </section>
   </main>
 
-  <dialog id="look"><canvas id="lookCanvas" width="256" height="192"></canvas><p id="lookInfo" class="mono muted"></p><button id="lookClose" class="ghost">Close</button></dialog>
+  <footer class="foot">
+    <canvas id="logoFoot" aria-hidden="true"></canvas>
+    <span class="muted small">Built for ETHGlobal Mumbai 2026 · <a href="https://github.com/victxx/okupa" rel="noopener">GitHub</a> · <a href="./download/README.txt">README.txt</a> · Title font: Pixel Operator (CC0)</span>
+  </footer>
+
+  <dialog id="look"><canvas id="lookCanvas" width="256" height="192"></canvas><p id="lookInfo" class="mono muted"></p><div class="row"><a id="lookSave" class="button ghost" download>Download PNG</a><button id="lookClose" class="ghost">Close</button></div></dialog>
   <script type="module" src="./src/app.js"></script>
 </body>
 </html>

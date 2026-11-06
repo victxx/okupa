@@ -122,7 +122,22 @@ node scripts/funding.mjs <monkey>... --bee <bee address>
 | `src/arkiv.js` | Mailbox schema, write and query |
 | `src/chain.js` | Send through RPC; independent checks of a transaction |
 | `src/anon.js` | anon-rpc reads |
-| `src/app.js` | The page |
+| `src/app.js` | The page: landing, gifts, wall and archive |
+| `public/download/` | `okupa.nds`, `README.txt` (SD guide), `rom.json` (commit, sha256). The ROM is not in Git (`*.nds` is ignored): `sh scripts/rom.sh <okupa.nds> <commit>` copies a build there before you serve or publish the page |
 | `src/scene.js`, `scene/scene.c` | The attic: the console's renderer compiled to WebAssembly. `sh scene/build.sh` rebuilds `public/scene.wasm` (needs clang's wasm32 target and `wasm-ld`, e.g. `brew install lld`) |
 
 Keys live only in the browser's local storage. Run data goes in `../run/`, never in Git.
+
+## Landing page on Vercel
+
+The page is live at https://okupa.vercel.app. It is deployed as static files: Vercel uploads only `dist/` (see `.vercelignore`) and builds nothing. On a real host the page starts on Ethereum mainnet and hides the local dev stack.
+
+```bash
+sh scripts/rom.sh <okupa.nds> <commit>
+```
+
+```bash
+npm run build && vercel deploy --prod
+```
+
+`scripts/font.py` regenerates `src/font.js`, the title font, from the console's `game/src/font_sans.c`.
