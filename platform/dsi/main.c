@@ -364,7 +364,11 @@ int main(void)
     irqSet(IRQ_VBLANK, watchdog);
     irqEnable(IRQ_VBLANK);
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
+#ifndef OKUPA_SOFT_DIV
     ok_r3d_divider(hw_divide);
+#else
+    (void)hw_divide;
+#endif
     ok_house_clock = now_us;
     ok_dsi_audio_start();
     ok_ui_start_intro(&ui);
@@ -609,9 +613,12 @@ int main(void)
                          (unsigned)(draw_us / 1000 % 10000), (unsigned)(loop_us / 1000 % 10000));
                 for (i = 0; i < OK_UI_W * 24; i++) back[0][(OK_UI_H - 24) * OK_UI_W + i] = 0x8000;
                 ok_text_draw(back[0], &ok_sans_regular, 2, OK_UI_H - 23, perf, 0xffff);
-                snprintf(perf, sizeof perf, "gpu %u/%u  tris kept %u live %u", (unsigned)(GFX_POLYGON_RAM_USAGE & 0xfff),
-                         (unsigned)(GFX_VERTEX_RAM_USAGE & 0x1fff), (unsigned)(ok_r3d_kept_triangles() % 10000),
-                         (unsigned)(ok_r3d_triangles() % 10000));
+                {
+                    int bad, ntex = ok_r3d_textures(&bad);
+                    snprintf(perf, sizeof perf, "gpu %u/%u kept %u live %u tex %d/%d", (unsigned)(GFX_POLYGON_RAM_USAGE & 0xfff),
+                             (unsigned)(GFX_VERTEX_RAM_USAGE & 0x1fff), (unsigned)(ok_r3d_kept_triangles() % 10000),
+                             (unsigned)(ok_r3d_triangles() % 10000), ntex % 1000, bad % 1000);
+                }
                 (void)pr;
                 ok_text_draw(back[0], &ok_sans_regular, 2, OK_UI_H - 11, perf, 0xffff);
             }
