@@ -344,10 +344,13 @@ void ok_v4_crawl_step(ok_v4_crawl *c, uint32_t now)
     static uint8_t buf[OK_V4_MAX];
     ok_v4_endpoint from, self;
     int i, budget = 8;
+    /* Each packet can cost a signature check or a signed reply (milliseconds
+     * on a handheld): let other cooperative threads run between them. */
     for (i = 0; i < 32; i++) {
         int n = c->recv(c->ctx, buf, sizeof buf, &from);
         if (n <= 0) break;
         handle(c, buf, (size_t)n, &from, now);
+        if (ok_yield) ok_yield();
     }
     memset(&self, 0, sizeof self);
     for (i = 0; i < c->count && budget > 0; i++) {
@@ -357,6 +360,7 @@ void ok_v4_crawl_step(ok_v4_crawl *c, uint32_t now)
         if (e->state == NEW || (e->state == PINGED && now - e->last >= 3 && e->tries < 2)) {
             if (ok_v4_ping(c->priv, &self, &e->at, now + EXPIRY, buf, sizeof buf, &len, NULL) != OK_OK) continue;
             c->send(c->ctx, &e->at, buf, len);
+            if (ok_yield) ok_yield();
             e->state = PINGED;
             e->tries++;
             e->last = now;
@@ -370,8 +374,10 @@ void ok_v4_crawl_step(ok_v4_crawl *c, uint32_t now)
                 memcpy(target + k, &r, 4);
             }
             if (ok_v4_findnode(c->priv, target, now + EXPIRY, buf, sizeof buf, &len) == OK_OK) c->send(c->ctx, &e->at, buf, len);
+            if (ok_yield) ok_yield();
             if (ok_v4_enrrequest(c->priv, now + EXPIRY, buf, sizeof buf, &len, e->enr_request) == OK_OK)
                 c->send(c->ctx, &e->at, buf, len);
+            if (ok_yield) ok_yield();
             e->state = ASKED;
             e->last = now;
             budget -= 2;

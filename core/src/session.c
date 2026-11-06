@@ -95,6 +95,7 @@ static int send_frame(const ok_io *io, ok_rlpx_session *s, const uint8_t *data, 
 static int recv_message_idle(const ok_io *io, ok_rlpx_session *s, int snappy, uint64_t *id, size_t *len, int idle_ok)
 {
     size_t size;
+    if (ok_yield) ok_yield();
     int r = read_some(io, wire, OK_RLPX_HEADER, idle_ok);
     if (r < 0) return 2;
     if (!r) return 0;
@@ -119,6 +120,7 @@ static int send_message(const ok_io *io, ok_rlpx_session *s, uint64_t id, const 
 static void stage(const ok_io *io, int st)
 {
     if (io->stage) io->stage(io->ctx, st);
+    if (ok_yield) ok_yield();
 }
 
 /* ---- Following blocks while held -------------------------------------------- */
@@ -331,6 +333,7 @@ int ok_session_dial(const ok_io *io, const uint8_t priv[32], const uint8_t remot
     if (ok_keys_public(priv, pub) != OK_OK ||
         ok_rlpx_auth_write(priv, remote_pub, e, auth_wire, sizeof auth_wire, &auth_len) != OK_OK)
         return finish(rep, OK_SESSION_BROKEN);
+    if (ok_yield) ok_yield();
     if (!write_all(io, auth_wire, auth_len)) return finish(rep, OK_SESSION_CLOSED);
     stage(io, OK_STAGE_AUTH);
     say(io, "sent auth (%lu bytes)", (unsigned long)auth_len);
@@ -339,6 +342,7 @@ int ok_session_dial(const ok_io *io, const uint8_t priv[32], const uint8_t remot
         return finish(rep, OK_SESSION_CLOSED);
     }
     memcpy(scratch, ack_wire, ack_len);
+    if (ok_yield) ok_yield(); /* the ECIES and ECDH steps are the heavy ones: breathe between them */
     if (ok_rlpx_ack_read(priv, scratch, ack_len, &remote) != OK_OK ||
         ok_rlpx_session_init(&s, 1, e->eph, e->nonce, &remote, auth_wire, auth_len, ack_wire, ack_len) != OK_OK)
         return finish(rep, OK_SESSION_BROKEN);
