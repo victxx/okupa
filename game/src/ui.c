@@ -299,15 +299,15 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         snprintf(link, sizeof link, "ethereum:%.42s", u->wallet_address);
         if (qrcodegen_encodeText(link, tmp, qr, qrcodegen_Ecc_MEDIUM, 1, 6, qrcodegen_Mask_AUTO, true)) {
             size = qrcodegen_getSize(qr);
-            scale = 120 / (size + 4);
+            scale = 112 / (size + 4);
             left = 128 - (size + 4) * scale / 2;
-            topq = 40;
+            topq = 32;
             rect(f, left, topq, (size + 4) * scale, (size + 4) * scale, RGB(31, 31, 31));
             for (y = 0; y < size; y++)
                 for (x = 0; x < size; x++)
                     if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
         }
-        centred(f, font, 128, 144, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
+        centred(f, font, 128, 152, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
         frame_box(f, 4, 166, 120, 22, PAPER, INK);
         centred(f, font, 64, 173, "Send hello", INK, 1);
     }
