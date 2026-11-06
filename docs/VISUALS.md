@@ -10,6 +10,8 @@ played by our own C code (no third-party art or music):
 | The attic: light through the day, sunbeam, string lights, the drawing on the wall | `game/src/house.c` | `build/okupa-house` → `house-*.png` |
 | Screens: labels over the attic, buttons, closet | `game/src/ui.c` | `build/okupa-preview` → `home-*.png`, `closet.png` |
 | Music and sounds | `game/src/music.c`, `platform/dsi/audio.c` | `build/okupa-music` → `okupa-music.wav` |
+| The splash and the opening film | `game/src/intro.c` (outside: `ok_house_outside` in `house.c`) | `build/okupa-intro <dir>` → frames |
+| Gallery frames (6 in the attic, 6 on the terrace) | `ok_house_frame(slot, pixels)` in `house.c` | `house-*.png` |
 
 `make preview` writes all of them to `build/preview/`. `build/okupa-house <dir>
 <frames dir>` also writes a short film, one PNG per 1/20 s.
@@ -59,3 +61,17 @@ One original eight-bar tune in F ("Attic morning") in three arrangements:
 The sound effects are made by the same synthesiser. On the DSi a looping
 16-bit buffer is refilled just ahead of the speaker. Its rate and the CPU
 timer share a crystal (2048 ticks per sample), so they never drift apart.
+
+## Opening, garden, gallery
+
+The console opens on a splash: OKUPA stamped over a turning sun of halftone
+dots, "by victorxva" typed in, a shine across the name, and a bell jingle.
+Then a short film plays, the cottage on its floating island at night, with
+clouds and haze, the camera flying in through the round attic window. A
+touch skips either. The outside is the attic seen from outside: the same
+walls, roof, round window, door and side window.
+
+"Out" takes the okupa to the terrace, where six more frames hang (three on
+the brick wall, three on easels). Frames stay empty until `ok_house_frame`
+hangs a 64x64 picture in them: they are meant for the drawings the console
+has sent.
