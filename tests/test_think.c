@@ -225,6 +225,25 @@ int main(void)
         assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"sight\""));
     }
 
+    /* Pictionary: the guess is one to three words, lower case. */
+    {
+        static char buf[4096];
+        static const uint8_t png[8] = {0x89, 'P', 'N', 'G'};
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {5};
+        fake.content = "A House.";
+        assert(ok_think_guess(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "a house"));
+        assert(strstr(fake.req_body, "Pictionary") && strstr(fake.req_body, "\"max_tokens\":16"));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"guess\":\"a house\""));
+        fake.content = "I think this might be a small cottage";
+        assert(ok_think_guess(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_ANSWER); /* not a guess: a sentence */
+    }
+
     /* Keep-alive: the connection stays unless the server says it closes. */
     assert(ok_think_keeps_open("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", 38));
     assert(!ok_think_keeps_open("HTTP/1.1 200 OK\r\nconnection: Close\r\n\r\n", 39));

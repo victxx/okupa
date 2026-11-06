@@ -108,6 +108,12 @@ ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t de
                        const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
                        ok_think_fetch_fn fetch, void *fetch_ctx);
 
+/* Pictionary: the player's drawing as a PNG; t->saw is the vision model's
+ * guess, one to three lower-case words (anything else is OK_THINK_ANSWER). */
+ok_result ok_think_guess(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                         const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
+                         ok_think_fetch_fn fetch, void *fetch_ctx);
+
 const char *ok_think_stage_name(ok_think_stage s);
 
 /* The episode of one call as JSON (for 0G Storage): kind, stage, decision or

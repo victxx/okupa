@@ -1,4 +1,5 @@
 #include "okupa_png.h"
+#include "okupa_act.h"
 #include <string.h>
 
 static uint32_t crc_table[256];
@@ -123,4 +124,16 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
     o += 12;
     *len = o;
     return OK_OK;
+}
+
+ok_result ok_png_drawing(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len)
+{
+    static uint16_t frame[256 * 256];
+    int x, y, w;
+    if (!pixels || scale < 1 || scale > 4) return OK_ARGUMENT;
+    w = 64 * scale;
+    for (y = 0; y < w; y++)
+        for (x = 0; x < w; x++)
+            frame[y * w + x] = ok_drawing_get(pixels, (unsigned)(x / scale), (unsigned)(y / scale)) ? 0 : 0x7fff;
+    return ok_png_rgb15(frame, w, w, 1, out, cap, len);
 }

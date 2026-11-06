@@ -1,4 +1,5 @@
 #include "okupa_png.h"
+#include "okupa_act.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -42,6 +43,27 @@ int main(void)
         assert(big[43] == 0 && big[43 + 5 + 65535] == 0 && big[43 + 2 * (5 + 65535)] == 1);
         if ((f = fopen("build/test-png-full.png", "wb"))) {
             fwrite(big, 1, n, f);
+            fclose(f);
+        }
+    }
+    /* The sketchbook: a doodle of a house (a square, a roof, a door) at
+     * twice the size, ink black on white. */
+    {
+        static uint8_t doodle[OK_DRAWING_BYTES], pic[60000];
+        int x, y;
+        for (x = 16; x < 48; x++) ok_drawing_set(doodle, (unsigned)x, 30, 1), ok_drawing_set(doodle, (unsigned)x, 58, 1);
+        for (y = 30; y < 59; y++) ok_drawing_set(doodle, 16, (unsigned)y, 1), ok_drawing_set(doodle, 47, (unsigned)y, 1);
+        for (x = 0; x < 16; x++) {
+            ok_drawing_set(doodle, (unsigned)(16 + x), (unsigned)(30 - x), 1);
+            ok_drawing_set(doodle, (unsigned)(47 - x), (unsigned)(30 - x), 1);
+        }
+        for (y = 44; y < 59; y++) ok_drawing_set(doodle, 28, (unsigned)y, 1), ok_drawing_set(doodle, 35, (unsigned)y, 1);
+        for (x = 28; x < 36; x++) ok_drawing_set(doodle, (unsigned)x, 44, 1);
+        assert(ok_png_drawing(doodle, 2, pic, sizeof pic, &n) == OK_OK && n == ok_png_size(128, 128));
+        assert(pic[48] == 0 && pic[49] == 255 && pic[52 + 3 * (16 * 2) + 1 + 3 * 128 * 0] == 255); /* white paper */
+        assert(ok_png_drawing(doodle, 5, pic, sizeof pic, &n) == OK_ARGUMENT);
+        if ((f = fopen("build/test-png-doodle.png", "wb"))) {
+            fwrite(pic, 1, n, f);
             fclose(f);
         }
     }

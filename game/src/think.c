@@ -308,9 +308,17 @@ static const char EYES[] =
     "short sentence of plain English (at most 25 words), say what you see: people, faces and expressions, what "
     "they hold or wear, the room, the light. No preamble.";
 
-ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
-                       const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
-                       ok_think_fetch_fn fetch, void *fetch_ctx)
+static const char GUESS[] =
+    "You are playing Pictionary with a child on a Nintendo DSi. The picture is a quick black-on-white doodle drawn "
+    "with a stylus on a tiny 64x64 sketchbook. Guess what it shows. Reply with only your guess: one to three plain "
+    "English words, lower case, no punctuation, no article.";
+
+/* One picture to a vision model, in a canonical request (keys sorted, no
+ * spaces, nothing Go would escape differently), and its one-line answer. */
+static ok_result look(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                      const uint8_t nonce[16], const char *kind, const char *system, const char *question,
+                      int max_tokens, const uint8_t *png, size_t png_len, char *buf, size_t cap,
+                      ok_think_fetch_fn fetch, void *fetch_ctx)
 {
     static char content[1024];
     ok_json root, v, choice, msg;
@@ -318,23 +326,23 @@ ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t de
     int k;
     ok_result r;
     if (!t) return OK_ARGUMENT;
-    begin(t, "sight");
-    if (!p || !p->model || !png || !buf || strpbrk(p->model, "\"\\<>&")) return OK_ARGUMENT;
-    need = (png_len + 2) / 3 * 4 + sizeof EYES + 512;
+    begin(t, kind);
+    if (!p || !p->model || !png || !buf || strpbrk(p->model, "\"\\<>&") || strpbrk(system, "\"\\<>&\n") ||
+        strpbrk(question, "\"\\<>&\n"))
+        return OK_ARGUMENT;
+    need = (png_len + 2) / 3 * 4 + strlen(system) + strlen(question) + 512;
     if (need > cap) return OK_RANGE;
-    /* Keys sorted, no spaces, as Go re-encodes it (the system prompt holds
-     * nothing Go would escape differently). */
     k = snprintf(buf, cap,
-                 "{\"chat_template_kwargs\":{\"enable_thinking\":false},\"max_tokens\":80,\"messages\":[{\"content\":\"%s\","
+                 "{\"chat_template_kwargs\":{\"enable_thinking\":false},\"max_tokens\":%d,\"messages\":[{\"content\":\"%s\","
                  "\"role\":\"system\"},{\"content\":[{\"image_url\":{\"url\":\"data:image/png;base64,",
-                 EYES);
+                 max_tokens, system);
     if (k < 0 || (size_t)k >= cap) return OK_RANGE;
     o = (size_t)k;
     o += base64(png, png_len, buf + o);
     k = snprintf(buf + o, cap - o,
-                 "\"},\"type\":\"image_url\"},{\"text\":\"What do you see?\",\"type\":\"text\"}],\"role\":\"user\"}],"
+                 "\"},\"type\":\"image_url\"},{\"text\":\"%s\",\"type\":\"text\"}],\"role\":\"user\"}],"
                  "\"model\":\"%s\",\"temperature\":0.3}",
-                 p->model);
+                 question, p->model);
     if (k < 0 || o + (size_t)k >= cap) return OK_RANGE;
     o += (size_t)k;
     r = call(t, p, device_key, now_ms, nonce, "/v1/proxy/chat/completions", "application/json", buf, o, fetch,
@@ -349,6 +357,36 @@ ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t de
     plain(content, n, t->saw, sizeof t->saw);
     if (!t->saw[0]) stop(t, OK_THINK_ANSWER);
     return OK_OK;
+}
+
+ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                       const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
+                       ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    return look(t, p, device_key, now_ms, nonce, "sight", EYES, "What do you see?", 80, png, png_len, buf, cap, fetch,
+                fetch_ctx);
+}
+
+ok_result ok_think_guess(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                         const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
+                         ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    ok_result r = look(t, p, device_key, now_ms, nonce, "guess", GUESS, "What did I draw?", 16, png, png_len, buf, cap,
+                       fetch, fetch_ctx);
+    size_t i;
+    /* One to three words, lower case: anything longer is not a guess. */
+    if (r == OK_OK && t->stage == OK_THINK_DECIDED) {
+        int words = 1;
+        for (i = 0; t->saw[i]; i++) {
+            char c = t->saw[i];
+            if (c >= 'A' && c <= 'Z') t->saw[i] = (char)(c + 32);
+            if (c == '.' || c == '!' || c == '"') t->saw[i] = ' ';
+            if (c == ' ') words++;
+        }
+        while (i && t->saw[i - 1] == ' ') t->saw[--i] = 0;
+        if (words > 3 || !t->saw[0]) stop(t, OK_THINK_ANSWER);
+    }
+    return r;
 }
 
 /* Appends s as a JSON string literal. */
@@ -434,8 +472,10 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
         }
     } else if (!strcmp(kind, "hearing")) {
         if (!put(out, cap, &o, ",\"heard\":") || !put_str(out, cap, &o, t->heard, strlen(t->heard))) return OK_RANGE;
-    } else if (!strcmp(kind, "sight")) {
-        if (!put(out, cap, &o, ",\"saw\":") || !put_str(out, cap, &o, t->saw, strlen(t->saw))) return OK_RANGE;
+    } else if (!strcmp(kind, "sight") || !strcmp(kind, "guess")) {
+        if (!put(out, cap, &o, !strcmp(kind, "guess") ? ",\"guess\":" : ",\"saw\":") ||
+            !put_str(out, cap, &o, t->saw, strlen(t->saw)))
+            return OK_RANGE;
     }
     if (!put(out, cap, &o, ",\"signed_text\":") || !put_str(out, cap, &o, t->text, strlen(t->text)) ||
         !put(out, cap, &o, ",\"signature\":") || !put_str(out, cap, &o, t->signature, strlen(t->signature)))

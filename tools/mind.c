@@ -144,7 +144,10 @@ int main(int argc, char **argv)
     FILE *f;
     ok_result r;
     int count = argc > 7 ? atoi(argv[7]) : 1, i, j, verified = 0;
-    const char *sense = argc > 7 && (!strncmp(argv[7], "hear=", 5) || !strncmp(argv[7], "see=", 4)) ? argv[7] : NULL;
+    const char *sense = argc > 7 && (!strncmp(argv[7], "hear=", 5) || !strncmp(argv[7], "see=", 4) ||
+                                     !strncmp(argv[7], "guess=", 6))
+                            ? argv[7]
+                            : NULL;
     double t0;
 
     if (sense) count = 1;
@@ -172,15 +175,16 @@ int main(int argc, char **argv)
     if (sense) { /* one verified sense: what it hears or sees */
         static uint8_t media[400000];
         static char buf[600000];
-        int hear = sense[0] == 'h';
+        int hear = sense[0] == 'h', guess = sense[0] == 'g';
         size_t m;
-        if (!(f = fopen(sense + (hear ? 5 : 4), "rb"))) return 2;
+        if (!(f = fopen(strchr(sense, '=') + 1, "rb"))) return 2;
         m = fread(media, 1, sizeof media, f);
         fclose(f);
         if (!entropy(nonce, sizeof nonce)) return 2;
         t0 = seconds();
-        r = hear ? ok_think_hear(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, media, m, buf, sizeof buf, fetch, NULL)
-                 : ok_think_see(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, media, m, buf, sizeof buf, fetch, NULL);
+        r = hear    ? ok_think_hear(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, media, m, buf, sizeof buf, fetch, NULL)
+            : guess ? ok_think_guess(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, media, m, buf, sizeof buf, fetch, NULL)
+                    : ok_think_see(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, media, m, buf, sizeof buf, fetch, NULL);
         ok_wipe(key, sizeof key);
         hang_up();
         if (r != OK_OK) {
@@ -189,7 +193,8 @@ int main(int argc, char **argv)
         }
         printf("%s %.2fs %s %s signer %s\n", t.kind, seconds() - t0, ok_think_stage_name(t.stage),
                t.chat_id[0] ? t.chat_id : "-", t.recovered[0] ? t.recovered : "-");
-        if (t.stage == OK_THINK_DECIDED) printf("VERIFIED %s: \"%s\"\n", hear ? "heard" : "saw", hear ? t.heard : t.saw);
+        if (t.stage == OK_THINK_DECIDED)
+            printf("VERIFIED %s: \"%s\"\n", hear ? "heard" : guess ? "guessed" : "saw", hear ? t.heard : t.saw);
         else if (t.response_len) printf("    %.*s\n", (int)(t.response_len > 300 ? 300 : t.response_len), t.response);
         if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
             save(argv[6], "episode.json", episode, n);
