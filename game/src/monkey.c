@@ -1111,14 +1111,14 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
             stroke(x - 24, y - 4, 224 + hz, x + 24, y - 4, 224 + hz, 6);
             break;
         default:
-            solid(INK3);
-            ok_r3d_ellipsoid(P(x, y - 6, 197 + hz), P(34, 46, 24), 6, 4); /* sunk in, so it never stands out in profile */
-            ok_r3d_material(WHITE, ++next_id, OK_R3D_UNLIT);
-            if (hz) { /* on the hardware a glint smaller than a pixel is dropped: one bigger, coarser */
-                ok_r3d_ellipsoid(P(x - 9, y + 10 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 234 + hz), P(17, 18, 4), 4, 2);
-            } else {
-                ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 218), P(11, 12, 4), 4, 3);
-                ok_r3d_ellipsoid(P(x + 9, y - 20, 216), P(5, 5, 3), 4, 2); /* a second, small glint */
+            { /* a white eye with a small dark pupil and a glint: friendly, not a black hole */
+                int dy = f->eyes == 'u' ? 8 : f->eyes == 'd' ? -10 : 0, px = x + f->look * 5, fz = hz ? 10 : 0;
+                ok_r3d_material(RGB(31, 31, 29), ++next_id, OK_R3D_UNLIT | OK_R3D_EDGE);
+                ok_r3d_ellipsoid(P(x, y - 6, 197 + hz), P(34, 46, 24), 6, 4); /* sunk in, so it never stands out in profile */
+                solid(INK3);
+                ok_r3d_ellipsoid(P(px, y - 10 + dy, 214 + hz + fz), P(26, 33, 8), 6, 3);
+                ok_r3d_material(WHITE, ++next_id, OK_R3D_UNLIT);
+                ok_r3d_ellipsoid(P(px - 8, y + 4 + dy, 222 + hz + 2 * fz), P(8, 9, 3), 4, 2);
             }
             if (f->eyes == 'h') { /* heavy lids */
                 part(skin, OK_PART_HEAD, f->head_id);
