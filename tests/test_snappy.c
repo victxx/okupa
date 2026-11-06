@@ -35,7 +35,7 @@ static void refused(const char *compressed)
 int main(void)
 {
     static const size_t sizes[] = {0, 1, 60, 61, 256, 257, 65536, 65537, 150000};
-    uint8_t want[300];
+    uint8_t want[300] = {0};
     size_t i, j, len, n;
 
     /* Compressed by cramjam 2.9.1 (Rust snap): literals, 2-byte-offset copies, overlap. */
