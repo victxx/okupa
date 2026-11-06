@@ -1003,6 +1003,16 @@ static void hand(const uint16_t *skin, int s, int id)
     ok_r3d_ellipsoid(P(-s * 22, -20, 36), P(16, 24, 16), 6, 4); /* thumb */
 }
 
+static void mat_envelope(void)
+{
+    ok_r3d_material(RGB(31, 30, 26), ++next_id, OK_R3D_EDGE);
+}
+
+static void box3(int x0, int y0, int z0, int x1, int y1, int z1)
+{
+    ok_r3d_box(P(x0, y0, z0), P(x1, y1, z1));
+}
+
 /* An arm reaching a wrist point (hundredths, chest frame): the elbow found by
  * the law of cosines, bending down, out and back like a real one. */
 static void arm_reach(const uint16_t *skin, int s, int hand_id, int sleeve_id, const int32_t wrist[3], int bites)
@@ -1275,6 +1285,12 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         ok_r3d_translate(P(s * 6, -76, 6));
         hand(skin, s, hands);
         ok_r3d_pop();
+    }
+    if (a->carry && mv != OK_MOVE_EAT && mv != OK_MOVE_PLAY) { /* the envelope, a red heart seal on it */
+        mat_envelope();
+        box3(-92, 250, 150, 92, 372, 176);
+        solid(RGB(29, 6, 8));
+        ok_r3d_ellipsoid(P(0, 312, 182), P(24, 21, 7), 6, 3);
     }
     if (mv == OK_MOVE_PLAY) {
         static uint16_t stripes[8];

@@ -83,6 +83,7 @@ typedef struct {
     int gaze_mode;    /* OK_GAZE_* + 1, or 0 for its own glances */
     int32_t gaze_at[3]; /* the point it looks at for that gaze (room, hundredths) */
     int energy;       /* 0 sluggish .. 100 bouncy; 50 as it always was */
+    int carry;        /* 1: an envelope held against its tummy (a drawing being posted) */
     uint32_t ticks, seed;
 } ok_monkey_anim;
 
