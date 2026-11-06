@@ -171,42 +171,107 @@ static void clock_pill(frame f, const uint8_t (*font)[8], int hour, int minute)
     text(f, font, 18, 7, clock, RGB(30, 29, 27), 1);
 }
 
-/* What it says, in a bubble above its head with a tail pointing at it:
- * up to two lines of at most 200 pixels, broken at spaces. */
-static void bubble(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy)
+/* Bubbles above the okupa's head: what it says (a speech bubble with a
+ * tail), what it thinks (a cloud trailing little circles), what it asks you
+ * (a speech bubble with a hint to answer), and the ear it lends you while
+ * you answer. Text is up to two lines of at most 200 pixels, broken at spaces. */
+enum { SAY, THINK, ASK };
+
+static int wrap(const char *s, char line[2][64])
 {
-    char line[2][48] = {{0}};
     size_t n = strlen(s), cut = n;
-    int w, h, x, y, tx, lines, k;
+    memset(line, 0, 2 * 64);
     while (cut > 0 && cut < n + 1) {
-        char head[48];
+        char head[64];
         snprintf(head, sizeof head, "%.*s", (int)cut, s);
         if (width(head, 1) <= 200 || cut == 1) break;
         for (cut--; cut > 0 && s[cut] != ' '; cut--) {}
     }
     if (cut == 0) cut = n > 40 ? 40 : n;
-    snprintf(line[0], sizeof line[0], "%.*s", (int)cut, s);
-    if (cut < n) snprintf(line[1], sizeof line[1], "%s", s + cut + (s[cut] == ' '));
-    lines = line[1][0] ? 2 : 1;
+    snprintf(line[0], 64, "%.*s", (int)cut, s);
+    if (cut < n) snprintf(line[1], 64, "%s", s + cut + (s[cut] == ' '));
+    return line[1][0] ? 2 : 1;
+}
+
+static void bubble_as(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy, int kind, uint32_t ticks)
+{
+    char line[2][64];
+    int lines = wrap(s, line), w, h, x, y, tx, k, hint = kind == ASK;
+    uint16_t edge = kind == ASK ? RGB(26, 17, 3) : INK;
     w = (width(line[0], 1) > width(line[1], 1) ? width(line[0], 1) : width(line[1], 1)) + 16;
-    h = lines * 11 + 9;
+    if (hint && w < width("Hold L to answer", 1) + 16) w = width("Hold L to answer", 1) + 16;
+    h = lines * 11 + 9 + hint * 10;
     if (hx < -50) hx = 128, hy = 110;
     x = hx - w / 2;
-    x = x < 4 ? 4 : x + w > OK_UI_W - 4 ? OK_UI_W - 4 - w : x;
-    y = hy - h - 12;
-    if (y < 20) y = 20;
+    x = x < 6 ? 6 : x + w > OK_UI_W - 6 ? OK_UI_W - 6 - w : x;
+    y = hy - h - (kind == THINK ? 20 : 12);
+    if (y < 22) y = 22;
     tx = hx < x + 12 ? x + 12 : hx > x + w - 12 ? x + w - 12 : hx;
-    round_box(f, x - 1, y + 1, w + 2, h + 2, 6, RGB(2, 2, 3)); /* a soft drop shadow */
-    round_box(f, x - 1, y - 1, w + 2, h + 2, 6, INK);
-    round_box(f, x, y, w, h, 5, PAPER);
-    for (k = 0; k < 6; k++) { /* the tail, leaning towards the head */
-        int lean = (hx - tx) * k / 24;
-        rect(f, tx - 4 + k / 2 + lean, y + h + k, 8 - k, 1, PAPER);
-        rect(f, tx - 5 + k / 2 + lean, y + h + k, 1, 1, INK);
-        rect(f, tx + 4 - k / 2 + lean, y + h + k, 1, 1, INK);
+    if (kind == THINK) { /* a cloud: puffs all round its edge, then little circles down to the head */
+        for (k = 0; k < 2; k++) {
+            int b, r = 6, grow = k ? 0 : 1;
+            uint16_t c = k ? PAPER : INK;
+            round_box(f, x - grow, y - grow, w + 2 * grow, h + 2 * grow, 6, c);
+            for (b = x + 5; b <= x + w - 5; b += 11) {
+                disc(f, b, y + 1, r + grow, c);
+                disc(f, b + 5, y + h - 1, r + grow, c);
+            }
+            disc(f, x + 1, y + h / 2, r + grow, c);
+            disc(f, x + w - 1, y + h / 2, r + grow, c);
+            disc(f, tx + (hx - tx) / 3, y + h + 7, 3 + grow, c);
+            disc(f, tx + (hx - tx) * 2 / 3, y + h + 13, 2 + grow, c);
+        }
+    } else {
+        round_box(f, x - 1, y + 1, w + 2, h + 2, 6, RGB(2, 2, 3)); /* a soft drop shadow */
+        round_box(f, x - 1 - hint, y - 1 - hint, w + 2 + 2 * hint, h + 2 + 2 * hint, 6, edge);
+        round_box(f, x, y, w, h, 5, PAPER);
+        for (k = 0; k < 6; k++) { /* the tail, leaning towards the head */
+            int lean = (hx - tx) * k / 24;
+            rect(f, tx - 4 + k / 2 + lean, y + h + k, 8 - k, 1, PAPER);
+            rect(f, tx - 5 + k / 2 + lean, y + h + k, 1, 1, edge);
+            rect(f, tx + 4 - k / 2 + lean, y + h + k, 1, 1, edge);
+        }
+    }
+    if (kind == ASK) { /* a little question mark badge on its corner */
+        disc(f, x + 2, y + 2, 6, edge);
+        disc(f, x + 2, y + 2, 5, RGB(31, 26, 8));
+        text(f, font, x, y - 2, "?", INK, 1);
     }
     centred(f, font, x + w / 2, y + 6, line[0], INK, 1);
     if (lines == 2) centred(f, font, x + w / 2, y + 17, line[1], INK, 1);
+    if (hint) centred(f, font, x + w / 2, y + 6 + lines * 11, "Hold L to answer", MUTED, 1);
+    (void)ticks;
+}
+
+static void bubble(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy)
+{
+    bubble_as(f, font, s, hx, hy, SAY, 0);
+}
+
+/* While you answer: a round badge by its head with a microphone and rings
+ * going out (recording), or a cloud of dots (the answer is being thought over). */
+static void listening(frame f, const uint8_t (*font)[8], const ok_ui *u, int hx, int hy)
+{
+    static const char *const mic[] = {"..kkk..", ".kkkkk.", ".kkwkk.", ".kkkkk.", ".kkkkk.", "k.kkk.k", ".k...k.", "..kkk..", "...k...", ".kkkkk."};
+    if (hx < -50) hx = 128, hy = 110;
+    if (u->listening == 2) {
+        static const char *const dots[] = {"Thinking", "Thinking.", "Thinking..", "Thinking..."};
+        bubble_as(f, font, dots[u->ticks / 20 % 4], hx, hy, THINK, u->ticks);
+        return;
+    }
+    {
+        int x = hx + 30 > OK_UI_W - 16 ? hx - 30 : hx + 30, y = hy + 4, k, ring = (int)(u->ticks / 6 % 12);
+        for (k = 0; k < 2; k++) { /* rings going out from the badge */
+            int r = 13 + (ring + k * 6) % 12, a;
+            for (a = 0; a < 64; a++) {
+                int px = x + (int)((int64_t)ok_r3d_cos(a * 64) * r / 4096), py = y + (int)((int64_t)ok_r3d_sin(a * 64) * r / 4096);
+                if ((a / 4) % 2 == 0) rect(f, px, py, 1, 1, RGB(31, 26, 8));
+            }
+        }
+        disc(f, x, y, 11, INK);
+        disc(f, x, y, 10, RGB(31, 26, 8));
+        pixels(f, x - 3, y - 5, mic, 10, 1);
+    }
 }
 
 static uint16_t skin[OK_SKIN * OK_SKIN];
@@ -242,12 +307,18 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
     hang_pictures(u);
     if (memcmp(&skin_look, &u->look, sizeof skin_look)) {
         ok_monkey_skin(&u->look, skin);
+        ok_r3d_texture_changed(skin);
         skin_look = u->look;
     }
     ok_house_draw(f, hour, minute, p->asleep, NULL, &u->look, skin, &u->anim, &face); /* frames fill as drawings are sent */
     clock_pill(f, font, hour, minute);
     needs(f, p);
-    if (line && !(p->asleep && line == ok_pet_line(p, hour))) bubble(f, font, line, face.top_x, face.top_y);
+    /* One bubble at a time: answering, a question, something just said, a thought, then its mood. */
+    if (u->listening) listening(f, font, u, face.top_x, face.top_y);
+    else if (u->ask_ticks) bubble_as(f, font, u->ask, face.top_x, face.top_y, ASK, u->ticks);
+    else if (u->say) bubble(f, font, line, face.top_x, face.top_y);
+    else if (u->thought_ticks) bubble_as(f, font, u->thought, face.top_x, face.top_y, THINK, u->ticks);
+    else if (line && !(p->asleep && line == ok_pet_line(p, hour))) bubble(f, font, line, face.top_x, face.top_y);
 }
 
 /* --------------------------------------------------------- bottom screen */
@@ -532,28 +603,43 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         return;
     }
     icons_ready();
-    rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
-    for (y = 4; y < OK_UI_H; y += 8)
-        for (x = 4; x < OK_UI_W; x += 8) rect(bottom, x, y, 1, 1, RGB(11, 10, 10));
-    if (u->scene == OK_UI_SKETCH) {
-        sketch(bottom, font, u);
-        line = "Draw me something for the house!";
-    } else if (u->scene == OK_UI_DEV) {
-        dev(bottom, font, u);
-    } else if (u->scene == OK_UI_WIFI) {
-        wifi(bottom, font, u);
-        line = u->wifi_status[0] ? u->wifi_status : "Which Wi-Fi do we use?";
-    } else if (u->scene == OK_UI_PASSWORD) {
-        password(bottom, font, u);
-        line = "Psst. I won't peek.";
-    } else if (u->scene == OK_UI_WALLET) {
-        wallet(bottom, font, u);
-        line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
-    } else if (u->scene == OK_UI_CLOSET) {
-        closet(bottom, font, u);
-        if (!u->say) line = "How do I look?";
-    } else {
-        home_buttons(bottom, font, u, p);
+    {
+        /* The bottom screen only when it may have changed, or ten times a
+         * second: redrawing it every frame costs the DS a lot. */
+        static const uint16_t *last_buf;
+        static int last_scene = -1, last_pressed;
+        static uint32_t last_tick;
+        int draw = bottom != last_buf || u->scene != last_scene || u->pressed != last_pressed || u->pressed_ticks ||
+                   u->scene == OK_UI_SKETCH || u->scene == OK_UI_WALLET || u->ticks - last_tick >= 6 || u->ticks < last_tick;
+        if (draw) {
+            last_buf = bottom;
+            last_scene = u->scene;
+            last_pressed = u->pressed;
+            last_tick = u->ticks;
+            rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
+            for (y = 4; y < OK_UI_H; y += 8)
+                for (x = 4; x < OK_UI_W; x += 8) rect(bottom, x, y, 1, 1, RGB(11, 10, 10));
+        }
+        if (u->scene == OK_UI_SKETCH) {
+            if (draw) sketch(bottom, font, u);
+            line = "Draw me something for the house!";
+        } else if (u->scene == OK_UI_DEV) {
+            if (draw) dev(bottom, font, u);
+        } else if (u->scene == OK_UI_WIFI) {
+            if (draw) wifi(bottom, font, u);
+            line = u->wifi_status[0] ? u->wifi_status : "Which Wi-Fi do we use?";
+        } else if (u->scene == OK_UI_PASSWORD) {
+            if (draw) password(bottom, font, u);
+            line = "Psst. I won't peek.";
+        } else if (u->scene == OK_UI_WALLET) {
+            if (draw) wallet(bottom, font, u);
+            line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
+        } else if (u->scene == OK_UI_CLOSET) {
+            if (draw) closet(bottom, font, u);
+            if (!u->say) line = "How do I look?";
+        } else if (draw) {
+            home_buttons(bottom, font, u, p);
+        }
     }
     top_screen(top, font, u, p, hour, minute, line);
 }
@@ -593,6 +679,41 @@ void ok_ui_direct(ok_ui *u, const ok_pet *p, int move, int where, int mood, cons
         snprintf(u->mind_line, sizeof u->mind_line, "%s", line);
         say(u, u->mind_line);
     }
+}
+
+/* Copies up to 60 printable ASCII characters, the rest as '?'. */
+static void copy_ascii(char *out, const char *in)
+{
+    int i;
+    for (i = 0; i < 60 && in[i]; i++) out[i] = in[i] >= 32 && in[i] < 127 ? in[i] : '?';
+    out[i] = 0;
+}
+
+void ok_ui_thought(ok_ui *u, const char *text)
+{
+    if (!text || !text[0]) {
+        u->thought_ticks = 0;
+        return;
+    }
+    copy_ascii(u->thought, text);
+    u->thought_ticks = 360;
+}
+
+void ok_ui_ask(ok_ui *u, const char *question)
+{
+    if (!question || !question[0]) {
+        u->ask_ticks = 0;
+        return;
+    }
+    copy_ascii(u->ask, question);
+    u->ask_ticks = 1800;
+}
+
+void ok_ui_listening(ok_ui *u, int state)
+{
+    state = state < 0 || state > 2 ? 0 : state;
+    if (state == 1 && u->listening != 1) ok_monkey_direct(&u->anim, OK_MOVE_LOOK); /* all ears */
+    u->listening = state;
 }
 
 /* Out to the terrace or back in: the okupa is placed in the new spot. */
@@ -658,6 +779,8 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
     }
     u->ticks++;
     if (u->say_ticks && --u->say_ticks == 0) u->say = NULL;
+    if (u->thought_ticks) u->thought_ticks--;
+    if (u->ask_ticks) u->ask_ticks--;
     if (u->happy_ticks) u->happy_ticks--;
     if (u->pressed_ticks) u->pressed_ticks--;
     ok_monkey_step(&u->anim, pose(u, p), u->look.wear);

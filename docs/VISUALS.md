@@ -16,43 +16,38 @@ played by our own C code (no third-party art or music):
 `make preview` writes all of them to `build/preview/`. `build/okupa-house <dir>
 <frames dir>` also writes a short film, one PNG per 1/20 s.
 
-## Software 3D, not the DSi's 3D engine
+## 3D: software on the host, the DS's own 3D hardware on the console
 
-The top screen is drawn by `r3d.c` on the CPU, not by the DSi's 3D hardware.
+`r3d.c` builds every shape on the CPU in the same way everywhere: the
+primitives, the lighting into four tones, and the outlines between objects.
+The host and the tests rasterise in software, pixel for pixel. The console
+build (`OK_R3D_GL`, after `ok_r3d_hardware(1)`) sends the same triangles to
+the DS's 3D hardware instead.
 
-- **The same pixels everywhere.** The host previews, the tests and a future
-  phone port run the very same code as the console. With the hardware engine,
-  the host would need a second renderer that imitates it, and the two would drift.
-- **Its look is not one the hardware gives for free.** Each object has its own
-  four tones and outline colour. The hardware has one toon table and eight edge
-  colours for everything. The eyes and mouth are masked to the head and the
-  smiley's face follows the mask's plane. Both need the depth and object
-  buffers, which the CPU cannot read back from the hardware.
-- **It is cheap enough, once it avoids what the ARM946 is bad at.** The
-  still attic is drawn once per change of light and kept (`ok_r3d_keep`);
-  each frame redraws only the okupa (about 1100 triangles). The first DSi
-  test ran at about 2 frames a second. `make perf` counts the work per
-  frame on the host, and three things were behind the slowness:
-  - Every 64-bit division ran in software, about 42,000 a frame in the
-    attic and 63,000 in the opening film. The renderer now does fewer of
-    them: none to start a triangle, none for a speck of one pixel, and the
-    sphere rings are worked out once per shape. The ones left go through
-    `ok_r3d_divider`, which the DSi points at its hardware divider. Now
-    8,500 in the attic and 20,000 in the film.
-  - Thumb code has no 32x32 to 64-bit multiply. The renderer, the synth,
-    the house, the okupa and the crypto libraries now build in ARM mode.
-  - The okupa had more triangles than its 40 pixels need. It now uses
-    fewer rings, five tail links, and four-sided strokes on the face.
-    The sky dome skips facets and clouds behind the camera.
-  The pixel loop runs in 32 bits when nothing can overflow. Dev shows
-  "Frame: draw X, loop Y ms" on the console. If loop is much larger than
-  draw, the network's cooperative threads are holding the CPU.
-- **The music no longer depends on the frame rate.** The synth fills its
-  buffer from a timer interrupt, 120 times a second.
+- **The vertices go in world space, with their tone as the colour.** The
+  camera is the hardware's matrix, against one fixed frustum. Textures are
+  the uv rectangles, uploaded once each and small (16 or 32 texels).
+- **Still scenes are recorded once and replayed.** Everything drawn after
+  `ok_r3d_begin` is recorded as GPU commands. A kept frame (`ok_r3d_keep`)
+  is replayed from the CPU straight into the GX FIFO each frame, and only
+  the okupa is built anew. The opening film builds its island once and draws
+  it again under each new camera (`ok_r3d_world_keep`/`ok_r3d_world_again`).
+- **Three layers on the top screen.** The game's 2D layer is BG3, drawn over
+  the 3D and see-through where bit 15 is clear. The 3D is BG0. The sky is
+  BG2, a 512x256 256-colour panorama that the hardware turns and scales
+  with the camera, so it costs no CPU.
+- **On the hardware, hazes, glows and the sunbeam are skipped.** They read
+  back the software renderer's depth, which the hardware does not give back.
+- **Before the 3D moves to the hardware, the icons are drawn once in
+  software.** They need the software renderer.
 
-If that figure is too high on the DSi, the scene code can drive the hardware
-instead (`ok_r3d_*` is already shaped like it: transforms, materials,
-triangles). That stays a fallback, not the plan.
+Measured in melonDS 1.1, DS mode (67 MHz, half the DSi's clock), with its
+emulated Wi-Fi. The software renderer drew the film in about 440 ms a
+frame. On the hardware the film draws in about 30 ms and the splash in about
+30 ms. The real limit now is the network's cooperative threads: they held
+the CPU for 100 to 350 ms between yields in these runs. The ROM shows
+"N fps draw D loop L ms" at the bottom of the top screen while R is held.
+`make perf` counts the work per frame on the host.
 
 ## Moving like it is alive
 

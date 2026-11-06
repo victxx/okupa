@@ -139,6 +139,18 @@ static const uint8_t damp[OK_SPRINGS] = {
 
 static int32_t isqrt(int32_t v);
 
+static int eases(int i)
+{
+    switch (i) {
+    case OK_SPRING_LEAN: case OK_SPRING_ROLL: case OK_SPRING_NOD: case OK_SPRING_TURN: case OK_SPRING_TILT:
+    case OK_SPRING_RAISE_L: case OK_SPRING_RAISE_R: case OK_SPRING_FWD_L: case OK_SPRING_FWD_R: case OK_SPRING_MASK:
+    case OK_SPRING_CHEST: case OK_SPRING_ELBOW_L: case OK_SPRING_ELBOW_R:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static uint32_t rnd(ok_monkey_anim *a)
 {
     uint32_t x = a->seed ? a->seed : 0x9e3779b9u;
@@ -723,9 +735,21 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         while (d > 180 * Q) d -= 360 * Q, a->s[OK_SPRING_YAW].x += 360 * Q;
         while (d < -180 * Q) d += 360 * Q, a->s[OK_SPRING_YAW].x -= 360 * Q;
     }
+    /* The pose's targets glide to a new pose (ease in, ease out) instead of
+     * jumping; the springs then follow them. Feet, squash, the ball, the
+     * tail and the turn keep their own, quicker targets. */
+    if (!a->eased_ready) {
+        for (i = 0; i < OK_SPRINGS; i++) a->eased[i] = t[i] * Q;
+        a->eased_ready = 1;
+    }
     for (i = 0; i < OK_SPRINGS; i++) {
         ok_spring *s = &a->s[i];
-        s->v += (t[i] * Q - s->x) * stiff[i] / 2048 - s->v * damp[i] / 256;
+        int32_t goal = t[i] * Q;
+        if (eases(i)) {
+            a->eased[i] += (goal - a->eased[i]) / 7;
+            goal = a->eased[i];
+        }
+        s->v += (goal - s->x) * stiff[i] / 2048 - s->v * damp[i] / 256;
         s->x += s->v;
     }
 
@@ -757,12 +781,12 @@ static int solid(uint16_t c)
 
 static void blob(int x, int y, int z, int rx, int ry, int rz)
 {
-    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 8, 5);
+    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 6, 4);
 }
 
 static void limb(int x0, int y0, int z0, int x1, int y1, int z1, int r)
 {
-    ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), H(r), 6);
+    ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), H(r), 5);
 }
 
 static int val(const ok_monkey_anim *a, int s)
@@ -937,8 +961,8 @@ static void part_rows(const uint16_t *skin, int which, int id, int from, int to)
 static void hand(const uint16_t *skin, int s, int id)
 {
     part(skin, OK_PART_HANDS, id);
-    ok_r3d_ellipsoid(P(s * 4, -28, 12), P(46, 42, 36), 8, 6);   /* palm */
-    ok_r3d_ellipsoid(P(s * 4, -58, 16), P(38, 24, 30), 8, 5);   /* curled fingers */
+    ok_r3d_ellipsoid(P(s * 4, -28, 12), P(46, 42, 36), 6, 4);   /* palm */
+    ok_r3d_ellipsoid(P(s * 4, -58, 16), P(38, 24, 30), 5, 3);   /* curled fingers */
     ok_r3d_ellipsoid(P(-s * 22, -20, 36), P(16, 24, 16), 6, 4); /* thumb */
 }
 
@@ -1027,7 +1051,11 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
 {
     int s;
     for (s = -1; s <= 1; s += 2) {
-        int x = s * 72 + f->look * 8, y = 644;
+        int x = s * 72 + f->look * 8, y = 644, x0, y0, x1, y1;
+        int32_t d0, d1;
+        /* An eye turned away from the camera (the far one, in profile) is
+         * not drawn: it would show past the edge of the head. */
+        if (ok_r3d_project(P(x, y, 200), &x0, &y0, &d0) && ok_r3d_project(P(x + s * 80, y, 250), &x1, &y1, &d1) && d1 <= d0) continue;
         switch (f->eyes) {
         case 'j': /* smiling eyes, ^ ^ */
             solid(INK3);
@@ -1047,13 +1075,13 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
             break;
         default:
             solid(INK3);
-            ok_r3d_ellipsoid(P(x, y - 6, 204), P(34, 46, 24), 6, 4);
+            ok_r3d_ellipsoid(P(x, y - 6, 197), P(34, 46, 24), 6, 4); /* sunk in, so it never stands out in profile */
             ok_r3d_material(WHITE, ++next_id, OK_R3D_UNLIT);
-            ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 227), P(11, 12, 5), 4, 3);
-            ok_r3d_ellipsoid(P(x + 9, y - 20, 226), P(5, 5, 4), 4, 2); /* a second, small glint */
+            ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 218), P(11, 12, 4), 4, 3);
+            ok_r3d_ellipsoid(P(x + 9, y - 20, 216), P(5, 5, 3), 4, 2); /* a second, small glint */
             if (f->eyes == 'h') { /* heavy lids */
                 part(skin, OK_PART_HEAD, f->head_id);
-                ok_r3d_ellipsoid(P(x, y + 22, 210), P(36, 26, 24), 8, 5);
+                ok_r3d_ellipsoid(P(x, y + 22, 210), P(36, 26, 24), 6, 3);
             }
             if (f->eyes == 'd') { /* worried brows, high in the middle */
                 solid(RGB(9, 5, 3));
@@ -1062,29 +1090,29 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
         }
     }
     solid(RGB(13, 7, 5)); /* a small soft nose */
-    ok_r3d_ellipsoid(P(0, 582, 236), P(20, 12, 8), 8, 4);
+    ok_r3d_ellipsoid(P(0, 582, 232), P(20, 12, 7), 8, 4);
     solid(INK3);
     switch (f->mouth) {
     case 'O':
     case 'y': {
         int tall = f->mouth == 'y' ? 30 : 22;
-        ok_r3d_ellipsoid(P(0, 522, 224), P(f->mouth == 'y' ? 22 : 30, tall, 12), 8, 6);
+        ok_r3d_ellipsoid(P(0, 522, 219), P(f->mouth == 'y' ? 22 : 30, tall, 12), 8, 6);
         ok_r3d_material(RGB(30, 12, 13), ++next_id, 0);
-        ok_r3d_ellipsoid(P(0, 522 - tall / 2, 231), P(16, 9, 6), 6, 4); /* tongue */
+        ok_r3d_ellipsoid(P(0, 522 - tall / 2, 226), P(16, 9, 6), 6, 4); /* tongue */
         break;
     }
-    case 'c': ok_r3d_ellipsoid(P(0, 524, 226), P(18, 14, 10), 6, 4); break;
-    case '.': ok_r3d_ellipsoid(P(0, 524, 228), P(12, 10, 6), 6, 4); break;
-    case '-': stroke(-24, 526, 229, 24, 526, 229, 5); break;
+    case 'c': ok_r3d_ellipsoid(P(0, 524, 221), P(18, 14, 10), 6, 4); break;
+    case '.': ok_r3d_ellipsoid(P(0, 524, 223), P(12, 10, 6), 6, 4); break;
+    case '-': stroke(-24, 526, 224, 24, 526, 224, 5); break;
     case 'w':
-        stroke(-28, 522, 228, -10, 532, 230, 5);
-        stroke(-10, 532, 230, 10, 522, 230, 5);
-        stroke(10, 522, 230, 28, 532, 228, 5);
+        stroke(-28, 522, 223, -10, 532, 225, 5);
+        stroke(-10, 532, 225, 10, 522, 225, 5);
+        stroke(10, 522, 225, 28, 532, 223, 5);
         break;
     default: /* a little smile */
-        stroke(-32, 540, 226, -14, 524, 231, 6);
-        stroke(-14, 524, 231, 14, 524, 231, 6);
-        stroke(14, 524, 231, 32, 540, 226, 6);
+        stroke(-32, 540, 221, -14, 524, 226, 6);
+        stroke(-14, 524, 226, 14, 524, 226, 6);
+        stroke(14, 524, 226, 32, 540, 221, 6);
     }
     ok_r3d_material(f->blush ? RGB(31, 13, 15) : RGB(31, 17, 17), ++next_id, 0); /* cheeks */
     ok_r3d_ellipsoid(P(-118, 592, 182), P(30, 15, 10), 6, 4);
@@ -1106,7 +1134,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         part_rows(skin, OK_PART_TAIL, 230, 0, 60);
         for (i = 0; i < 10; i += 2) /* five links over the eleven points: cheap, still curvy */
             ok_r3d_capsule(P(a->tail[i][0], a->tail[i][1], a->tail[i][2]), P(a->tail[i + 2][0], a->tail[i + 2][1], a->tail[i + 2][2]),
-                           H(30 - i * 3 / 2), 5);
+                           H(30 - i * 3 / 2), 4);
     }
     /* Where it is: standing in the room, or on the bed. */
     x = a->x + (a->room.bed_x - a->x) * lie / 100;
@@ -1118,7 +1146,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         int k, r = 270 - lie - bob / 2;
         for (k = 0; k < 3; k++) {
             ok_r3d_material(9 + k, k, OK_R3D_SHADOW);
-            ok_r3d_disc(P(26, 9 + k, -14), H(r * (100 - k * 26) / 100), H(r * 74 * (100 - k * 26) / 10000), 16);
+            ok_r3d_disc(P(26, 9 + k, -14), H(r * (100 - k * 26) / 100), H(r * 74 * (100 - k * 26) / 10000), 10);
         }
     }
     ok_r3d_rotate_y(deg(a, OK_SPRING_YAW) * (100 - lie) / 100);
@@ -1151,7 +1179,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         ok_r3d_rotate_z(s * DEG(9));
         ok_r3d_rotate_x(thigh - knee); /* the foot stays level */
         part(skin, OK_PART_HANDS, hands);
-        ok_r3d_ellipsoid(P(s * 6, -24, 30), P(56, 28, 86), 8, 5);
+        ok_r3d_ellipsoid(P(s * 6, -24, 30), P(56, 28, 86), 6, 4);
         ok_r3d_ellipsoid(P(-s * 36, -28, 84), P(20, 18, 26), 6, 4); /* the big toe, monkey-style */
         ok_r3d_pop();
     }
@@ -1164,7 +1192,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(0, -170, 0));
     /* One whole body, round at the tummy, breathing. */
     part_rows(skin, OK_PART_TOP, ++next_id, 0, 100);
-    ok_r3d_ellipsoid(P(0, 318, 6), P(166, 160 + wave(a->ticks, 17, 3), 140), 10, 6);
+    ok_r3d_ellipsoid(P(0, 318, 6), P(166, 160 + wave(a->ticks, 17, 3), 140), 8, 5);
     /* The shoulders and head bend over it: sighs, a stretch. */
     ok_r3d_push();
     ok_r3d_translate(P(0, 295, 0));
@@ -1236,8 +1264,8 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(0, -450, 0));
     face->head_id = ++next_id;
     part(skin, OK_PART_HEAD, face->head_id);
-    ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 12, 9);
-    ok_r3d_ellipsoid(P(0, 728, 118), P(150, 38, 80), 10, 5);   /* brow */
+    ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 10, 7);
+    ok_r3d_ellipsoid(P(0, 728, 118), P(150, 38, 80), 8, 4);   /* brow */
     if (bare) { /* a tuft of hair */
         limb(0, 845, 20, -14, 880, 46, 15);
         limb(26, 840, 10, 40, 870, 30, 12);

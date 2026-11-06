@@ -289,7 +289,10 @@ void ok_icons_build(void)
 {
     static void (*const model[OK_ICONS])(void) = {banana, beach_ball, heart, moon, sun, pencil,
                                                   camera, envelope, gear, shirt, house, note};
+    static int built;
     int i, x, y, k, pass;
+    if (built) return; /* once: the platform may build them early */
+    built = 1;
     for (i = 0; i < OK_ICONS; i++) {
         id = 0;
         ok_r3d_begin(scratch, 0x8000);
