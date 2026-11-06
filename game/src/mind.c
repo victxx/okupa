@@ -26,8 +26,10 @@ static const char SYSTEM[] =
     "(tired and sad low, excited high), \"make\": a small object Okupa builds now out of boxes, a few words, or "
     "\"\", \"draw\": something Okupa draws now on its own sketchbook, a few words, or \"\", \"letter\": a short "
     "letter to the player, at most 140 characters, sent for ever on Ethereum, or \"\"}. Make and draw rarely, "
-    "when inspired or when the player asks. Write a letter only for something that matters, only when "
-    "can_write_letter is true, at most once a day. You move its whole body: choose where it goes, where it looks and how it "
+    "when inspired or when the player asks. can_write_letter is true only when the player has asked Okupa for "
+    "a letter: then write it in this very answer, two or three short sentences under 140 characters, warm in Okupa's own voice, about something real from "
+    "its day (what it did, what the player did or said, its plan) or from known, never an event that did not "
+    "happen, and say in line that it wrote it; when it is false, letter is always \"\". You move its whole body: choose where it goes, where it looks and how it "
     "moves so each decision plays out like a little scene. Speak when the player does or says something, when Okupa sees something or when its "
     "needs change; otherwise stay quiet or just think. Ask rarely, only to learn something about the player (their "
     "name, what they like, where they are, how their day was), never while a question is waiting, never one you asked in recent, and use what "
@@ -307,6 +309,13 @@ ok_result ok_mind_parse(const char *body, size_t n, ok_mind *d)
             for (i = 0, o = 0; i < n && o + 1 < caps[k]; i++)
                 if ((unsigned char)s[i] >= 0x20 && (unsigned char)s[i] < 0x7f) outs[k][o++] = s[i];
             outs[k][o] = 0;
+            if (k == 2 && i < n) { /* a letter too long: end it on its last whole sentence, or word */
+                while (o > 40 && !strchr(".!?", outs[k][o - 1])) o--;
+                if (o <= 40)
+                    for (o = strlen(outs[k]); o > 0 && outs[k][o - 1] != ' ';) o--;
+                while (o > 0 && outs[k][o - 1] == ' ') o--;
+                outs[k][o] = 0;
+            }
         }
     }
     note(&obj, "ask", d->ask);

@@ -318,6 +318,12 @@ int main(int argc, char **argv)
         obs.minute = local.tm_min;
         obs.seconds_since_player = (uint32_t)(i * 5);
         if (i) obs.player_did = NULL;
+        /* OKUPA_LETTER=1: on the second decision the player asks for a
+         * letter, as the Mail button does; it may write one until it has. */
+        if (i == 1 && getenv("OKUPA_LETTER")) {
+            obs.player_did = "asked you to write them a letter";
+            obs.can_write_letter = 1;
+        }
         if (!entropy(nonce, sizeof nonce)) return 2;
         t0 = seconds();
         r = ok_think_run(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, &obs, fetch, NULL);
@@ -335,6 +341,10 @@ int main(int argc, char **argv)
                    t.decision.energy, t.decision.line, t.decision.thought[0] ? " thinks: " : "",
                    t.decision.thought, t.decision.ask[0] ? " asks: " : "", t.decision.ask,
                    t.decision.remember[0] ? " keeps: " : "", t.decision.remember);
+            if (t.decision.letter[0]) {
+                printf("         letter%s: %s\n", obs.can_write_letter ? "" : " (not asked for, dropped)", t.decision.letter);
+                obs.can_write_letter = 0;
+            }
             /* It remembers what it just did, newest first. */
             for (j = OK_MIND_RECENT - 1; j > 0; j--) memcpy(memory[j], memory[j - 1], sizeof memory[0]);
             ok_mind_memory(&t.decision, memory[0]);
