@@ -10,17 +10,25 @@
  * the platform's read/write functions; no sockets or entropy in here. Sends
  * no transactions. Uses static buffers: one session at a time. */
 typedef struct {
-    int (*read)(void *ctx, uint8_t *buf, size_t n);        /* >0 bytes read, <=0 closed or failed */
+    /* >0 bytes read; OK_IO_IDLE if nothing came within the platform's wait;
+     * anything else: closed or failed. */
+    int (*read)(void *ctx, uint8_t *buf, size_t n);
     int (*write)(void *ctx, const uint8_t *buf, size_t n); /* >0 bytes written */
     void (*log)(void *ctx, const char *line);              /* optional */
+    /* Optional: once admitted, stay connected (answering pings) while this
+     * returns 1, so the next message goes out with no new handshake. */
+    int (*hold)(void *ctx);
     void *ctx;
 } ok_io;
+
+#define OK_IO_IDLE (-2)
 
 enum { OK_SESSION_PASS, OK_SESSION_CLOSED, OK_SESSION_DISCONNECTED, OK_SESSION_MISMATCH, OK_SESSION_BROKEN };
 
 typedef struct {
     int outcome;
     int handshake, hello, status, pong; /* how far it got */
+    unsigned held;                      /* messages handled while holding */
     char client[48];
     uint64_t disconnect; /* reason, when outcome is OK_SESSION_DISCONNECTED */
     ok_eth_status remote;

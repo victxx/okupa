@@ -21,15 +21,23 @@ static void say(const ok_io *io, const char *fmt, ...)
     io->log(io->ctx, line);
 }
 
-static int read_all(const ok_io *io, uint8_t *p, size_t n)
+/* 1 read, 0 closed. With idle_ok, a quiet line before the first byte gives
+ * -1 instead (holding a session); once a message has started, quiet is fatal. */
+static int read_some(const ok_io *io, uint8_t *p, size_t n, int idle_ok)
 {
-    while (n) {
-        int k = io->read(io->ctx, p, n);
+    size_t got = 0;
+    while (got < n) {
+        int k = io->read(io->ctx, p + got, n - got);
+        if (k == OK_IO_IDLE && idle_ok && got == 0) return -1;
         if (k <= 0) return 0;
-        p += k;
-        n -= (size_t)k;
+        got += (size_t)k;
     }
     return 1;
+}
+
+static int read_all(const ok_io *io, uint8_t *p, size_t n)
+{
+    return read_some(io, p, n, 0) == 1;
 }
 
 static int write_all(const ok_io *io, const uint8_t *p, size_t n)
@@ -58,15 +66,23 @@ static int send_frame(const ok_io *io, ok_rlpx_session *s, const uint8_t *data, 
     return ok_rlpx_frame_write(s, data, n, wire, sizeof wire, &len) == OK_OK && write_all(io, wire, len);
 }
 
-/* 1 message, 0 closed, -1 broken (bad MAC, too large, malformed). */
-static int recv_message(const ok_io *io, ok_rlpx_session *s, int snappy, uint64_t *id, size_t *len)
+/* 1 message, 0 closed, -1 broken (bad MAC, too large, malformed), 2 idle
+ * (only when idle_ok: nothing arrived). */
+static int recv_message_idle(const ok_io *io, ok_rlpx_session *s, int snappy, uint64_t *id, size_t *len, int idle_ok)
 {
     size_t size;
-    if (!read_all(io, wire, OK_RLPX_HEADER)) return 0;
+    int r = read_some(io, wire, OK_RLPX_HEADER, idle_ok);
+    if (r < 0) return 2;
+    if (!r) return 0;
     if (ok_rlpx_header_read(s, wire, &size) != OK_OK || size > BUF) return -1;
     if (!read_all(io, wire + OK_RLPX_HEADER, ok_rlpx_frame_len(size) - OK_RLPX_HEADER)) return 0;
     if (ok_rlpx_body_read(s, wire + OK_RLPX_HEADER, size) != OK_OK) return -1;
     return ok_p2p_read(wire + OK_RLPX_HEADER, size, snappy, id, msg, sizeof msg, len) == OK_OK ? 1 : -1;
+}
+
+static int recv_message(const ok_io *io, ok_rlpx_session *s, int snappy, uint64_t *id, size_t *len)
+{
+    return recv_message_idle(io, s, snappy, id, len, 0);
 }
 
 static int send_message(const ok_io *io, ok_rlpx_session *s, uint64_t id, const uint8_t *payload, size_t n, int snappy)
@@ -139,6 +155,29 @@ static int converse(const ok_io *io, ok_rlpx_session *s, const uint8_t pub[64], 
             rep->status = 1;
         } else {
             say(io, "got message 0x%02llx (%lu bytes), ignored", (unsigned long long)id, (unsigned long)len);
+        }
+    }
+    /* Admitted. Holding: answer pings and let everything else pass until the
+     * caller is done or the peer goes away. */
+    while (io->hold && io->hold(io->ctx)) {
+        if ((got = recv_message_idle(io, s, snappy, &id, &len, 1)) == 2) {
+            /* A quiet line: show we are still here. */
+            if (ok_p2p_ping(snappy, out, sizeof out, &len) != OK_OK || !send_frame(io, s, out, len))
+                return finish(rep, OK_SESSION_PASS);
+            continue;
+        }
+        if (got <= 0) {
+            say(io, "peer left after %u messages", rep->held);
+            return finish(rep, OK_SESSION_PASS);
+        }
+        rep->held++;
+        if (id == OK_P2P_PING) {
+            if (ok_p2p_pong(snappy, out, sizeof out, &len) != OK_OK || !send_frame(io, s, out, len))
+                return finish(rep, OK_SESSION_PASS);
+        } else if (id == OK_P2P_DISCONNECT) {
+            if (ok_p2p_disconnect_reason(msg, len, &rep->disconnect) != OK_OK) rep->disconnect = 0xff;
+            say(io, "peer left: %s", ok_p2p_reason_name(rep->disconnect));
+            return finish(rep, OK_SESSION_PASS);
         }
     }
     if (ok_p2p_disconnect(0x08, snappy, out, sizeof out, &len) == OK_OK) send_frame(io, s, out, len);
