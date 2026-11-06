@@ -84,8 +84,6 @@ void ok_monkey_skin(const ok_look *look, uint16_t skin[OK_SKIN * OK_SKIN])
     fill(skin, p->x, p->y, p->w, p->h, EAR_IN);
     p = &parts[OK_PART_HANDS];
     fill(skin, p->x, p->y, p->w, p->h, CREAM);
-    p = &parts[OK_PART_TAIL];
-    fill(skin, p->x, p->y + p->h - 8, p->w, 8, CREAM);
     /* The top, and sleeves: full for the hoodie, short for the tees. */
     p = &parts[OK_PART_TOP];
     fill(skin, p->x, p->y, p->w, p->h, top);
@@ -101,7 +99,7 @@ void ok_monkey_skin(const ok_look *look, uint16_t skin[OK_SKIN * OK_SKIN])
     fill(skin, p->x, p->y + p->h - 4, p->w, 4, shade(top, 4, 5)); /* hem */
     p = &parts[OK_PART_SLEEVE];
     fill(skin, p->x, p->y, p->w, look->top == OK_TOP_HOODIE ? p->h : p->h / 3, top);
-    if (look->top == OK_TOP_HOODIE) fill(skin, p->x, p->y + p->h * 2 / 3, p->w, 4, shade(top, 4, 5)); /* cuff */
+    if (look->top == OK_TOP_HOODIE) fill(skin, p->x, p->y + p->h - 9, p->w, 5, shade(top, 4, 5)); /* cuff */
     if (look->top == OK_TOP_STRIPES) fill(skin, p->x, p->y + 6, p->w, 3, RGB(30, 29, 26));
     p = &parts[OK_PART_HOOD];
     fill(skin, p->x, p->y, p->w, p->h, shade(top, 9, 10));
@@ -117,11 +115,13 @@ static const uint8_t stiff[OK_SPRINGS] = {
     180, 60, 60, 70, 50, 60, 110, 110, 110, 110, 200, 200, /* bob .. legs */
     90, 50, 30, 20,                                        /* tail, each joint softer */
     60, 200, 60, 40, 25, 250,                              /* ear, squash, mask, yaw, lie, ball */
+    60, 110, 110, 200, 200, 14, 10,                        /* chest, elbows, foot lifts, tail tip */
 };
 static const uint8_t damp[OK_SPRINGS] = {
     91, 61, 60, 65, 56, 60, 77, 77, 77, 77, 112, 112,
     43, 28, 22, 18,
     22, 56, 70, 64, 56, 179,
+    60, 77, 77, 112, 112, 16, 14,
 };
 
 static uint32_t rnd(ok_monkey_anim *a)
@@ -247,6 +247,8 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     /* The mood sets the resting pose. */
     t[OK_SPRING_SQUASH] = 100 + wave(k, 17, 1);
     t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 9;
+    t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 16;
+    t[OK_SPRING_CHEST] = wave(k, 17, 2); /* breathing */
     t[OK_SPRING_TAIL0] = wave(k, 19, 9);
     switch (mood) {
     case OK_POSE_HAPPY:
@@ -260,13 +262,17 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     case OK_POSE_HUNGRY:
         t[OK_SPRING_LEAN] = 7;
         t[OK_SPRING_NOD] = 11;
-        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -30;
-        t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 48;
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -26;
+        t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 30;
+        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 62;
+        t[OK_SPRING_CHEST] = 9;
         t[OK_SPRING_BOB] = wave(k, 15, 3);
         if (k % 400 < 30) t[OK_SPRING_ROLL] = wave(k, 600, 3); /* tummy rumble */
         t[OK_SPRING_TAIL0] = wave(k, 12, 5) - 6;
         break;
     case OK_POSE_SLEEPY:
+        t[OK_SPRING_CHEST] = 7 + wave(k, 11, 3);
+        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 6;
         t[OK_SPRING_NOD] = 13 + wave(k, 11, 7);
         t[OK_SPRING_TILT] = 7;
         t[OK_SPRING_BOB] = wave(k, 11, 6) - 8;
@@ -274,6 +280,7 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         t[OK_SPRING_TAIL0] = wave(k, 9, 4) - 10;
         break;
     case OK_POSE_BORED:
+        t[OK_SPRING_CHEST] = 6;
         t[OK_SPRING_LEAN] = -4;
         t[OK_SPRING_NOD] = 5;
         t[OK_SPRING_ROLL] = wave(k, 9, 4);
@@ -305,16 +312,20 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         if (mt > 190) done(a, 90, 200);
         break;
     case OK_MOVE_SCRATCH:
-        t[OK_SPRING_RAISE_R] = mt > 15 && mt < 110 ? 148 + wave(k, 300, 7) : 9;
-        t[OK_SPRING_FWD_R] = mt > 15 && mt < 110 ? 32 : 0;
+        t[OK_SPRING_RAISE_R] = mt > 15 && mt < 110 ? 128 + wave(k, 300, 7) : 9;
+        t[OK_SPRING_FWD_R] = mt > 15 && mt < 110 ? 30 : 0;
+        t[OK_SPRING_ELBOW_R] = mt > 15 && mt < 110 ? 105 + wave(k, 300, 10) : 16;
         t[OK_SPRING_TILT] = mt < 110 ? -12 : 0;
         t[OK_SPRING_TURN] = -8;
         if (mt > 140) done(a, 120, 240);
         break;
     case OK_MOVE_STRETCH:
         if (mt > 10 && mt < 95) {
-            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 142;
-            t[OK_SPRING_LEAN] = -10;
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 140;
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 22;
+            t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 8;
+            t[OK_SPRING_LEAN] = -6;
+            t[OK_SPRING_CHEST] = -10;
             t[OK_SPRING_NOD] = -14;
             t[OK_SPRING_SQUASH] = 109;
             t[OK_SPRING_BOB] = 12;
@@ -326,11 +337,13 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         if (mt < 12) {
             t[OK_SPRING_BOB] = -22; /* crouch */
             t[OK_SPRING_SQUASH] = 86;
+            t[OK_SPRING_CHEST] = 10;
         } else if (h < 22) {
             t[OK_SPRING_BOB] = (int)(4 * 130 * h * (22 - h) / (22 * 22)); /* the jump */
             t[OK_SPRING_SQUASH] = h < 8 ? 114 : 100;
             t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 70;
-            t[OK_SPRING_LEG_L] = t[OK_SPRING_LEG_R] = -12;
+            t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 40;
+            t[OK_SPRING_CHEST] = -6;
         } else if (h < 30) {
             t[OK_SPRING_SQUASH] = 88; /* landing */
             t[OK_SPRING_BOB] = -14;
@@ -342,7 +355,8 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         if (mt < 150) {
             t[OK_SPRING_MASK] = mt > 12 ? 100 : 0;
             t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = mt < 40 || mt > 120 ? 35 : 12;
-            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = mt < 40 || mt > 120 ? 95 : 10;
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = mt < 40 || mt > 120 ? 70 : 10;
+            t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = mt < 40 || mt > 120 ? 95 : 20;
             t[OK_SPRING_ROLL] = wave(k, 60, 6);
             t[OK_SPRING_TILT] = wave(k, 60, 10);
         }
@@ -366,14 +380,16 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         if (mt < 90) {
             t[OK_SPRING_BOB] = mt < 30 ? 10 : -16;
             t[OK_SPRING_NOD] = mt < 30 ? -6 : 18;
+            t[OK_SPRING_CHEST] = mt < 30 ? -8 : 12;
             t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 1;
             t[OK_SPRING_TAIL0] = -16;
         }
         if (mt > 130) done(a, 150, 240);
         break;
     case OK_MOVE_WAVE:
-        t[OK_SPRING_RAISE_R] = mt < 100 ? 128 + wave(k, 220, 24) : 9;
+        t[OK_SPRING_RAISE_R] = mt < 100 ? 112 + wave(k, 220, 8) : 9;
         t[OK_SPRING_FWD_R] = mt < 100 ? 22 : 0;
+        t[OK_SPRING_ELBOW_R] = mt < 100 ? 45 + wave(k, 220, 30) : 16;
         t[OK_SPRING_TILT] = mt < 100 ? 9 : 0;
         t[OK_SPRING_BOB] += mt < 100 ? wave(k, 110, 4) : 0;
         if (mt > 120) done(a, 120, 240);
@@ -381,11 +397,14 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     case OK_MOVE_EAT: {
         int bite = mt > 30 && mt < 150 ? (mt - 30) % 40 : 99;
         t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -18;
-        t[OK_SPRING_FWD_R] = 72;
-        t[OK_SPRING_FWD_L] = 40;
+        t[OK_SPRING_FWD_R] = 40;
+        t[OK_SPRING_FWD_L] = 25;
+        t[OK_SPRING_ELBOW_R] = 70;
+        t[OK_SPRING_ELBOW_L] = 55;
         if (bite < 14) {
-            t[OK_SPRING_FWD_R] = 112;
-            t[OK_SPRING_RAISE_R] = -34;
+            t[OK_SPRING_FWD_R] = 62;
+            t[OK_SPRING_RAISE_R] = -30;
+            t[OK_SPRING_ELBOW_R] = 112;
             t[OK_SPRING_NOD] = 8;
         }
         if (bite == 12) a->bites++;
@@ -393,6 +412,7 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         if (mt > 160) {
             t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 120;
             t[OK_SPRING_FWD_R] = t[OK_SPRING_FWD_L] = 0;
+            t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 30;
             t[OK_SPRING_BOB] = (mt - 160) < 20 ? (mt - 160) * 4 : 0;
         }
         if (mt > 210) done(a, 120, 200);
@@ -401,11 +421,13 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     case OK_MOVE_PLAY: {
         int toss = mt % 72, air = toss - 14;
         t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 22;
-        t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 70;
+        t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 55;
+        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 45;
         if (air >= 0 && air < 46) {
             t[OK_SPRING_BALL] = 4 * 340 * air * (46 - air) / (46 * 46);
             t[OK_SPRING_NOD] = -(int)(t[OK_SPRING_BALL] / 18);
-            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 110;
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 120;
+            t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 15;
         } else if (toss < 14) {
             t[OK_SPRING_BOB] = toss < 7 ? -10 : 8;
         }
@@ -419,16 +441,19 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
             t[OK_SPRING_ROLL] = wave(k, 55, 6);
             t[OK_SPRING_TAIL0] = wave(k, 160, 26);
             t[OK_SPRING_BOB] = wave(k, 110, 8) < 0 ? 0 : wave(k, 110, 8);
-            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -10;
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -16;
             t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 30;
+            t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 80;
+            t[OK_SPRING_CHEST] = wave(k, 55, 4);
         }
         if (mt > 170) done(a, 90, 180);
         break;
     case OK_MOVE_REFUSE:
         if (mt < 60) {
             t[OK_SPRING_TURN] = wave(k, 240, 24);
-            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -38;
-            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 62;
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -40;
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 40;
+            t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 105;
             t[OK_SPRING_LEAN] = -5;
         }
         if (mt > 80) done(a, 120, 200);
@@ -473,8 +498,12 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     /* Walking: legs and arms swing, the body bobs twice a stride. */
     if (a->move == OK_MOVE_IDLE && (a->x != a->room.home_x || a->z != a->room.home_z)) walk(a, a->room.home_x, a->room.home_z);
     if (a->walking) {
-        t[OK_SPRING_LEG_L] = wave(k, 150, 30);
-        t[OK_SPRING_LEG_R] = -wave(k, 150, 30);
+        int lift = (int)((int64_t)ok_r3d_cos((int)(k * 150u)) * 26 / 4096);
+        t[OK_SPRING_LEG_L] = wave(k, 150, 42);
+        t[OK_SPRING_LEG_R] = -wave(k, 150, 42);
+        t[OK_SPRING_LIFT_L] = lift > 0 ? lift : 0; /* the foot moving forward is in the air */
+        t[OK_SPRING_LIFT_R] = lift < 0 ? -lift : 0;
+        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 26;
         t[OK_SPRING_FWD_L] = -wave(k, 150, 22);
         t[OK_SPRING_FWD_R] = wave(k, 150, 22);
         t[OK_SPRING_BOB] = (wave(k, 300, 12) < 0 ? -wave(k, 300, 12) : wave(k, 300, 12)) - 4;
@@ -493,6 +522,8 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     t[OK_SPRING_TAIL1] = a->s[OK_SPRING_TAIL0].x / Q;
     t[OK_SPRING_TAIL2] = a->s[OK_SPRING_TAIL1].x / Q;
     t[OK_SPRING_TAIL3] = a->s[OK_SPRING_TAIL2].x / Q;
+    t[OK_SPRING_TAIL4] = a->s[OK_SPRING_TAIL3].x / Q;
+    t[OK_SPRING_TAIL5] = a->s[OK_SPRING_TAIL4].x / Q;
     t[OK_SPRING_EAR] = -a->s[OK_SPRING_BOB].v * 3 / 512;
     t[OK_SPRING_NOD] -= a->s[OK_SPRING_BOB].v * 3 / 1280;
 
@@ -640,7 +671,7 @@ static void wear(int which, const ok_monkey_anim *a, ok_monkey_face *f)
 
 static void banana(int s, int bites)
 {
-    static const int pts[4][3] = {{50, -175, 35}, {48, -120, 70}, {32, -70, 96}, {8, -40, 110}};
+    static const int pts[4][3] = {{4, -40, 34}, {2, 6, 56}, {-12, 44, 70}, {-32, 66, 72}};
     int i, n = 3 - (bites > 3 ? 3 : bites);
     solid(RGB(31, 27, 8));
     for (i = 0; i < n; i++)
@@ -649,10 +680,69 @@ static void banana(int s, int bites)
     if (n) blob(s * pts[n][0], pts[n][1], pts[n][2], 18, 18, 18);
 }
 
+static int32_t isqrt(int32_t v)
+{
+    int32_t r = 0, bit = 1 << 30;
+    if (v <= 0) return 0;
+    while (bit > v) bit >>= 2;
+    while (bit) {
+        if (v >= r + bit) {
+            v -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+        bit >>= 2;
+    }
+    return r;
+}
+
+#define THIGH 75
+#define SHIN 72
+
+/* Two-bone inverse kinematics: the thigh's angle forward and the knee's bend
+ * (1/4096 turns) that put the ankle dz forward of and dy below the hip. */
+static void reach(int dz, int dy, int *thigh, int *knee)
+{
+    int32_t d = isqrt(dz * dz + dy * dy), c1, c2;
+    int phi = ok_r3d_atan2(dz, dy);
+    if (d >= THIGH + SHIN - 2) { /* out of reach: in the air, the legs tuck up a little */
+        *thigh = phi + DEG(14);
+        *knee = DEG(30);
+        return;
+    }
+    if (d < 40) d = 40;
+    c1 = (THIGH * THIGH + d * d - SHIN * SHIN) * 4096 / (2 * THIGH * d);
+    c2 = (THIGH * THIGH + SHIN * SHIN - d * d) * 4096 / (2 * THIGH * SHIN);
+    c1 = c1 > 4096 ? 4096 : c1 < -4096 ? -4096 : c1;
+    c2 = c2 > 4096 ? 4096 : c2 < -4096 ? -4096 : c2;
+    *thigh = phi + ok_r3d_atan2(isqrt(4096 * 4096 - c1 * c1), c1);
+    *knee = OK_TURN / 2 - ok_r3d_atan2(isqrt(4096 * 4096 - c2 * c2), c2);
+}
+
+/* A part of the skin, or only some of its rows (for limbs in two pieces). */
+static void part_rows(const uint16_t *skin, int which, int id, int from, int to)
+{
+    const ok_part *p = &parts[which];
+    ok_r3d_texture(skin, OK_SKIN);
+    ok_r3d_uv(p->x, p->y + p->h * from / 100, p->w, p->h * (to - from) / 100);
+    ok_r3d_material(FUR, id, OK_R3D_EDGE | OK_R3D_TEXTURED);
+}
+
+static void hand(const uint16_t *skin, int s, int id)
+{
+    part(skin, OK_PART_HANDS, id);
+    ok_r3d_ellipsoid(P(s * 4, -28, 12), P(46, 42, 36), 8, 6);   /* palm */
+    ok_r3d_ellipsoid(P(s * 4, -58, 16), P(38, 24, 30), 8, 5);   /* curled fingers */
+    ok_r3d_ellipsoid(P(-s * 22, -20, 36), P(16, 24, 16), 6, 4); /* thumb */
+}
+
 void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
 {
-    static const int tail[6][3] = {{0, 0, 0}, {150, -40, -40}, {100, 80, 30}, {20, 120, 50}, {-60, 80, 30}, {-45, -40, 10}};
-    int s, i, lie = val(a, OK_SPRING_LIE), sq = val(a, OK_SPRING_SQUASH), hands, mood = a->mood, mv = a->move;
+    static const int8_t curl[10] = {-22, 8, 14, 18, 22, 26, 30, 34, 36, 30};
+    int s, i, lie = val(a, OK_SPRING_LIE), sq = val(a, OK_SPRING_SQUASH), hands, fur_id, mood = a->mood, mv = a->move;
+    int bob = val(a, OK_SPRING_BOB), bare = look->wear == OK_WEAR_NONE || look->wear == OK_WEAR_GLASSES ||
+                                            look->wear == OK_WEAR_SCARF || look->wear == OK_WEAR_SMILEY;
     int32_t x, y, z;
     lie = lie < 0 ? 0 : lie > 100 ? 100 : lie;
     memset(face, 0, sizeof *face);
@@ -665,7 +755,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(x, y, z));
     if (lie < 60) {
         ok_r3d_material(0, 0, OK_R3D_SHADOW);
-        ok_r3d_disc(P(20, 5, 0), H(240 - lie), H(180 - lie), 12);
+        ok_r3d_disc(P(20, 5, 0), H(230 - lie - bob / 3), H(175 - lie - bob / 4), 12);
     }
     ok_r3d_rotate_y(deg(a, OK_SPRING_YAW) * (100 - lie) / 100);
     if (lie) {
@@ -673,60 +763,87 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         ok_r3d_rotate_z(DEG(90) * lie / 100);
         ok_r3d_translate(P(0, -190, 0));
     }
-    /* Legs swing from the hips. */
+    /* Legs: hip, knee and ankle, the feet kept on the floor while it bobs. */
     hands = ++next_id;
+    fur_id = ++next_id;
     for (s = -1; s <= 1; s += 2) {
+        int k = s > 0, thigh = DEG(6), knee = DEG(12);
+        if (lie < 30)
+            reach(val(a, k ? OK_SPRING_LEG_R : OK_SPRING_LEG_L) + 6,
+                  195 + bob - 50 - val(a, k ? OK_SPRING_LIFT_R : OK_SPRING_LIFT_L), &thigh, &knee);
         ok_r3d_push();
-        ok_r3d_translate(P(s * 75, 190, 0));
-        ok_r3d_rotate_x(-deg(a, s < 0 ? OK_SPRING_LEG_L : OK_SPRING_LEG_R));
-        part(skin, OK_PART_LEG, hands + 1);
-        limb(0, -120, 0, 0, 0, 0, 55);
+        ok_r3d_translate(P(s * 72, 195 + bob, 0));
+        ok_r3d_rotate_z(-s * DEG(3));
+        ok_r3d_rotate_x(-thigh);
+        part_rows(skin, OK_PART_LEG, fur_id, 0, 50);
+        limb(0, -THIGH, 0, 0, 0, 0, 50);
+        ok_r3d_translate(P(0, -THIGH, 0));
+        ok_r3d_rotate_x(knee);
+        part_rows(skin, OK_PART_LEG, fur_id, 50, 100);
+        limb(0, -SHIN, 0, 0, 0, 0, 42);
+        ok_r3d_translate(P(0, -SHIN, 0));
+        ok_r3d_rotate_x(thigh - knee); /* the foot stays level */
+        ok_r3d_rotate_z(s * DEG(3));
         part(skin, OK_PART_HANDS, hands);
-        ok_r3d_ellipsoid(P(s * 10, -152, 35), P(70, 40, 95), 10, 6);
+        ok_r3d_ellipsoid(P(s * 6, -24, 30), P(56, 28, 86), 10, 6);
+        ok_r3d_ellipsoid(P(-s * 36, -28, 84), P(20, 18, 26), 6, 4); /* the big toe, monkey-style */
         ok_r3d_pop();
     }
-    next_id++;
-    /* The body: bob, lean, roll and squash around the hips. */
+    /* The pelvis: bob, lean, roll and squash around the hips. */
     ok_r3d_push();
-    ok_r3d_translate(P(0, 170 + val(a, OK_SPRING_BOB), 0));
+    ok_r3d_translate(P(0, 170 + bob, 0));
     ok_r3d_rotate_x(deg(a, OK_SPRING_LEAN));
     ok_r3d_rotate_z(deg(a, OK_SPRING_ROLL));
     ok_r3d_scale(H(200 - sq), H(sq), H(200 - sq));
     ok_r3d_translate(P(0, -170, 0));
-    /* Tail: each joint turns by its own, lagging spring. */
-    part(skin, OK_PART_TAIL, ++next_id);
+    part_rows(skin, OK_PART_TOP, ++next_id, 45, 100);
+    ok_r3d_ellipsoid(P(0, 250, 8), P(162, 118, 138), 12, 7);
+    /* Tail: ten joints, each turned by a spring a beat behind the one before. */
+    part_rows(skin, OK_PART_TAIL, fur_id + 60, 0, 60);
     ok_r3d_push();
-    ok_r3d_translate(P(60, 160, -110));
-    for (i = 0; i < 5; i++) {
-        static const int joint[5] = {OK_SPRING_TAIL0, OK_SPRING_TAIL1, OK_SPRING_TAIL2, OK_SPRING_TAIL3, OK_SPRING_TAIL3};
-        ok_r3d_rotate_z(deg(a, joint[i]) * (i ? 6 : 10) / 10);
-        limb(tail[i + 1][0], tail[i + 1][1], tail[i + 1][2], 0, 0, 0, 32 - i * 2);
-        ok_r3d_translate(P(tail[i + 1][0], tail[i + 1][1], tail[i + 1][2]));
+    ok_r3d_translate(P(40, 195, -112));
+    ok_r3d_rotate_y(-DEG(78));
+    for (i = 0; i < 10; i++) {
+        int sp = OK_SPRING_TAIL0 + (i * 6 / 10 < 4 ? i * 6 / 10 : 0), r = 30 - i * 3 / 2;
+        if (i * 6 / 10 >= 4) sp = i * 6 / 10 == 4 ? OK_SPRING_TAIL4 : OK_SPRING_TAIL5;
+        ok_r3d_rotate_y(deg(a, sp) * 7 / 10);
+        ok_r3d_rotate_x(DEG(curl[i]));
+        limb(0, 0, -52, 0, 0, 0, r);
+        ok_r3d_translate(P(0, 0, -52));
     }
     ok_r3d_pop();
-    part(skin, OK_PART_TOP, ++next_id);
-    ok_r3d_ellipsoid(P(0, 290, 0), P(175, 170 + wave(a->ticks, 17, 3), 145), 12, 8);
+    /* The chest bends over the belly: breathing, sighs, a stretch. */
+    ok_r3d_push();
+    ok_r3d_translate(P(0, 295, 0));
+    ok_r3d_rotate_x(deg(a, OK_SPRING_CHEST));
+    ok_r3d_translate(P(0, -295, 0));
+    part_rows(skin, OK_PART_TOP, next_id, 0, 55);
+    ok_r3d_ellipsoid(P(0, 352, 0), P(170, 122 + wave(a->ticks, 17, 3), 134), 12, 7);
     if (look->top == OK_TOP_HOODIE) {
         part(skin, OK_PART_HOOD, ++next_id);
-        ok_r3d_ellipsoid(P(0, 430, -75), P(150, 75, 100), 10, 6);
+        ok_r3d_ellipsoid(P(0, 440, -80), P(150, 72, 100), 10, 6);
     }
     if (look->wear == OK_WEAR_SCARF) {
         solid(RGB(28, 9, 8));
-        ok_r3d_ellipsoid(P(0, 448, 0), P(158, 52, 140), 12, 5);
+        ok_r3d_ellipsoid(P(0, 452, 0), P(158, 52, 140), 12, 5);
         solid(RGB(26, 7, 7));
-        blob(70, 365, 125, 42, 90, 28);
+        blob(70, 370, 128, 42, 90, 28);
     }
-    /* Arms from the shoulders: raise turns them outwards, forward to the front. */
+    /* Arms: shoulder, elbow, wrist, a hand with a thumb. */
     for (s = -1; s <= 1; s += 2) {
         int k = s > 0;
         ok_r3d_push();
-        ok_r3d_translate(P(s * 150, 390, 10));
+        ok_r3d_translate(P(s * 150, 400, 5));
         ok_r3d_rotate_z(s * deg(a, k ? OK_SPRING_RAISE_R : OK_SPRING_RAISE_L));
         ok_r3d_rotate_x(-deg(a, k ? OK_SPRING_FWD_R : OK_SPRING_FWD_L));
-        part(skin, OK_PART_SLEEVE, ++next_id);
-        limb(s * 45, -150, 30, 0, 0, 0, 48);
-        part(skin, OK_PART_HANDS, hands);
-        ok_r3d_ellipsoid(P(s * 50, -175, 35), P(55, 55, 55), 8, 6);
+        part_rows(skin, OK_PART_SLEEVE, ++next_id, 0, 50);
+        limb(s * 18, -82, 6, 0, 0, 0, 44);
+        ok_r3d_translate(P(s * 18, -82, 6));
+        ok_r3d_rotate_x(-deg(a, k ? OK_SPRING_ELBOW_R : OK_SPRING_ELBOW_L));
+        part_rows(skin, OK_PART_SLEEVE, next_id, 50, 100);
+        limb(s * 6, -76, 6, 0, 0, 0, 38);
+        ok_r3d_translate(P(s * 6, -76, 6));
+        hand(skin, s, hands);
         if (k && mv == OK_MOVE_EAT && a->move_t < 165) banana(s, a->bites);
         ok_r3d_pop();
     }
@@ -739,42 +856,53 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     }
     /* Head, turning on the neck. */
     ok_r3d_push();
-    ok_r3d_translate(P(0, 430, 0));
+    ok_r3d_translate(P(0, 450, 0));
     ok_r3d_rotate_y(deg(a, OK_SPRING_TURN));
     ok_r3d_rotate_x(deg(a, OK_SPRING_NOD));
     ok_r3d_rotate_z(deg(a, OK_SPRING_TILT));
-    ok_r3d_translate(P(0, -430, 0));
+    ok_r3d_translate(P(0, -450, 0));
     face->head_id = ++next_id;
     part(skin, OK_PART_HEAD, face->head_id);
-    ok_r3d_ellipsoid(P(0, 630, 0), P(240, 230, 230), 12, 9);
+    ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 12, 9);
+    ok_r3d_ellipsoid(P(0, 722, 122), P(170, 42, 84), 10, 5);   /* brow */
+    blob(-150, 556, 100, 82, 74, 80);                          /* cheeks */
+    blob(150, 556, 100, 82, 74, 80);
+    if (bare) { /* a tuft of hair */
+        limb(0, 840, 10, -18, 900, 30, 16);
+        limb(30, 835, 0, 46, 892, 14, 14);
+        limb(-30, 835, 0, -56, 884, 6, 13);
+    }
     if (look->wear != OK_WEAR_HEADPHONES)
         for (s = -1; s <= 1; s += 2) {
             ok_r3d_push();
             ok_r3d_translate(P(s * 215, 650, -10));
             ok_r3d_rotate_z(s * (deg(a, OK_SPRING_EAR) + wave(a->ticks, 29, 1) * DEG(2)));
             part(skin, OK_PART_EAR, face->head_id);
-            blob(s * 20, -10, 0, 45, 85, 85);
+            blob(s * 22, -10, 0, 46, 86, 86);
             part(skin, OK_PART_EAR_IN, face->head_id + 50);
-            blob(s * 40, -10, 15, 25, 55, 55);
+            blob(s * 42, -10, 16, 24, 56, 56);
             ok_r3d_pop();
         }
     face->mask_id = ++next_id;
     part(skin, OK_PART_EYES, face->mask_id);
-    blob(-75, 645, 145, 105, 115, 95);
-    blob(75, 645, 145, 105, 115, 95);
+    blob(-75, 645, 150, 102, 110, 92);
+    blob(75, 645, 150, 102, 110, 92);
     part(skin, OK_PART_MUZZLE, face->mask_id);
-    blob(0, 555, 170, 135, 95, 85);
+    blob(0, 552, 175, 132, 92, 86);
+    blob(0, 478, 142, 86, 48, 72); /* chin */
     wear(look->wear, a, face);
     for (i = 0; i < 2; i++)
-        if (!ok_r3d_project(P(i ? 75 : -75, 640, 232), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
-    if (!ok_r3d_project(P(0, 540, 255), &face->mouth_x, &face->mouth_y, &face->mouth_z)) face->mouth_x = -100;
+        if (!ok_r3d_project(P(i ? 75 : -75, 645, 240), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
+    if (!ok_r3d_project(P(0, 536, 260), &face->mouth_x, &face->mouth_y, &face->mouth_z)) face->mouth_x = -100;
+    if (!ok_r3d_project(P(0, 588, 262), &face->nose_x, &face->nose_y, &face->nose_z)) face->nose_x = -100;
     if (!ok_r3d_project(P(0, 900, 0), &face->top_x, &face->top_y, NULL)) face->top_x = -100;
+    ok_r3d_pop();
     ok_r3d_pop();
     ok_r3d_pop();
     /* Tucked in. */
     if (lie > 50) {
         solid(RGB(7, 13, 24));
-        ok_r3d_ellipsoid(P(-10, 210, 25), P(195, 265, 200), 12, 7);
+        ok_r3d_ellipsoid(P(-10, 220, 25), P(195, 280, 200), 12, 7);
     }
     ok_r3d_pop();
 
@@ -822,7 +950,7 @@ static void sprite(uint16_t *frame, const ok_monkey_face *f, int cx, int cy, con
             if (k == '.' || x < 0 || y < 0 || x >= OK_R3D_W || y >= OK_R3D_H) continue;
             if (masked && id != f->head_id && id != f->mask_id) continue;
             frame[y * OK_R3D_W + x] = k == '#' ? INK : k == 'o' ? WHITE : k == 'p' ? BLUSH : k == 'h' ? RGB(30, 9, 12)
-                                      : k == 'z' ? RGB(26, 27, 31) : RGB(27, 11, 11);
+                                      : k == 'z' ? RGB(26, 27, 31) : k == 'n' ? RGB(14, 8, 6) : RGB(27, 11, 11);
         }
 }
 
@@ -841,6 +969,7 @@ static const char *const mouth_small[] = {".##."};
 static const char *const mouth_flat[] = {"####"};
 static const char *const mouth_chew[] = {".##.", "#rr#", ".##."};
 static const char *const cheek[] = {"pp"};
+static const char *const nose[] = {"n.n"};
 static const char *const blush[] = {"pppp"};
 static const char *const brow_l[] = {"..##", "##.."};
 static const char *const brow_r[] = {"##..", "..##"};
@@ -908,6 +1037,7 @@ void ok_monkey_face_draw(uint16_t *frame, const ok_monkey_face *f)
         for (i = 0; i < 2; i++) sprite(frame, f, f->eye_x[i], f->eye_y[i], glasses, 8, 1);
         sprite(frame, f, (f->eye_x[0] + f->eye_x[1]) / 2, f->eye_y[0] - 1, bridge, 1, 1);
     }
+    if (seen(f->nose_x, f->nose_y, f->nose_z)) sprite(frame, f, f->nose_x, f->nose_y, nose, 1, 1);
     if (seen(f->mouth_x, f->mouth_y, f->mouth_z)) {
         switch (f->mouth) {
         case 'O': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_open, 3, 1); break;

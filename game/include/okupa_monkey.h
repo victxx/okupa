@@ -44,7 +44,10 @@ const ok_part *ok_monkey_part(int part);
 enum { OK_SPRING_BOB, OK_SPRING_LEAN, OK_SPRING_ROLL, OK_SPRING_NOD, OK_SPRING_TURN, OK_SPRING_TILT, OK_SPRING_RAISE_L,
        OK_SPRING_RAISE_R, OK_SPRING_FWD_L, OK_SPRING_FWD_R, OK_SPRING_LEG_L, OK_SPRING_LEG_R, OK_SPRING_TAIL0,
        OK_SPRING_TAIL1, OK_SPRING_TAIL2, OK_SPRING_TAIL3, OK_SPRING_EAR, OK_SPRING_SQUASH, OK_SPRING_MASK,
-       OK_SPRING_YAW, OK_SPRING_LIE, OK_SPRING_BALL, OK_SPRINGS };
+       OK_SPRING_YAW, OK_SPRING_LIE, OK_SPRING_BALL, OK_SPRING_CHEST, OK_SPRING_ELBOW_L, OK_SPRING_ELBOW_R,
+       OK_SPRING_LIFT_L, OK_SPRING_LIFT_R, OK_SPRING_TAIL4, OK_SPRING_TAIL5, OK_SPRINGS };
+/* LEG_L/R are where each foot is put, forward of the hip (hundredths), and
+ * LIFT_L/R how high it is raised; the legs reach it by inverse kinematics. */
 
 typedef struct {
     int32_t x, v; /* value and speed, 1/256 of a degree or a hundredth */
@@ -67,8 +70,8 @@ typedef struct {
 
 /* What the face and the effects around it need once the frame is finished. */
 typedef struct {
-    int eye_x[2], eye_y[2], mouth_x, mouth_y, top_x, top_y;
-    int32_t eye_z[2], mouth_z;
+    int eye_x[2], eye_y[2], mouth_x, mouth_y, nose_x, nose_y, top_x, top_y;
+    int32_t eye_z[2], mouth_z, nose_z;
     int mask_x, mask_y, mask_ux, mask_uy, mask_vx, mask_vy; /* the smiley, 1/16 pixel axes */
     int head_id, mask_id, smiley_id;
     int eyes, mouth, look, blush, hearts, zzz, glasses;
