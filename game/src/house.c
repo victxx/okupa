@@ -142,7 +142,52 @@ static void apply(const light *l)
 
 /* ------------------------------------------------------------ the room */
 
-static uint16_t art[64 * 64];
+/* The gallery: six frames on the gable wall, each a 64x64 one-bit picture. */
+static uint8_t gallery[OK_HOUSE_FRAMES][OK_DRAWING_BYTES], hung[OK_HOUSE_FRAMES];
+static uint16_t art[OK_HOUSE_FRAMES][64 * 64];
+/* Where each frame hangs (centre x, y, half size, tilt in degrees, wood). */
+static const int16_t spots[OK_HOUSE_FRAMES][5] = {
+    {-1050, 520, 165, -2, 0}, {-660, 545, 150, 2, 1}, {-270, 560, 140, -1, 2},
+    {150, 545, 150, 3, 1},   {-650, 1010, 140, 2, 2}, {650, 1010, 140, -3, 0},
+};
+
+void ok_house_frame(int slot, const uint8_t *pixels)
+{
+    if (slot < 0 || slot >= OK_HOUSE_FRAMES) return;
+    hung[slot] = pixels != NULL;
+    if (pixels) memcpy(gallery[slot], pixels, OK_DRAWING_BYTES);
+}
+
+/* One frame: wood, a cream mount, and the drawing in ink, or nothing yet
+ * (pixels NULL): an empty frame waiting for its picture. */
+static void framed(int slot, const uint8_t *pixels)
+{
+    static const uint16_t woods[3] = {RGB(14, 9, 5), RGB(21, 14, 7), RGB(28, 26, 22)};
+    const int16_t *sp = spots[slot];
+    int x, y, h = sp[2], m = h * 82 / 100, d = h * 70 / 100;
+    for (y = 0; y < 64 && pixels; y++)
+        for (x = 0; x < 64; x++)
+            art[slot][y * 64 + x] = ok_drawing_get(pixels, (unsigned)x, (unsigned)y) ? RGB(5, 4, 4) : RGB(30, 29, 26);
+    ok_r3d_push();
+    ok_r3d_translate(P(sp[0], sp[1], -1096));
+    ok_r3d_rotate_z(DEG(sp[3]));
+    tex(OK_ROOM_BEAM, 8, woods[sp[4]], OK_R3D_EDGE); /* the frame */
+    box(-h, -h, 0, h, h, 26);
+    mat(RGB(29, 27, 23), 0); /* the mount */
+    ok_r3d_quad(P(-m, -m, 28), P(m, -m, 28), P(m, m, 28), P(-m, m, 28));
+    if (pixels) {
+        ok_r3d_texture(art[slot], 64);
+        ok_r3d_uv(0, 0, 64, 64);
+        ok_r3d_tile(0);
+        ok_r3d_material(RGB(30, 29, 26), ++next_id, OK_R3D_TEXTURED);
+    } else {
+        mat(RGB(25, 23, 19), 0); /* empty: a bare, slightly shadowed backing */
+    }
+    ok_r3d_quad(P(-d, -d, 30), P(d, -d, 30), P(d, d, 30), P(-d, d, 30));
+    limb_house(0, h, 2, -h / 2, h + h / 2, -6, 4); /* the string and the nail */
+    limb_house(0, h, 2, h / 2, h + h / 2, -6, 4);
+    ok_r3d_pop();
+}
 
 static void bulbs(int x0, int y0, int x1, int y1, int z, int n, int on, int out[][2], int *count)
 {
@@ -279,18 +324,10 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     ok_r3d_pop();
     bulbs(-1300, 720, 0, 1950, -980, 9, on, lit, &lights);
     bulbs(0, 1950, 1300, 720, -980, 9, on, lit, &lights);
-    /* The player's drawing, framed above the bed. */
-    if (drawing) {
-        int x, y;
-        for (y = 0; y < 64; y++)
-            for (x = 0; x < 64; x++) art[y * 64 + x] = ok_drawing_get(drawing, (unsigned)x, (unsigned)y) ? RGB(5, 4, 4) : RGB(30, 29, 26);
-        tex(OK_ROOM_BEAM, 8, RGB(14, 9, 5), OK_R3D_EDGE);
-        box(-1060, 330, -1100, -640, 750, -1070);
-        ok_r3d_texture(art, 64);
-        ok_r3d_uv(0, 0, 64, 64);
-        ok_r3d_tile(0);
-        ok_r3d_material(RGB(30, 29, 26), ++next_id, OK_R3D_TEXTURED);
-        ok_r3d_quad(P(-1030, 360, -1065), P(-670, 360, -1065), P(-670, 720, -1065), P(-1030, 720, -1065));
+    /* The gallery: six frames, empty until a picture is hung in them. */
+    {
+        int k;
+        for (k = 0; k < OK_HOUSE_FRAMES; k++) framed(k, hung[k] ? gallery[k] : k == 0 ? drawing : NULL);
     }
     /* A woven rug. */
     tex(OK_ROOM_RUG, 0, RGB(20, 8, 6), 0);
@@ -415,6 +452,7 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
     int mask_on_floor = look->wear != OK_WEAR_SMILEY;
     int m = (hour % 24) * 60 + minute % 60, key = (m / 5 * 2 + (lights_off != 0)) * 2 + mask_on_floor, i;
     uint32_t s = sum(drawing), t = a->ticks;
+    for (i = 0; i < OK_HOUSE_FRAMES; i++) s = s * 7 + (hung[i] ? sum(gallery[i]) + 1 : 0);
     light l;
     light_at(m, lights_off, &l);
     if (!kept.valid || kept.key != key || kept.art_sum != s) {

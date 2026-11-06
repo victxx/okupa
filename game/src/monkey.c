@@ -985,7 +985,7 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
 {
     int s;
     for (s = -1; s <= 1; s += 2) {
-        int x = s * 70 + f->look * 8, y = 652;
+        int x = s * 82 + f->look * 8, y = 652;
         switch (f->eyes) {
         case 'j': /* smiling eyes, ^ ^ */
             solid(INK3);
@@ -1216,15 +1216,15 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     /* A heart-shaped face: two lobes round the eyes over one soft disc, and a
      * gentle muzzle low on it. */
     part(skin, OK_PART_EYES, face->mask_id);
-    blob(-68, 650, 128, 90, 98, 96);
-    blob(68, 650, 128, 90, 98, 96);
+    blob(-78, 650, 124, 92, 98, 96);
+    blob(78, 650, 124, 92, 98, 96);
     ok_r3d_ellipsoid(P(0, 572, 118), P(150, 124, 116), 12, 8);
     part(skin, OK_PART_MUZZLE, face->mask_id);
     blob(0, 540, 160, 106, 72, 76);
     face3d(skin, face);
     wear(look->wear, a, face);
     for (i = 0; i < 2; i++) /* where glasses go */
-        if (!ok_r3d_project(P(i ? 70 : -70, 652, 230), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
+        if (!ok_r3d_project(P(i ? 82 : -82, 652, 228), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
     if (!ok_r3d_project(P(0, 900, 0), &face->top_x, &face->top_y, NULL)) face->top_x = -100;
     ok_r3d_pop();
     ok_r3d_pop();

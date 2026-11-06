@@ -219,7 +219,7 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
         ok_monkey_skin(&u->look, skin);
         skin_look = u->look;
     }
-    ok_house_draw(f, hour, minute, p->asleep, u->wall_set ? u->wall : NULL, &u->look, skin, &u->anim, &face);
+    ok_house_draw(f, hour, minute, p->asleep, NULL, &u->look, skin, &u->anim, &face); /* frames fill as drawings are sent */
     clock_pill(f, font, hour, minute);
     needs(f, p);
     if (line && !(p->asleep && line == ok_pet_line(p, hour))) bubble(f, font, line, face.top_x, face.top_y);
@@ -605,7 +605,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
                 memcpy(u->wall, u->drawing, sizeof u->wall);
                 for (k = 0; k < (int)sizeof u->wall && !u->wall[k]; k++) {}
                 u->wall_set = k < (int)sizeof u->wall;
-                say(u, u->wall_set ? "There, on the wall. I love it!" : "Nothing yet? Maybe next time.");
+                say(u, u->wall_set ? "I love it! Send it and it goes on the wall." : "Nothing yet? Maybe next time.");
                 if (u->wall_set) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
             }
             return OK_UI_CHANGED;
