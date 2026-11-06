@@ -371,10 +371,12 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 static int shown(const ok_ui *u, int list[BUTTONS])
 {
     static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, OK_UI_HAS_GAMES,
-                                            OK_UI_HAS_MAIL, OK_UI_HAS_FRIEND, 0, 0};
+                                            0, OK_UI_HAS_FRIEND, 0, 0};
+    /* What the mind says works here (ok_facts.og_features): 2 hearing, 4 the camera, 8 Pictionary. */
+    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 0, 0, 0};
     int i, n = 0;
     for (i = 0; i < BUTTONS; i++) {
-        if (needs_wire[i] && !(u->wired & needs_wire[i])) continue;
+        if (needs_wire[i] && !(u->wired & needs_wire[i]) && !(ok_facts_now.og_features & needs_mind[i])) continue;
         if (i == B_DREAM && !u->dream_w) continue;
         list[n++] = i;
     }
@@ -446,13 +448,33 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
             snprintf(out, 48, "Posting: looking for Ethereum nodes");
         return out;
     }
+    if (!strcmp(fa->og_state, "napping")) { /* a safe stop: a nap, nothing invented */
+        *kind = 3;
+        snprintf(out, 48, "zzz...");
+        return out;
+    }
+    if (fa->og_state[0]) { /* its last verified decision: what it said, thought, or did, in turn */
+        const char *say_it[3];
+        int m = 0;
+        if (fa->og_said[0]) say_it[m++] = fa->og_said;
+        if (fa->og_thought[0]) say_it[m++] = fa->og_thought;
+        if (fa->og_feature[0]) say_it[m++] = fa->og_feature;
+        if (m) {
+            const char *t = say_it[u->ticks / 240 % (uint32_t)m];
+            *kind = fa->og_verified ? 2 : 1;
+            if (t == fa->og_said) snprintf(out, 48, "\"%.40s\"", t);
+            else if (t == fa->og_thought) snprintf(out, 48, "(%.40s)", t);
+            else snprintf(out, 48, "%.44s", t);
+            return out;
+        }
+    }
     for (k = fa->log_count; k > 0 && k + OK_FACTS_LOG > fa->log_count; k--) {
         const char *t = fa->log[(k - 1) % OK_FACTS_LOG].text;
         if (fa->log[(k - 1) % OK_FACTS_LOG].src != 'G') continue;
         if (!strncmp(t, "safe stop", 9) || !strncmp(t, "waiting for Wi-Fi", 17) || !strncmp(t, "TCP: no", 7) ||
             !strncmp(t, "DNS: no", 7) || !strncmp(t, "TLS failed", 10)) {
             *kind = 3;
-            snprintf(out, 48, "zzz, 0G unreachable");
+            snprintf(out, 48, "zzz...");
             return out;
         }
         *kind = fa->og_verified ? 2 : 1;
@@ -468,10 +490,15 @@ static void strip(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
     static const char *seal[] = {"", "0G", "0G", "0G", "ETH"};
     static const uint16_t sc[] = {0, RGB(14, 16, 18), RGB(8, 24, 12), RGB(13, 12, 12), RGB(14, 16, 28)};
-    char line[48];
-    int kind, x = 12, n;
+    char line[48], count[16];
+    int kind, x = 12, n, right = 244;
     strip_line(u, line, &kind);
+    if ((kind == 1 || kind == 2) && ok_facts_now.og_decisions) { /* how many verified decisions so far */
+        snprintf(count, sizeof count, "#%u", (unsigned)ok_facts_now.og_decisions);
+        right = 244 - width(count, 1) - 4;
+    }
     round_box(f, 6, STRIP_Y, 244, 20, 7, RGB(12, 11, 11));
+    if (right < 244) text(f, font, right + 4, STRIP_Y + 6, count, RGB(14, 24, 14), 1);
     if (kind) {
         int w = kind == 4 ? 30 : kind == 2 ? 36 : 22;
         round_box(f, 9, STRIP_Y + 3, w, 14, 5, sc[kind]);
@@ -484,7 +511,7 @@ static void strip(frame f, const uint8_t (*font)[8], const ok_ui *u)
         x = 9 + w + 6;
     }
     if (kind != 3 && kind != 4 && u->ticks / 300 % 4 == 3) snprintf(line, sizeof line, "SELECT: see how it all works"), kind = -1;
-    for (n = (int)strlen(line); n > 3 && x + width(line, 1) > 244; n--) { /* clip, with an ellipsis */
+    for (n = (int)strlen(line); n > 3 && x + width(line, 1) > right; n--) { /* clip, with an ellipsis */
         line[n - 1] = 0;
         line[n - 4] = line[n - 3] = line[n - 2] = '.';
     }

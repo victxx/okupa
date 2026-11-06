@@ -150,7 +150,12 @@ int main(int argc, char **argv)
     p.need[OK_NEED_ENERGY] = 55;
     u.say = NULL;
     shot(dir, "home-hungry-evening", &u, &p, 19);
-    u.wired = OK_UI_HAS_PHOTO | OK_UI_HAS_TALK | OK_UI_HAS_GAMES | OK_UI_HAS_MAIL; /* as the DSi */
+    /* As on the DSi with its mind: hearing, camera, Pictionary; a verified decision in the strip. */
+    ok_facts_now.og_features = 1 | 2 | 4 | 8;
+    snprintf(ok_facts_now.og_state, sizeof ok_facts_now.og_state, "decided");
+    snprintf(ok_facts_now.og_said, sizeof ok_facts_now.og_said, "Is there anything to eat?");
+    ok_facts_now.og_verified = 1;
+    ok_facts_now.og_decisions = 12;
     shot(dir, "home-wired", &u, &p, 19);
     u.page = 1; /* the second menu */
     shot(dir, "home-more", &u, &p, 19);
@@ -173,6 +178,9 @@ int main(int argc, char **argv)
         ok_facts_now.blocks_checked = 3;
         for (k = 0; k < 400; k++) ok_ui_tick(&g, &p);
         shot(dir, "home-posting", &g, &p, 15);
+        g.drawing_sent = 0;
+        snprintf(ok_facts_now.og_state, sizeof ok_facts_now.og_state, "napping");
+        shot(dir, "home-napping", &g, &p, 15);
         memset(&ok_facts_now, 0, sizeof ok_facts_now);
     }
     p.asleep = 1;

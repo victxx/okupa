@@ -1,6 +1,7 @@
 #include "okupa_act.h"
 #include "okupa_font.h"
 #include "okupa_ui.h"
+#include "okupa_facts.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,9 +30,9 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && p.asleep);
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Zzz... (it's sleeping)"));
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && !p.asleep);
-    /* Nothing wired by the platform: one menu (Feed..Sleep, Draw, Gallery, Dev), no tabs, no dead buttons. */
+    /* No mind: one menu (Feed..Sleep, Draw, Gallery, Mail, Dev), no tabs, no dead buttons. */
     assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_NOTHING);
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_NOTHING);
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_MAIL);
     assert(ok_ui_touch(&u, &p, 97, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GALLERY);
     assert(ok_ui_touch(&u, &p, 210, 175, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME); /* Back */
     /* Everything wired: Talk, Photo on the first menu; Games, Mail, Friend, Dev on More. */
@@ -44,6 +45,10 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 159, 60, 0, t) == OK_UI_FRIEND);
     assert(ok_ui_touch(&u, &p, 95, 157, 0, t) == OK_UI_CHANGED && u.page == 0); /* Care */
     u.wired = 0;
+    ok_facts_now.og_features = 1 | 2 | 8; /* the mind hears and plays, no camera */
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_GAMES);
+    ok_facts_now.og_features = 0;
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 
     /* The line goes back to the mood line after three seconds. */
@@ -74,12 +79,12 @@ int main(void)
     u.scene = OK_UI_HOME;
 
     /* Dev (on the second menu) asks the platform to run the checks; Back returns. */
-    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Wi-Fi from Dev: search, pick a secured network, type its password. */
-    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_RUN_CHECKS);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS);
     assert(ok_ui_touch(&u, &p, 90, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
     u.ap_count = 2;
     strcpy(u.aps[0].ssid, "iPhone de Okupa");
