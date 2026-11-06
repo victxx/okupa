@@ -11,14 +11,11 @@
 #define OK_FACTS_PEERS 8 /* the last dial attempts, newest first */
 #define OK_FACTS_BLOCKS 4
 
-/* How far a dial got, in order. */
-enum { OK_STAGE_NONE, OK_STAGE_TCP, OK_STAGE_AUTH, OK_STAGE_ACK, OK_STAGE_HELLO, OK_STAGE_STATUS, OK_STAGE_TX, OK_STAGE_HELD };
-
 typedef struct {
     uint8_t ip[4];
     uint16_t port;
     uint8_t pub[8];      /* first bytes of the node id */
-    int stage;           /* OK_STAGE_* reached */
+    int stage;           /* OK_STAGE_* reached (okupa_session.h) */
     int disconnect;      /* devp2p reason (4 = too many peers), -1 none */
     char client[40];     /* from their Hello, e.g. "Geth/v1.16.7-stable/linux-amd64/go1.24" */
     uint32_t ms_tcp, ms_rlpx, ms_hello, ms_status; /* time to reach each step */
