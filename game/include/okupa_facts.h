@@ -17,7 +17,7 @@ typedef struct {
     uint8_t pub[8];      /* first bytes of the node id */
     int stage;           /* OK_STAGE_* reached (okupa_session.h) */
     int disconnect;      /* devp2p reason (4 = too many peers), -1 none */
-    char client[40];     /* from their Hello, e.g. "Geth/v1.16.7-stable/linux-amd64/go1.24" */
+    char client[48];     /* from their Hello, e.g. "Geth/v1.16.7-stable/linux-amd64/go1.24" */
     uint32_t ms_tcp, ms_rlpx, ms_hello, ms_status; /* time to reach each step */
     uint64_t latest;     /* their head, from eth/69 Status */
     uint8_t latest_hash[32];
@@ -91,7 +91,8 @@ typedef struct {
     /* The machine. */
     int dsi_mode;            /* 133 MHz DSi mode */
     uint32_t heap_used, heap_free, code_size;
-    uint32_t us_keccak, us_ecdh, us_sign_check, us_recover; /* from the core checks */
+    char checks[10][33];     /* the core's timed known-answer checks, run on this console */
+    int checks_n;
     char build[24];
     char ssid[33];
     uint8_t ip[4];

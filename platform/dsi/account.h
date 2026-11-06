@@ -18,4 +18,8 @@ void ok_dsi_account_scribble(int x, int y, ok_ui *u);
  * 1 on success. */
 int ok_dsi_account_hello(uint64_t chain_id, uint64_t nonce, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32]);
 
+/* Same, carrying a 64x64 drawing (512 bytes, 1 bpp) when pixels is not NULL. */
+int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
+                       uint8_t hash[32]);
+
 #endif

@@ -10,9 +10,10 @@
 #define OK_UI_H 192
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
-       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO };
+       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING };
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
+#define OK_UI_WALL 6 /* framed drawings, each hung only once seen in a block */
 
 /* A Wi-Fi network found by the platform's scan. */
 typedef struct {
@@ -43,6 +44,10 @@ typedef struct {
     int wallet_ready, wallet_progress;
     char wallet_address[43], wallet_network[12];
     char wallet_status[33]; /* e.g. the hello on its way */
+    /* The wall: drawings the console saw included, oldest first. */
+    uint8_t wall[OK_UI_WALL][64 * 64 / 8];
+    int wall_count;
+    int drawing_sent; /* the sketchbook's drawing is on its way: not editable until it lands */
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);

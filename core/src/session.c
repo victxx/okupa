@@ -3,13 +3,35 @@
 #include "okupa_p2p.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define BUF 65536
-/* Incoming messages can be whole block bodies (often 100-300 KB on mainnet). */
-#define RBUF (2u << 20)
+/* Incoming messages can be whole block bodies (often 100-300 KB on mainnet,
+ * sometimes much more): taken from the heap once, as large as it will give
+ * (the DSi's static area is only 4 MB; its heap has the rest of the 16). */
+static uint8_t *wire, *msg, out[BUF];
+static size_t rbuf;
+#define RBUF rbuf
 
-static uint8_t wire[RBUF + 64], msg[RBUF], out[BUF];
+static int buffers(void)
+{
+    static const size_t sizes[] = {2u << 20, 1u << 20, 256u << 10, BUF};
+    size_t i;
+    if (wire) return 1;
+    for (i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+        wire = malloc(sizes[i] + 64);
+        msg = malloc(sizes[i]);
+        if (wire && msg) {
+            rbuf = sizes[i];
+            return 1;
+        }
+        free(wire);
+        free(msg);
+        wire = msg = NULL;
+    }
+    return 0;
+}
 static uint8_t auth_wire[OK_RLPX_MAX_PACKET], ack_wire[OK_RLPX_MAX_PACKET], scratch[OK_RLPX_MAX_PACKET];
 
 static void say(const ok_io *io, const char *fmt, ...)
@@ -65,7 +87,7 @@ static size_t read_packet(const ok_io *io, uint8_t *buf)
 static int send_frame(const ok_io *io, ok_rlpx_session *s, const uint8_t *data, size_t n)
 {
     size_t len;
-    return ok_rlpx_frame_write(s, data, n, wire, sizeof wire, &len) == OK_OK && write_all(io, wire, len);
+    return ok_rlpx_frame_write(s, data, n, wire, RBUF + 64, &len) == OK_OK && write_all(io, wire, len);
 }
 
 /* 1 message, 0 closed, -1 broken (bad MAC, too large, malformed), 2 idle
@@ -79,7 +101,7 @@ static int recv_message_idle(const ok_io *io, ok_rlpx_session *s, int snappy, ui
     if (ok_rlpx_header_read(s, wire, &size) != OK_OK || size > RBUF) return -1;
     if (!read_all(io, wire + OK_RLPX_HEADER, ok_rlpx_frame_len(size) - OK_RLPX_HEADER)) return 0;
     if (ok_rlpx_body_read(s, wire + OK_RLPX_HEADER, size) != OK_OK) return -1;
-    return ok_p2p_read(wire + OK_RLPX_HEADER, size, snappy, id, msg, sizeof msg, len) == OK_OK ? 1 : -1;
+    return ok_p2p_read(wire + OK_RLPX_HEADER, size, snappy, id, msg, RBUF, len) == OK_OK ? 1 : -1;
 }
 
 static int recv_message(const ok_io *io, ok_rlpx_session *s, int snappy, uint64_t *id, size_t *len)
@@ -305,6 +327,7 @@ int ok_session_dial(const ok_io *io, const uint8_t priv[32], const uint8_t remot
     size_t auth_len, ack_len;
     int r;
     memset(rep, 0, sizeof *rep);
+    if (!buffers()) return finish(rep, OK_SESSION_BROKEN);
     if (ok_keys_public(priv, pub) != OK_OK ||
         ok_rlpx_auth_write(priv, remote_pub, e, auth_wire, sizeof auth_wire, &auth_len) != OK_OK)
         return finish(rep, OK_SESSION_BROKEN);
@@ -336,7 +359,7 @@ int ok_session_answer(const ok_io *io, const uint8_t priv[32], const ok_rlpx_ent
     size_t auth_len, ack_len;
     int r;
     memset(rep, 0, sizeof *rep);
-    if (ok_keys_public(priv, pub) != OK_OK) return finish(rep, OK_SESSION_BROKEN);
+    if (!buffers() || ok_keys_public(priv, pub) != OK_OK) return finish(rep, OK_SESSION_BROKEN);
     if (!(auth_len = read_packet(io, auth_wire))) return finish(rep, OK_SESSION_CLOSED);
     memcpy(scratch, auth_wire, auth_len);
     if (ok_rlpx_auth_read(priv, scratch, auth_len, &remote) != OK_OK) return finish(rep, OK_SESSION_BROKEN);

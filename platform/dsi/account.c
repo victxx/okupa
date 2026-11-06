@@ -1,4 +1,6 @@
 #include "account.h"
+#include "okupa_facts.h"
+#include "okupa_rlp.h"
 #include "okupa_keccak.h"
 #include "okupa_act.h"
 #include "okupa_keys.h"
@@ -21,6 +23,7 @@ static void show_address(const uint8_t priv[32], ok_ui *u)
     ok_keys_address(pub, addr);
     ok_keys_checksum(addr, u->wallet_address);
     u->wallet_ready = 1;
+    snprintf(ok_facts_now.address, sizeof ok_facts_now.address, "%s", u->wallet_address);
 }
 
 void ok_dsi_account_open(const char *path, ok_ui *u)
@@ -64,6 +67,7 @@ void ok_dsi_account_scribble(int x, int y, ok_ui *u)
     last_x = x;
     last_y = y;
     u->wallet_progress = samples * 100 / SAMPLES;
+    ok_facts_now.scribble_samples = samples;
     if (samples < SAMPLES) return;
     if (!key_path) {
         snprintf(u->wallet_address, sizeof u->wallet_address, "Needs an SD card");
@@ -88,11 +92,50 @@ void ok_dsi_account_scribble(int x, int y, ok_ui *u)
     ok_wipe(&pool, sizeof pool);
 }
 
-int ok_dsi_account_hello(uint64_t chain_id, uint64_t nonce, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])
+/* The signed transaction's own fields, for the technical screens. */
+static void note_tx(const ok_tx *tx, const uint8_t *raw, size_t len, const uint8_t hash[32], uint32_t us, const char *kind)
+{
+    ok_facts *f = &ok_facts_now;
+    ok_rlp_item list, it;
+    size_t pos = 0;
+    int i;
+    if (len > sizeof f->tx) return;
+    memcpy(f->tx, raw, len);
+    f->tx_len = (uint32_t)len;
+    memcpy(f->tx_hash, hash, 32);
+    f->tx_nonce = tx->nonce;
+    f->tx_gas = tx->gas_limit;
+    f->tx_max_fee = tx->max_fee;
+    f->tx_tip = tx->max_priority_fee;
+    f->tx_data_len = (uint32_t)tx->data_len;
+    f->us_sign = us;
+    f->tx_handed = 0;
+    f->nonce = tx->nonce + 1;
+    snprintf(f->tx_kind, sizeof f->tx_kind, "%s", kind);
+    /* 0x02 || [chain, nonce, tip, max fee, gas, to, value, data, access, y, r, s] */
+    if (ok_rlp_decode(raw + 1, len - 1, &list) != OK_OK) return;
+    for (i = 0; ok_rlp_next(&list, &pos, &it) == OK_OK; i++) {
+        uint64_t v;
+        if (i == 9 && ok_rlp_to_uint(&it, &v) == OK_OK) f->tx_v = (int)v;
+        if (i == 10 && it.len <= 32) {
+            memset(f->tx_r, 0, 32);
+            memcpy(f->tx_r + 32 - it.len, it.data, it.len);
+        }
+        if (i == 11 && it.len <= 32) {
+            memset(f->tx_s, 0, 32);
+            memcpy(f->tx_s + 32 - it.len, it.data, it.len);
+        }
+    }
+}
+
+/* A zero-value transaction to itself carrying an Okupa act (hello, or a
+ * drawing when pixels is given), signed here with the console's key. */
+int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
+                       uint8_t hash[32])
 {
     char text[80] = {0};
-    uint8_t priv[32], pub[64], hello[OK_ACT_HEADER];
-    size_t hello_len;
+    uint8_t priv[32], pub[64], act[OK_ACT_MAX];
+    size_t act_len;
     unsigned i, v;
     ok_tx tx;
     FILE *f;
@@ -100,21 +143,32 @@ int ok_dsi_account_hello(uint64_t chain_id, uint64_t nonce, uint8_t *out, size_t
     if (!key_path || !(f = fopen(key_path, "r"))) return 0;
     if (fgets(text, sizeof text, f)) {
         for (i = 0; i < 32 && sscanf(text + 2 * i, "%2x", &v) == 1; i++) priv[i] = (uint8_t)v;
-        if (i == 32 && ok_keys_public(priv, pub) == OK_OK && ok_act_hello(hello, sizeof hello, &hello_len) == OK_OK) {
+        if (i == 32 && ok_keys_public(priv, pub) == OK_OK &&
+            (pixels ? ok_act_drawing(pixels, act, sizeof act, &act_len) : ok_act_hello(act, sizeof act, &act_len)) == OK_OK) {
+            uint32_t t0;
             memset(&tx, 0, sizeof tx);
             tx.chain_id = chain_id;
             tx.nonce = nonce;
             tx.max_priority_fee = 100000000ull; /* 0.1 gwei */
             tx.max_fee = 2000000000ull;         /* 2 gwei */
-            tx.gas_limit = 30000;               /* a hello uses 21 210 */
-            ok_keys_address(pub, tx.to);        /* to itself */
-            tx.data = hello;
-            tx.data_len = hello_len;
+            /* A hello uses 21 210; a drawing about 21 000 + 16 x 518, or the calldata floor (with room for a higher one). */
+            tx.gas_limit = pixels ? 60000 : 30000;
+            ok_keys_address(pub, tx.to); /* to itself */
+            tx.data = act;
+            tx.data_len = act_len;
+            t0 = cpuGetTiming();
             ok = ok_tx_sign(&tx, priv, out, cap, len, hash) == OK_OK;
+            if (ok) note_tx(&tx, out, *len, hash, (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33514u),
+                            pixels ? "drawing" : "hello");
         }
     }
     fclose(f);
     ok_wipe(priv, sizeof priv);
     ok_wipe(text, sizeof text);
     return ok;
+}
+
+int ok_dsi_account_hello(uint64_t chain_id, uint64_t nonce, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])
+{
+    return ok_dsi_account_act(chain_id, nonce, NULL, out, cap, len, hash);
 }

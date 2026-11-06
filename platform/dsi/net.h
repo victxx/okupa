@@ -27,6 +27,9 @@ void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32]);
 int ok_dsi_net_pending(uint8_t hash[32]); /* 1 if one is waiting */
 int ok_dsi_net_handed(void);               /* nodes it was handed to */
 uint64_t ok_dsi_net_chain_id(void);
+/* One-shot: the pending transaction was seen in a block (header hash and
+ * transactions root recomputed on the console). Clears the pending one. */
+int ok_dsi_net_take_included(uint8_t hash[32], uint64_t *block);
 /* The account's next nonce, counted on the console (nonce-<network>.txt). */
 uint64_t ok_dsi_net_take_nonce(void);
 
