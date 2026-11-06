@@ -42,6 +42,11 @@ $(OUT)/obj/$(SECP)/%.o: $(SECP)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(SECP)/src $(SECP_DEFS) $(filter-out -Wextra -Werror,$(CFLAGS)) -Wno-unused-function -c -o $@ $<
 
+# Third-party code compiled as upstream ships it, without our -Werror.
+$(OUT)/obj/third_party/qrcodegen/%.o: third_party/qrcodegen/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(filter-out -Wextra -Werror,$(CFLAGS)) -c -o $@ $<
+
 $(OUT)/obj/$(BEAR)/%.o: $(BEAR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(BEAR)/src $(filter-out -Wextra -Werror,$(CFLAGS)) -c -o $@ $<
