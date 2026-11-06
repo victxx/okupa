@@ -219,15 +219,71 @@ def discv4(bootnode, limit, wanted):
     table(nodes, wanted)
 
 
+def crawl(seconds, wanted, out_path):
+    """Random walk over discv4 for a while: bond with every node we hear of,
+    ask each for neighbours near a random target and for its ENR, and keep the
+    ones that announce Sepolia. Less popular nodes than the DNS list."""
+    d = Discovery()
+    nodes = {}  # id -> {"ip","udp","tcp","bonded","asked_enr","enr_hash","fork","findnode"}
+    for text in BOOTNODES:
+        b = enr_text(text)
+        nodes[b["id"]] = {"ip": b["ip"], "udp": b["udp"], "tcp": b["tcp"], "bonded": False,
+                          "pinged": 0, "enr": None, "fork": None, "asked": 0}
+    end = time.time() + seconds
+    print(f"Rastreo discv4 durante {seconds} s desde {len(nodes)} bootnodes")
+    while time.time() < end:
+        now = time.time()
+        for node_id, n in list(nodes.items()):
+            if not n["bonded"] and now - n["pinged"] > 4 and n["pinged"] < 3 * 4 + now - 1e9:
+                n["pinged"] = now
+                d.ping(n["ip"], n["udp"])
+            elif n["bonded"] and n["asked"] < 2 and now - n.get("last_ask", 0) > 1:
+                n["last_ask"] = now
+                n["asked"] += 1
+                d.send(FINDNODE, [os.urandom(64), int(now) + 20], (n["ip"], n["udp"]))
+                n["enr"] = d.send(ENRREQUEST, [int(now) + 20], (n["ip"], n["udp"]))
+        for kind, payload, sender in d.receive(0.5):
+            n = nodes.get(sender)
+            if not n:
+                continue
+            if kind in (PING, PONG):
+                n["bonded"] = True
+            elif kind == NEIGHBORS:
+                for ip, udp, tcp, node_id in payload[0]:
+                    if len(ip) == 4 and node_id not in nodes and len(nodes) < 3000:
+                        nodes[node_id] = {"ip": socket.inet_ntoa(ip), "udp": int.from_bytes(udp, "big"),
+                                          "tcp": int.from_bytes(tcp, "big"), "bonded": False, "pinged": 0,
+                                          "enr": None, "fork": None, "asked": 0}
+            elif kind == ENRRESPONSE and payload[0] == n["enr"]:
+                f = enr_fields(payload[1])
+                n["fork"] = f["fork"]
+        seen = len(nodes)
+        bonded = sum(n["bonded"] for n in nodes.values())
+        sep = [i for i, n in nodes.items() if n["fork"] == wanted and n["tcp"]]
+        print(f"\r  {int(end - time.time()):3d}s  nodos {seen}  vinculados {bonded}  Sepolia {len(sep)}   ", end="", flush=True)
+    print()
+    sep = [(i, n) for i, n in nodes.items() if n["fork"] == wanted and n["tcp"]]
+    other = sum(1 for n in nodes.values() if n["fork"] and n["fork"] != wanted)
+    print(f"  {len(sep)} nodos Sepolia; {other} de otras redes con ficha")
+    if out_path:
+        with open(out_path, "w") as out:
+            for i, n in sep:
+                out.write(f"enode://{i.hex()}@{n['ip']}:{n['tcp']}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dns", action="store_true", help="read the DNS tree instead of asking over UDP")
     parser.add_argument("--bootnode", type=int, default=0, help=f"0..{len(BOOTNODES) - 1}")
     parser.add_argument("--nodes", type=int, default=10)
+    parser.add_argument("--crawl", type=int, default=0, help="discv4 random walk for this many seconds")
     parser.add_argument("--enodes", help="with --dns: write the Sepolia nodes as enode:// lines to this file")
     args = parser.parse_args()
     wanted = sepolia_fork_hash(int(time.time()))
     print(f"Sepolia hoy tiene fork hash {wanted.hex()} (EIP-2124).\n")
+    if args.crawl:
+        crawl(args.crawl, wanted, args.enodes)
+        return
     if args.dns:
         nodes = dns(args.nodes, wanted)
         if args.enodes:
