@@ -1,7 +1,7 @@
 /* Finds Sepolia nodes the way the console will: the EIP-1459 tree in DNS,
  * checked with the core (signed root, hash-named children, signed ENRs).
  * Only the UDP socket lives here. Prints one enode:// line per Sepolia node.
- *   build/okupa-dnswalk [resolver ip] [nodes] */
+ *   build/okupa-dnswalk [resolver ip] [nodes] [--mainnet] */
 #include "okupa_dns.h"
 #include "okupa_dnsdisc.h"
 #include "okupa_eth.h"
@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #define TREE "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net"
+#define MAINNET_TREE "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net"
 #define MAX_QUERIES 400
 
 static int fd;
@@ -64,7 +65,7 @@ int main(int argc, char **argv)
     uint8_t fork[4];
     uint64_t next;
     struct timeval tv = {3, 0};
-    int found, limit = argc > 2 ? atoi(argv[2]) : 20;
+    int found, limit = argc > 2 ? atoi(argv[2]) : 20, mainnet = argc > 3 && !strcmp(argv[3], "--mainnet");
 
     memset(&resolver, 0, sizeof resolver);
     resolver.sin_family = AF_INET;
@@ -72,11 +73,11 @@ int main(int argc, char **argv)
     if (inet_pton(AF_INET, argc > 1 ? argv[1] : "1.1.1.1", &resolver.sin_addr) != 1) return 2;
     if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) return 2;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    ok_forkid(&ok_sepolia, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
+    ok_forkid(mainnet ? &ok_mainnet : &ok_sepolia, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
     w.lookup = lookup_cb;
     w.found = found_cb;
-    found = ok_dnsdisc_walk_tree(&w, TREE, fork, limit);
-    fprintf(stderr, "okupa-dnswalk: root seq %llu, %d Sepolia nodes from %u records, %u queries, %u refused\n",
+    found = ok_dnsdisc_walk_tree(&w, mainnet ? MAINNET_TREE : TREE, fork, limit);
+    fprintf(stderr, "okupa-dnswalk: root seq %llu, %d nodes from %u records, %u queries, %u refused\n",
             (unsigned long long)w.seq, found, w.records, queries, w.refused);
     close(fd);
     return found ? 0 : 1;

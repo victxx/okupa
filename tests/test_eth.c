@@ -47,6 +47,10 @@ int main(void)
     fork(&mainnet, 1150000, 0, "97c2c34c", 1920000);
     fork(&mainnet, 1920000, 0, "91d1f948", 2463000);
 
+    /* Mainnet's built-in schedule: today, and before Shanghai (hashes from Python's zlib). */
+    fork(&ok_mainnet, UINT64_MAX, 1800000000u, "07c9462e", 0);
+    fork(&ok_mainnet, 15050000, 1681338454u, "f0afd0e3", 1681338455u);
+
     /* Sepolia today (all forks passed), and just before the last BPO fork. */
     fork(&ok_sepolia, UINT64_MAX, 1800000000u, "6c1d9423", 0);
     fork(&ok_sepolia, UINT64_MAX, 1791294815u, "268956b6", 1791294816u);

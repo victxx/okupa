@@ -6,6 +6,7 @@
  *   build/okupa-peer --listen <port>                  answer one dial (for tests)
  *   build/okupa-peer --listen <port> --key <hex file>  with a fixed identity
  *   build/okupa-peer --hold <seconds> enode://...     stay connected after admission
+ *   build/okupa-peer --mainnet enode://...            Ethereum mainnet instead of Sepolia
  */
 #include "okupa_keys.h"
 #include "okupa_session.h"
@@ -97,6 +98,7 @@ static int sock_write(void *ctx, const uint8_t *buf, size_t n)
 }
 
 static time_t hold_until;
+static const ok_eth_network *net = &ok_sepolia;
 static int hold_on(void *ctx)
 {
     (void)ctx;
@@ -145,7 +147,7 @@ static int dial(const char *enode, const uint8_t priv[32])
     io.hold = hold_until ? hold_on : NULL;
     io.ctx = &fd;
     fresh(&e);
-    ok_session_dial(&io, priv, remote_pub, &e, &ok_sepolia, (uint64_t)time(NULL), CLIENT, &rep);
+    ok_session_dial(&io, priv, remote_pub, &e, net, (uint64_t)time(NULL), CLIENT, &rep);
     ok_wipe(&e, sizeof e);
     close(fd);
     return rep.outcome == OK_SESSION_PASS;
@@ -176,7 +178,7 @@ static int listen_once(unsigned port, const uint8_t priv[32], const uint8_t pub[
     io.log = sock_log;
     io.ctx = &fd;
     fresh(&e);
-    ok_session_answer(&io, priv, &e, &ok_sepolia, (uint64_t)time(NULL), CLIENT, &rep);
+    ok_session_answer(&io, priv, &e, net, (uint64_t)time(NULL), CLIENT, &rep);
     ok_wipe(&e, sizeof e);
     close(fd);
     return rep.outcome == OK_SESSION_PASS;
@@ -199,6 +201,7 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--listen") && i + 1 < argc) listen_port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--key") && i + 1 < argc) key = argv[++i];
+        else if (!strcmp(argv[i], "--mainnet")) net = &ok_mainnet;
         else if (!strcmp(argv[i], "--hold") && i + 1 < argc) hold_until = time(NULL) + atoi(argv[++i]);
         else enode = argv[i];
     }

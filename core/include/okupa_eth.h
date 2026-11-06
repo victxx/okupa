@@ -18,6 +18,7 @@ typedef struct {
 } ok_eth_network;
 
 extern const ok_eth_network ok_sepolia;
+extern const ok_eth_network ok_mainnet;
 
 uint32_t ok_crc32(uint32_t crc, const void *data, size_t n);
 

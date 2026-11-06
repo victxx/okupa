@@ -263,6 +263,13 @@ ok_result ok_v4_crawl_add_enr(ok_v4_crawl *c, const char *text)
     return OK_OK;
 }
 
+void ok_v4_crawl_add_node(ok_v4_crawl *c, const uint8_t id[64], const ok_v4_endpoint *at)
+{
+    ok_v4_endpoint e = *at;
+    if (!e.udp) e.udp = e.tcp;
+    add(c, id, &e);
+}
+
 static ok_v4_entry *by_address(ok_v4_crawl *c, const ok_v4_endpoint *from)
 {
     int i;

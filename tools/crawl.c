@@ -1,7 +1,7 @@
 /* Finds Sepolia nodes through discovery v4, the network's own peer exchange,
  * with the core's crawler; only the UDP socket and the clock live here.
  * Prints one enode:// per node found.
- *   build/okupa-crawl [seconds] */
+ *   build/okupa-crawl [seconds] [--mainnet seeds.txt]   (seeds: enode:// lines) */
 #include "okupa_discv4.h"
 #include "okupa_eth.h"
 #include "okupa_keys.h"
@@ -71,17 +71,36 @@ int main(int argc, char **argv)
     if (fd < 0 || bind(fd, (struct sockaddr *)&any, sizeof any)) return 2;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 
-    ok_forkid(&ok_sepolia, UINT64_MAX, (uint64_t)start, fork, &next);
+    ok_forkid(argc > 3 && !strcmp(argv[2], "--mainnet") ? &ok_mainnet : &ok_sepolia, UINT64_MAX, (uint64_t)start, fork, &next);
     c.send = udp_send;
     c.recv = udp_recv;
     c.found = found;
     ok_v4_crawl_init(&c, priv, fork, (uint32_t)start ^ (uint32_t)getpid());
-    for (i = 0; i < ok_sepolia_bootnode_count; i++) ok_v4_crawl_add_enr(&c, ok_sepolia_bootnodes[i]);
+    if (argc > 3 && !strcmp(argv[2], "--mainnet")) {
+        char text[200];
+        FILE *seeds = fopen(argv[3], "r");
+        while (seeds && fgets(text, sizeof text, seeds)) {
+            uint8_t id[64];
+            unsigned a, b, cc, d, port, k, v;
+            ok_v4_endpoint at;
+            for (k = 0; k < 64 && sscanf(text + 8 + 2 * k, "%2x", &v) == 1; k++) id[k] = (uint8_t)v;
+            if (k < 64 || sscanf(text + 8 + 128, "@%u.%u.%u.%u:%u", &a, &b, &cc, &d, &port) != 5) continue;
+            at.ip[0] = (uint8_t)a;
+            at.ip[1] = (uint8_t)b;
+            at.ip[2] = (uint8_t)cc;
+            at.ip[3] = (uint8_t)d;
+            at.tcp = at.udp = (uint16_t)port;
+            ok_v4_crawl_add_node(&c, id, &at);
+        }
+        if (seeds) fclose(seeds);
+    } else {
+        for (i = 0; i < ok_sepolia_bootnode_count; i++) ok_v4_crawl_add_enr(&c, ok_sepolia_bootnodes[i]);
+    }
     while ((now = time(NULL)) - start < seconds) {
         ok_v4_crawl_step(&c, (uint32_t)now);
         usleep(20000);
     }
-    fprintf(stderr, "okupa-crawl: %ds, %d nodes known, %u bonded, %u records, %u Sepolia, %u sent, %u received\n",
+    fprintf(stderr, "okupa-crawl: %ds, %d nodes known, %u bonded, %u records, %u on the network, %u sent, %u received\n",
             seconds, c.count, c.bonded, c.records, c.found_count, c.sent, c.received);
     ok_wipe(priv, sizeof priv);
     return c.found_count ? 0 : 1;
