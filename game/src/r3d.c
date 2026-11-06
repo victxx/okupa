@@ -117,7 +117,6 @@ static void gx_matrix(const int32_t m[12])
     GFX_FIFO = 0x17;
     for (i = 0; i < 12; i++) GFX_FIFO = (uint32_t)m[i];
 }
-static uint32_t gx_world[GX_WORDS + 1];
 static int gx_world_n, gx_after_camera;
 static void gx_play(uint32_t *list, int n)
 {
@@ -127,6 +126,7 @@ static void gx_play(uint32_t *list, int n)
     for (i = 1; i <= n; i++) GFX_FIFO = list[i];
 }
 static int gl_on; /* off until the platform turns it on: icons are drawn in software first */
+static int gl_cpu_cull = 1; /* drop what this camera cannot see before it reaches the hardware */
 static int32_t gl_kx, gl_ky;
 static int gl_dirty = 1, gl_open, gl_polys, gl_clear_alpha = 31;
 static uint16_t gl_clear = 0x8000;
@@ -503,7 +503,7 @@ static void put(int k, ok_v3 p, ok_v3 n)
         v->n = scale(v->n, k);
     }
 #ifdef OK_R3D_GL
-    if (gl_on && !projecting) { /* the hardware projects: world position, normal and light are all it needs */
+    if (gl_on && !projecting && !gl_cpu_cull) { /* a scene for other cameras: world position, normal and light are all it needs */
         v->l = light_of(v->n);
         v->u = v->v = 0;
         v->ok = 1;
@@ -644,10 +644,32 @@ static void gl_state(void)
     gl_dirty = 0;
 }
 
+void ok_r3d_cpu_cull(int on)
+{
+    gl_cpu_cull = on;
+}
+
 static void gl_tri(const vert *a, const vert *b, const vert *c)
 {
     const vert *v[3];
     int i, textured;
+    if (gl_cpu_cull) {
+        /* Under this camera, as the software renderer would: facing away, off
+         * the screen or smaller than a pixel, it is dropped here; on the
+         * hardware it would still take room in its 2048 polygons. */
+        int64_t area = (int64_t)(b->x - a->x) * (c->y - a->y) - (int64_t)(b->y - a->y) * (c->x - a->x);
+        int32_t minx = a->x < b->x ? (a->x < c->x ? a->x : c->x) : (b->x < c->x ? b->x : c->x);
+        int32_t maxx = a->x > b->x ? (a->x > c->x ? a->x : c->x) : (b->x > c->x ? b->x : c->x);
+        int32_t miny = a->y < b->y ? (a->y < c->y ? a->y : c->y) : (b->y < c->y ? b->y : c->y);
+        int32_t maxy = a->y > b->y ? (a->y > c->y ? a->y : c->y) : (b->y > c->y ? b->y : c->y);
+        int32_t x0 = (minx - 8 + 15) >> 4, x1 = (maxx - 8) >> 4, y0 = (miny - 8 + 15) >> 4, y1 = (maxy - 8) >> 4;
+        if (area == 0 || (area > 0 && !(cur_flags & OK_R3D_BOTH))) return;
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > W - 1) x1 = W - 1;
+        if (y1 > H - 1) y1 = H - 1;
+        if (x0 > x1 || y0 > y1) return;
+    }
     v[0] = a, v[1] = b, v[2] = c;
     for (i = 0; i < 3; i++) { /* world space, a 64th: it must fit the hardware's 16 bits */
         int32_t x = v[i]->w.x >> 6, y = v[i]->w.y >> 6, z = v[i]->w.z >> 6;
@@ -698,7 +720,9 @@ void ok_r3d_world_keep(void)
     gl_dirty = 1;
     gx_world_n = gx_n - gx_after_camera;
     if (gx_world_n < 0) gx_world_n = 0;
-    memcpy(gx_world + 1, gx_rec + 1 + gx_after_camera, (size_t)gx_world_n * 4);
+    /* in the kept frame's buffer: the film and a kept room never share a frame */
+    memcpy(gx_kept + 1, gx_rec + 1 + gx_after_camera, (size_t)gx_world_n * 4);
+    gx_kept_ok = 0;
 }
 
 int ok_r3d_world_again(void)
@@ -707,7 +731,7 @@ int ok_r3d_world_again(void)
     if (gl_open) gx(FIFO_END, 0, 0, 0);
     gl_open = 0;
     gl_dirty = 1;
-    memcpy(gx_rec + 1 + gx_n, gx_world + 1, (size_t)gx_world_n * 4);
+    memcpy(gx_rec + 1 + gx_n, gx_kept + 1, (size_t)gx_world_n * 4);
     gx_n += gx_world_n;
     return 1;
 }
@@ -734,6 +758,11 @@ int ok_r3d_on_hardware(void)
     return gl_on;
 }
 
+int ok_r3d_kept_triangles(void)
+{
+    return gx_kept_polys;
+}
+
 int ok_r3d_retains(void)
 {
     return 1;
@@ -744,9 +773,22 @@ void ok_r3d_see_through(void)
     gl_clear_alpha = 0;
 }
 
+/* The 2D layer laid over the 3D and the sky at k/16, by the hardware's
+ * blending (fades over the 3D, with no work per pixel). */
+static int gl_blend_set;
+void ok_r3d_layer_alpha(int k16)
+{
+    k16 = k16 < 0 ? 0 : k16 > 16 ? 16 : k16;
+    REG_BLDCNT = BLEND_ALPHA | BLEND_SRC_BG3 | BLEND_DST_BG0 | BLEND_DST_BG2 | BLEND_DST_BACKDROP;
+    REG_BLDALPHA = (uint16_t)(k16 | (16 - k16) << 8);
+    gl_blend_set = 1;
+}
+
 void ok_r3d_swap(void)
 {
     if (!gl_on) return;
+    if (!gl_blend_set) REG_BLDCNT = 0; /* no fade this frame: the 2D layer as it is */
+    gl_blend_set = 0;
     if (gl_open) gx(FIFO_END, 0, 0, 0);
     if (gx_recording) { /* drawn since ok_r3d_begin and not kept: show it now */
         gx_recording = 0;
@@ -759,6 +801,16 @@ void ok_r3d_swap(void)
     gl_polys = 0;
 }
 #else
+void ok_r3d_layer_alpha(int k16)
+{
+    (void)k16;
+}
+
+void ok_r3d_cpu_cull(int on)
+{
+    (void)on;
+}
+
 void ok_r3d_world_keep(void)
 {
 }
@@ -778,6 +830,11 @@ void ok_r3d_hardware(int on)
 }
 
 int ok_r3d_on_hardware(void)
+{
+    return 0;
+}
+
+int ok_r3d_kept_triangles(void)
 {
     return 0;
 }
@@ -1271,10 +1328,10 @@ void ok_r3d_keep(void)
         if (gl_open) gx(FIFO_END, 0, 0, 0);
         gl_open = 0;
         gl_dirty = 1;
-        memcpy(keep_fb, fb, sizeof keep_fb);
         memcpy(gx_kept + 1, gx_rec + 1, (size_t)gx_n * 4);
         gx_kept_ok = gx_n;
-        gx_kept_polys = gl_polys;
+        gx_world_n = 0; /* the buffer is the kept frame's now */
+        gx_kept_polys = triangles;
         gx_kept_clear = gl_clear;
         gx_kept_alpha = gl_clear_alpha;
         gx_recording = 0;
@@ -1297,8 +1354,8 @@ void ok_r3d_restore(uint16_t *frame)
     int y;
     fb = frame;
 #ifdef OK_R3D_GL
-    if (gl_on) { /* the kept 2D layer back, and the kept commands replayed; then live */
-        memcpy(fb, keep_fb, sizeof keep_fb);
+    if (gl_on) { /* the 2D layer see-through again, and the kept commands replayed; then live */
+        memset(fb, 0, sizeof keep_fb);
         if (gl_open) gx(FIFO_END, 0, 0, 0);
         gl_open = 0;
         gl_dirty = 1;
@@ -1307,6 +1364,7 @@ void ok_r3d_restore(uint16_t *frame)
         gl_polys = gx_kept_polys;
         gl_clear = gx_kept_clear;
         gl_clear_alpha = gx_kept_alpha;
+        triangles = 0;
         memset(stack, 0, sizeof stack);
         sp = 0;
         stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;

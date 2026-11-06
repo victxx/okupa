@@ -44,14 +44,6 @@ static void fade(uint16_t *f, uint16_t to, int k)
 {
     int i;
     if (k <= 0) return;
-    if (ok_r3d_on_hardware() && k < 1000) { /* over the hardware's 3D: an ordered dither of the colour */
-        static const uint8_t bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
-        int x, y, level = k * 16 / 1000;
-        for (y = 0; y < H; y++)
-            for (x = 0; x < W; x++)
-                if (bayer[(y & 3) * 4 + (x & 3)] < level) f[y * W + x] = to | 0x8000;
-        return;
-    }
     for (i = 0; i < W * H; i++) f[i] = mix(f[i], to, k > 1000 ? 1000 : k);
 }
 
@@ -190,8 +182,16 @@ void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
     ok_house_outside(top, eye, at, 300, 20, 40, t);
     /* Cinema bars, and the warm glow of the window filling the screen at the end. */
     for (i = 0; i < W * 20; i++) top[i] = top[(H - 20) * W + i] = 0x8000;
-    fade(top, 0x8000, 1000 - ease(t, 0, 50));
-    fade(top, RGB(31, 26, 16), ease(t, 690, OK_FILM_TICKS - 20));
+    if (ok_r3d_on_hardware()) { /* over the hardware's 3D: a solid colour, blended in by the hardware */
+        int in = 1000 - ease(t, 0, 50), out = ease(t, 690, OK_FILM_TICKS - 20);
+        if (in > 0 || out > 0) {
+            fill(top, in > 0 ? 0x8000 : RGB(31, 26, 16));
+            ok_r3d_layer_alpha((in > 0 ? in : out) * 16 / 1000);
+        }
+    } else {
+        fade(top, 0x8000, 1000 - ease(t, 0, 50));
+        fade(top, RGB(31, 26, 16), ease(t, 690, OK_FILM_TICKS - 20));
+    }
     fill(bottom, RGB(2, 2, 3));
     for (i = 0; i < (int)(sizeof captions / sizeof captions[0]); i++) {
         int in = ease(t, captions[i].from, captions[i].from + 40), out = ease(t, captions[i].to - 40, captions[i].to);

@@ -319,6 +319,19 @@ static struct {
     int beam_x[4], beam_y[4], beam_add, candle_x, candle_y, stars[6][2], night, day, sun, lights_off;
 } kept;
 
+/* A plant as two pictures crossed in an X (the old trick for leaves): four
+ * triangles instead of a few hundred. which: 0 a houseplant, 1 a bush. */
+static void sprite_x(int x, int y, int z, int w, int h, int which)
+{
+    ok_r3d_flatten(0);
+    ok_r3d_tile(0);
+    ok_r3d_texture(ok_plant_art, 64);
+    ok_r3d_uv(which * 32, 0, 32, 32);
+    ok_r3d_material(RGB(2, 6, 2), ++next_id, OK_R3D_TEXTURED | OK_R3D_CUTOUT | OK_R3D_BOTH);
+    ok_r3d_quad(P(x - w / 2, y, z), P(x + w / 2, y, z), P(x + w / 2, y + h, z), P(x - w / 2, y + h, z));
+    ok_r3d_quad(P(x, y, z + w / 2), P(x, y, z - w / 2), P(x, y + h, z - w / 2), P(x, y + h, z + w / 2));
+}
+
 static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t *drawing, int mask_on_floor)
 {
     int i, lit[24][2], lights = 0, on = l->night && !lights_off;
@@ -342,16 +355,12 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     quad_grid(P(-1400, 0, -1100), P(-1400, 950, -1100), P(-1400, 950, 1300), P(-1400, 0, 1300), 4, 12);
     quad_grid(P(1400, 0, -1100), P(1400, 950, -1100), P(1400, 950, 1300), P(1400, 0, 1300), 4, 12);
     /* The door in the right kneewall (out to the terrace) and a small window in the left one. */
-    tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), OK_R3D_EDGE);
-    box(1360, 0, -340, 1400, 600, -300);
-    box(1360, 0, 260, 1400, 600, 300);
+    tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), OK_R3D_EDGE); /* a plain rectangular door, frame and lintel */
+    box(1360, 0, -340, 1400, 820, -300);
+    box(1360, 0, 260, 1400, 820, 300);
+    box(1360, 780, -340, 1400, 840, 300);
     tex(OK_ROOM_CRATE, 8, RGB(10, 6, 3), OK_R3D_EDGE);
-    box(1370, 0, -300, 1398, 560, 260);
-    ok_r3d_push();
-    ok_r3d_translate(P(1384, 560, -20));
-    ok_r3d_rotate_z(OK_TURN / 4);
-    ok_r3d_cylinder(P(0, -14, 0), U(280), U(28), 10);
-    ok_r3d_pop();
+    box(1370, 0, -300, 1398, 780, 260);
     mat(RGB(29, 24, 8), OK_R3D_EDGE);
     blob(1360, 300, 180, 20, 20, 20);
     tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), OK_R3D_EDGE);
@@ -410,9 +419,6 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
             framed(k, hung[k] ? gallery[k] : k == 0 ? drawing : NULL);
         }
     }
-    /* A woven rug. */
-    tex(OK_ROOM_RUG, 0, RGB(20, 8, 6), 0);
-    ok_r3d_disc(P(200, 5, 300), U(660), U(430), 20);
     /* The mattress on a pallet, pillow, a knitted blanket folded at its foot. */
     tex(OK_ROOM_CRATE, 8, RGB(18, 12, 6), OK_R3D_EDGE);
     box(-1380, 0, -930, -300, 60, -350);
@@ -449,16 +455,10 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     /* Plants: one in an old tin, one in a clay pot. */
     tex(OK_ROOM_TIN, 6, RGB(14, 15, 16), OK_R3D_EDGE);
     ok_r3d_cylinder(P(-1150, 0, 600), U(90), U(160), 10);
-    tex(OK_ROOM_LEAVES, 0, RGB(4, 12, 5), OK_R3D_EDGE);
-    blob(-1150, 280, 600, 140, 150, 140);
-    blob(-1230, 390, 580, 80, 100, 80);
-    blob(-1060, 360, 640, 70, 80, 70);
+    sprite_x(-1150, 140, 600, 420, 420, 0);
     tex(OK_ROOM_CLAY, 8, RGB(18, 8, 4), OK_R3D_EDGE);
     ok_r3d_cylinder(P(1180, 0, 700), U(110), U(150), 10);
-    tex(OK_ROOM_LEAVES, 0, RGB(4, 12, 5), OK_R3D_EDGE);
-    blob(1180, 260, 700, 120, 110, 120);
-    blob(1120, 390, 680, 70, 110, 70);
-    blob(1250, 360, 720, 70, 90, 70);
+    sprite_x(1180, 130, 700, 400, 400, 0);
     /* A pile of books by the plant, a floor cushion by the rug. */
     mat(RGB(9, 14, 22), OK_R3D_EDGE);
     box(-1300, 0, 150, -1020, 50, 330);
@@ -946,17 +946,11 @@ static void ivy(int cx, int cy, int cz, int size, int seed, int n)
     }
 }
 
-/* A small bush: a few low-poly lumps of leaves. */
+/* A small bush: a crossed picture. */
 static void bush(int x, int z, int s, int seed)
 {
-    int k, n = 3 + (int)(hash2(seed, 1) % 2);
-    otex(OK_OUT_LEAVES, 0, RGB(3, 8, 3), OK_R3D_EDGE | OK_R3D_FLAT);
-    for (k = 0; k < n; k++) {
-        int dx = ((int)(hash2(seed, k + 2) % 300) - 150) * s / 100, dz = ((int)(hash2(seed, k + 9) % 240) - 120) * s / 100;
-        int r = (150 + (int)(hash2(seed, k + 20) % 90)) * s / 100;
-        ok_r3d_ellipsoid(P(x + dx, r * 7 / 10, z + dz), P(r, r * 85 / 100, r), 5, 3);
-    }
-    ok_r3d_tile(0);
+    (void)seed;
+    sprite_x(x, 0, z, 460 * s / 100, 400 * s / 100, 1);
 }
 
 static void outside_scene(const light *l, int on)
@@ -1032,17 +1026,13 @@ static void outside_scene(const light *l, int on)
         box(-282, 8, -22, 282, 24, 22);
         box(-22, 8, -282, 22, 24, 282);
         ok_r3d_pop();
-        /* The door, big, round-topped, under a little porch roof, with a lantern. */
+        /* The door, big and rectangular as inside, under a little porch roof, with a lantern. */
         otex(OK_OUT_DOOR, 8, RGB(8, 5, 3), OK_R3D_EDGE);
-        box(1420, 0, -300, 1480, 560, 260);
-        ok_r3d_push();
-        ok_r3d_translate(P(1450, 560, -20));
-        ok_r3d_rotate_z(OK_TURN / 4);
-        ok_r3d_cylinder(P(0, -30, 0), U(280), U(60), 10);
-        ok_r3d_pop();
+        box(1420, 0, -300, 1480, 780, 260);
         tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), OK_R3D_EDGE);
-        box(1420, 0, -350, 1500, 640, -300);
-        box(1420, 0, 260, 1500, 640, 310);
+        box(1420, 0, -350, 1500, 840, -300);
+        box(1420, 0, 260, 1500, 840, 310);
+        box(1420, 780, -350, 1500, 840, 310);
         mat(RGB(29, 24, 8), OK_R3D_EDGE);
         blob(1490, 300, 180, 24, 24, 24);
         otex(OK_OUT_MOSS_TILES, 6, RGB(10, 6, 3), OK_R3D_EDGE | OK_R3D_FLAT);
@@ -1152,7 +1142,9 @@ void ok_house_outside(uint16_t *frame, ok_v3 eye, ok_v3 target, int focal, int h
          * new camera: the film flies round it without rebuilding it. */
         static int world_minute = -1;
         if (!(ok_r3d_on_hardware() && world_minute == m && ok_r3d_world_again())) {
+            ok_r3d_cpu_cull(0); /* seen again from other places */
             outside_scene(&l, l.night || m >= 1140);
+            ok_r3d_cpu_cull(1);
             if (ok_r3d_on_hardware()) {
                 ok_r3d_world_keep();
                 world_minute = m;
