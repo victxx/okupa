@@ -113,5 +113,10 @@ int ok_r3d_id_at(int x, int y);
 uint16_t *ok_r3d_frame(void);
 /* Triangles drawn since ok_r3d_begin (the DSi hardware takes about 2048). */
 int ok_r3d_triangles(void);
+/* A faster 64-bit division, if the platform has one (the DS's hardware divider). */
+void ok_r3d_divider(int64_t (*divide)(int64_t n, int64_t d));
+/* Work counted since the last clear, when built with OK_R3D_STATS (zeros otherwise). */
+enum { OK_R3D_STAT_DIVS, OK_R3D_STAT_VERTS, OK_R3D_STAT_TRIS, OK_R3D_STAT_ROWS, OK_R3D_STAT_PIXELS, OK_R3D_STATS_N };
+void ok_r3d_stats(uint32_t out[OK_R3D_STATS_N], int clear);
 
 #endif

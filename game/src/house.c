@@ -22,7 +22,7 @@ static void box(int x0, int y0, int z0, int x1, int y1, int z1)
 
 static void blob(int x, int y, int z, int rx, int ry, int rz)
 {
-    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 10, 7);
+    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 7, 5);
 }
 
 /* A quad cut into nu x nv smaller ones (corners counterclockwise from the
@@ -238,7 +238,7 @@ static void bulbs(int x0, int y0, int x1, int y1, int z, int n, int on, int out[
         ok_v3 at = P(x0 + (x1 - x0) * t / 1000, y0 + (y1 - y0) * t / 1000 - s - 35, z + 20);
         if (!on) c = RGB((c & 31) / 2 + 5, (c >> 5 & 31) / 2 + 5, (c >> 10 & 31) / 2 + 5);
         mat(c, on ? OK_R3D_UNLIT : 0);
-        ok_r3d_ellipsoid(at, P(28, 36, 28), 6, 4);
+        ok_r3d_ellipsoid(at, P(28, 36, 28), 4, 2);
         if (on && *count < 24 && ok_r3d_project(at, &out[*count][0], &out[*count][1], NULL)) (*count)++;
     }
 }
@@ -506,7 +506,7 @@ static void dot(uint16_t *f, int x, int y, uint16_t c)
 
 static int place;
 static void outside_scene(const light *l, int on);
-static void sky_dome(ok_v3 eye, int minute, uint32_t t);
+static void sky_dome(ok_v3 eye, ok_v3 target, int minute, uint32_t t);
 static void sky_stars(uint16_t *f, ok_v3 eye, int minute, uint32_t t);
 static void fireflies(uint16_t *f, uint32_t t, int night);
 static void fog(uint16_t *f, uint16_t haze, int near_units, int far_units);
@@ -526,7 +526,7 @@ static void garden_draw(uint16_t *frame, int m, const ok_look *look, const uint1
         ok_r3d_begin(frame, CHARCOAL);
         ok_r3d_camera(P(cam[0], cam[1], cam[2]), P(cam[3], cam[4], cam[5]), 330);
         apply(&l);
-        sky_dome(P(cam[0], cam[1], cam[2]), m, a->ticks);
+        sky_dome(P(cam[0], cam[1], cam[2]), P(cam[3], cam[4], cam[5]), m, a->ticks);
         outside_scene(&l, l.night || m >= 1140);
         fog(frame, frame[(H - 30) * W], 45, 150);
         ok_r3d_keep();
@@ -782,22 +782,31 @@ static uint16_t sky_at(const uint16_t c[4], int az, int el, int sun_az, int nigh
     return col;
 }
 
-static void sky_dome(ok_v3 eye, int minute, uint32_t t)
+/* How far az is from where the camera looks, in 1/4096 turn (0..2048). */
+static int az_off(int az, int cam_az)
+{
+    int d = (az - cam_az) & (OK_TURN - 1);
+    return d > OK_TURN / 2 ? OK_TURN - d : d;
+}
+
+static void sky_dome(ok_v3 eye, ok_v3 target, int minute, uint32_t t)
 {
     uint16_t c[4];
-    int i, j, sun_az, sun_el, night;
+    int i, j, sun_az, sun_el, night, cam_az = ok_r3d_atan2(target.x - eye.x, target.z - eye.z);
     sky_colours(minute, c);
     sky_light(minute, &sun_az, &sun_el, &night);
     ok_r3d_push();
     ok_r3d_translate(eye);
     for (j = 0; j < SKY_EL; j++)
         for (i = 0; i < SKY_AZ; i++) {
-            int o = j % 2; /* rings staggered by half a facet: triangles, not boxes */
-            ok_v3 a = sky_dir(sky_vertex_az(i, j), sky_vertex_el(i, j), SKY_R);
-            ok_v3 b = sky_dir(sky_vertex_az(i + 1, j), sky_vertex_el(i + 1, j), SKY_R);
-            ok_v3 e = sky_dir(sky_vertex_az(i + 1 - o, j + 1), sky_vertex_el(i + 1 - o, j + 1), SKY_R);
-            ok_v3 f = sky_dir(sky_vertex_az(i + 2 - o, j + 1), sky_vertex_el(i + 2 - o, j + 1), SKY_R);
-            int mid_el = (sky_vertex_el(i, j) + sky_vertex_el(i, j + 1)) / 2, az = (i * 2 + 1) * OK_TURN / SKY_AZ / 2;
+            int o = j % 2, az = (i * 2 + 1) * OK_TURN / SKY_AZ / 2, mid_el; /* rings staggered by half a facet */
+            ok_v3 a, b, e, f;
+            if (j < SKY_EL - 2 && az_off(az, cam_az) > DEG(75)) continue; /* behind the camera: never seen */
+            a = sky_dir(sky_vertex_az(i, j), sky_vertex_el(i, j), SKY_R);
+            b = sky_dir(sky_vertex_az(i + 1, j), sky_vertex_el(i + 1, j), SKY_R);
+            e = sky_dir(sky_vertex_az(i + 1 - o, j + 1), sky_vertex_el(i + 1 - o, j + 1), SKY_R);
+            f = sky_dir(sky_vertex_az(i + 2 - o, j + 1), sky_vertex_el(i + 2 - o, j + 1), SKY_R);
+            mid_el = (sky_vertex_el(i, j) + sky_vertex_el(i, j + 1)) / 2;
             ok_r3d_material(sky_at(c, az, mid_el, sun_az, night, minute, hash2(i, j * 2)), SKY_ID, OK_R3D_UNLIT | OK_R3D_BOTH);
             ok_r3d_quad(a, b, e, e);
             ok_r3d_material(sky_at(c, az + OK_TURN / SKY_AZ / 2, mid_el + DEG(4), sun_az, night, minute, hash2(i, j * 2 + 1)), SKY_ID,
@@ -821,12 +830,13 @@ static void sky_dome(ok_v3 eye, int minute, uint32_t t)
         int az = j0 * OK_TURN / n + (int)(hash2(i, 7) % (OK_TURN / 24)) + (int)(t / (sea ? 90 : 40)) + (sea ? OK_TURN / 28 : 0);
         int el = sea ? -DEG(7 + (int)(hash2(i, 8) % 9)) : DEG(1 + (int)(hash2(i, 8) % 8));
         int sz = (sea ? 2600 : 1500) + (int)(hash2(i, 9) % 1300);
+        if (az_off(az, cam_az) > DEG(60)) continue;
         for (k = 0; k < 4; k++) { /* a flat shaded base, then three puffs on it */
             int dz = (k - 2) * DEG(3) * sz / 1800, w = k == 0 ? 15 : k == 2 ? 9 : 6, hgt = k == 0 ? 3 : k == 2 ? 6 : 4;
             uint16_t body = sea ? lerp_c(c[2], c[3], 1, 3) : c[2];
             ok_r3d_material(k == 0 ? lerp_c(body, c[3], 2, 3) : body, SKY_ID - 2, OK_R3D_UNLIT);
             ok_r3d_ellipsoid(sky_dir(az + (k ? dz + DEG(3) * sz / 1800 : 0), el + (k == 0 ? -DEG(1) / 2 : k == 2 ? DEG(1) : DEG(1) / 3), SKY_R * 8 / 10 - k * 20),
-                             P(sz * w / 10, sz * hgt / 10, sz * w / 10), 7, 3);
+                             P(sz * w / 10, sz * hgt / 10, sz * w / 10), 5, 3);
         }
     }
     ok_r3d_pop();
@@ -948,15 +958,15 @@ static int island_r(int a, int seed)
 
 /* An island: a flat lawn, a lip that rounds over, then rocky cliffs
  * narrowing to a point; size 1000 is the one the house stands on. */
-#define ISLE_N 28
-static void island(int cx, int cy, int cz, int size, int seed)
+static void island(int cx, int cy, int cz, int size, int seed, int segs)
 {
     /* Rings from the lawn's edge down: radius (per 1000 of the outline) and height. */
-    static const int16_t ring[][2] = {{1000, 0},    {1028, -40},  {1040, -110}, {1026, -190}, {975, -270}, {890, -520},
-                                      {760, -940}, {590, -1420}, {400, -1920}, {210, -2400}, {70, -2780}, {0, -2950}};
+    static const int16_t ring[][2] = {{1000, 0}, {1028, -40}, {1040, -110}, {1026, -190}, {975, -270}, {840, -700},
+                                      {620, -1350}, {360, -2000}, {120, -2650}, {0, -2950}};
     enum { RINGS = sizeof ring / sizeof ring[0] };
     int i, k;
     for (k = 0; k < RINGS - 1; k++) {
+        if (segs < 20 && k >= 1 && k <= 3) continue; /* small ones: no rounded lip */
         if (k == 0) otex(OK_OUT_GRASS, 3, RGB(5, 10, 3), 0);
         if (k == 3) {
             ok_r3d_flatten(210);
@@ -965,13 +975,14 @@ static void island(int cx, int cy, int cz, int size, int seed)
             ok_r3d_tile(3);
             ok_r3d_material(RGB(11, 7, 3), ++next_id, OK_R3D_TEXTURED | OK_R3D_EDGE | OK_R3D_FLAT);
         }
-        for (i = 0; i < ISLE_N; i++) {
+        for (i = 0; i < segs; i++) {
             ok_v3 q[4];
             int n;
             for (n = 0; n < 4; n++) {
-                int ii = (i + (n == 1 || n == 2)) % ISLE_N, kk = k + (n >= 2), a = ii * OK_TURN / ISLE_N;
+                int ii = (i + (n == 1 || n == 2)) % segs, kk = (segs < 20 && k == 0 ? 4 : k + (n >= 2)), a = ii * OK_TURN / segs;
+                if (segs < 20 && k == 0 && n < 2) kk = 0;
                 int r = island_r(a, seed) * ring[kk][0] / 1000, y = ring[kk][1];
-                if (kk >= 5) r = r * (94 + (int)(hash2(ii + seed * 50, kk) % 13)) / 100; /* rocky, not turned */
+                if (kk >= 5 && kk < RINGS - 1) r = r * (94 + (int)(hash2(ii + seed * 50, kk) % 13)) / 100; /* rocky, not turned */
                 q[n] = P(cx + (int)((int64_t)ok_r3d_cos(a) * r / 4096) * size / 1000, cy + y * size / 1000,
                          cz + (int)((int64_t)ok_r3d_sin(a) * r / 4096) * size / 1000);
             }
@@ -979,8 +990,8 @@ static void island(int cx, int cy, int cz, int size, int seed)
         }
     }
     otex(OK_OUT_GRASS, 3, RGB(5, 10, 3), 0); /* the lawn on top, as a fan */
-    for (i = 0; i < ISLE_N; i++) {
-        int a0 = i * OK_TURN / ISLE_N, a1 = (i + 1) * OK_TURN / ISLE_N, r0 = island_r(a0, seed), r1 = island_r(a1, seed);
+    for (i = 0; i < segs; i++) {
+        int a0 = i * OK_TURN / segs, a1 = (i + 1) * OK_TURN / segs, r0 = island_r(a0, seed), r1 = island_r(a1, seed);
         ok_v3 c = P(cx, cy, cz), p0 = P(cx + (int)((int64_t)ok_r3d_cos(a0) * r0 / 4096) * size / 1000, cy,
                                        cz + (int)((int64_t)ok_r3d_sin(a0) * r0 / 4096) * size / 1000);
         ok_v3 p1 = P(cx + (int)((int64_t)ok_r3d_cos(a1) * r1 / 4096) * size / 1000, cy,
@@ -1018,7 +1029,7 @@ static void bush(int x, int z, int s, int seed)
     for (k = 0; k < n; k++) {
         int dx = ((int)(hash2(seed, k + 2) % 300) - 150) * s / 100, dz = ((int)(hash2(seed, k + 9) % 240) - 120) * s / 100;
         int r = (150 + (int)(hash2(seed, k + 20) % 90)) * s / 100;
-        ok_r3d_ellipsoid(P(x + dx, r * 7 / 10, z + dz), P(r, r * 85 / 100, r), 6, 4);
+        ok_r3d_ellipsoid(P(x + dx, r * 7 / 10, z + dz), P(r, r * 85 / 100, r), 5, 3);
     }
     ok_r3d_tile(0);
 }
@@ -1027,9 +1038,9 @@ static void outside_scene(const light *l, int on)
 {
     int i, k, lit[24][2], lights = 0;
     /* The island and two little islets, each an irregular low-poly rock. */
-    island(0, 0, 0, 1000, 0);
-    island(-2600, -600, 3300, 105, 1);
-    island(3900, -900, -1500, 90, 2);
+    island(0, 0, 0, 1000, 0, 22);
+    island(-2600, -600, 3300, 105, 1, 12);
+    island(3900, -900, -1500, 90, 2, 12);
     ivy(0, 0, 0, 1000, 0, 18);
     ivy(-2600, -600, 3300, 105, 1, 4);
     ivy(3900, -900, -1500, 90, 2, 4);
@@ -1202,7 +1213,7 @@ void ok_house_outside(uint16_t *frame, ok_v3 eye, ok_v3 target, int focal, int h
     ok_r3d_begin(frame, CHARCOAL);
     ok_r3d_camera(eye, target, focal);
     apply(&l);
-    sky_dome(eye, m, ticks);
+    sky_dome(eye, target, m, ticks);
     outside_scene(&l, l.night || m >= 1140);
     sky_stars(frame, eye, m, ticks);
     fireflies(frame, ticks, l.night || m >= 1140);

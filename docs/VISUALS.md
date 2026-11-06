@@ -28,11 +28,27 @@ The top screen is drawn by `r3d.c` on the CPU, not by the DSi's 3D hardware.
   colours for everything. The eyes and mouth are masked to the head and the
   smiley's face follows the mask's plane. Both need the depth and object
   buffers, which the CPU cannot read back from the hardware.
-- **It is cheap enough.** The still attic is drawn once per change of light
-  and kept (`ok_r3d_keep`). Each frame redraws only the okupa (about 1200
-  triangles in its bounding box). Divisions are per triangle, not per pixel.
-  The host draws a frame in about 0.1 ms. Dev → "Frame: ... ms to draw" shows
-  the real figure on the console.
+- **It is cheap enough, once it avoids what the ARM946 is bad at.** The
+  still attic is drawn once per change of light and kept (`ok_r3d_keep`);
+  each frame redraws only the okupa (about 1100 triangles). The first DSi
+  test ran at about 2 frames a second. `make perf` counts the work per
+  frame on the host, and three things were behind the slowness:
+  - Every 64-bit division ran in software, about 42,000 a frame in the
+    attic and 63,000 in the opening film. The renderer now does fewer of
+    them: none to start a triangle, none for a speck of one pixel, and the
+    sphere rings are worked out once per shape. The ones left go through
+    `ok_r3d_divider`, which the DSi points at its hardware divider. Now
+    8,500 in the attic and 20,000 in the film.
+  - Thumb code has no 32x32 to 64-bit multiply. The renderer, the synth,
+    the house, the okupa and the crypto libraries now build in ARM mode.
+  - The okupa had more triangles than its 40 pixels need. It now uses
+    fewer rings, five tail links, and four-sided strokes on the face.
+    The sky dome skips facets and clouds behind the camera.
+  The pixel loop runs in 32 bits when nothing can overflow. Dev shows
+  "Frame: draw X, loop Y ms" on the console. If loop is much larger than
+  draw, the network's cooperative threads are holding the CPU.
+- **The music no longer depends on the frame rate.** The synth fills its
+  buffer from a timer interrupt, 120 times a second.
 
 If that figure is too high on the DSi, the scene code can drive the hardware
 instead (`ok_r3d_*` is already shaped like it: transforms, materials,
