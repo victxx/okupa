@@ -32,7 +32,9 @@ CPPFLAGS := -Icore/include -Igame/include -Ithird_party/tiny_sha3 -I$(SECP)/incl
             -Ithird_party/font8x8 -Ithird_party/qrcodegen -I$(BLOCKSDS)/libs/libnds/include -I$(BLOCKSDS)/libs/dswifi/include -DOKUPA_BUILD_ID='"$(BUILD_ID)"'
 CFLAGS := $(ARCH) -O2 -std=gnu11 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
           -fstack-usage -specs=$(SPECS)
-LDFLAGS := $(ARCH) -specs=$(SPECS) -Wl,-Map,$(OUT)/okupa.map -Wl,--gc-sections -Wl,--build-id=none \
+# A 4 KB stack for interrupts (BlocksDS gives 256 bytes): the music is made
+# in a timer interrupt, and a deeper handler would run over into other memory.
+LDFLAGS := $(ARCH) -specs=$(SPECS) -Wl,--defsym=__irq_stack_size=0x1000 -Wl,-Map,$(OUT)/okupa.map -Wl,--gc-sections -Wl,--build-id=none \
            -L$(BLOCKSDS)/libs/dswifi/lib -L$(BLOCKSDS)/libs/libnds/lib -Wl,--start-group -ldswifi9 -lnds9 -lc -Wl,--end-group
 
 .PHONY: all

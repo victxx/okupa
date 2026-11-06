@@ -123,6 +123,8 @@ void ok_r3d_hardware(int on);
 /* 1 once the 3D goes to the hardware: no depth or objects to read back,
  * and the 2D layer is see-through over the 3D. */
 int ok_r3d_on_hardware(void);
+/* Triangles in the kept frame's recording (hardware), for measuring. */
+int ok_r3d_kept_triangles(void);
 /* The 3D layer's background is see-through this frame (a sky behind it). */
 void ok_r3d_see_through(void);
 /* On the hardware: keep what was drawn since the camera was set, and draw
@@ -130,6 +132,9 @@ void ok_r3d_see_through(void);
 void ok_r3d_world_keep(void);
 int ok_r3d_world_again(void);
 void ok_r3d_world_forget(void);
+/* On the hardware: 0 keeps back faces too (for a scene drawn again under
+ * other cameras); 1, the default, drops them before they reach the GPU. */
+void ok_r3d_cpu_cull(int on);
 /* Shows the frame drawn on the hardware (once a frame; nothing in software). */
 void ok_r3d_swap(void);
 /* The texels behind a texture changed (the hardware keeps uploaded copies). */

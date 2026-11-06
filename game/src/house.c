@@ -1152,7 +1152,9 @@ void ok_house_outside(uint16_t *frame, ok_v3 eye, ok_v3 target, int focal, int h
          * new camera: the film flies round it without rebuilding it. */
         static int world_minute = -1;
         if (!(ok_r3d_on_hardware() && world_minute == m && ok_r3d_world_again())) {
+            ok_r3d_cpu_cull(0); /* seen again from other places */
             outside_scene(&l, l.night || m >= 1140);
+            ok_r3d_cpu_cull(1);
             if (ok_r3d_on_hardware()) {
                 ok_r3d_world_keep();
                 world_minute = m;

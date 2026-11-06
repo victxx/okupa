@@ -553,7 +553,11 @@ int main(void)
             uint32_t start = now_us();
             tm = localtime(&now);
             ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
+#ifdef OKUPA_PERF_ALWAYS
+            if (1) {
+#else
             if (keysHeld() & KEY_R) { /* hold R: how fast it really runs */
+#endif
                 char perf[64];
                 int i;
                 const uint32_t *pr = ok_house_prof;
@@ -561,9 +565,10 @@ int main(void)
                          (unsigned)(draw_us / 1000 % 10000), (unsigned)(loop_us / 1000 % 10000));
                 for (i = 0; i < OK_UI_W * 24; i++) back[0][(OK_UI_H - 24) * OK_UI_W + i] = 0x8000;
                 ok_text_draw(back[0], &ok_sans_regular, 2, OK_UI_H - 23, perf, 0xffff);
-                snprintf(perf, sizeof perf, "%u %u %u %u %u | %u %u %u", (unsigned)(pr[0] / 100 % 10000), (unsigned)(pr[1] / 100 % 10000),
-                         (unsigned)(pr[2] / 100 % 10000), (unsigned)(pr[3] / 100 % 10000), (unsigned)(pr[4] / 100 % 10000),
-                         (unsigned)(pr[5] / 100 % 10000), (unsigned)(pr[6] / 100 % 10000), (unsigned)(pr[7] / 100 % 10000));
+                snprintf(perf, sizeof perf, "gpu %u/%u  tris kept %u live %u", (unsigned)(GFX_POLYGON_RAM_USAGE & 0xfff),
+                         (unsigned)(GFX_VERTEX_RAM_USAGE & 0x1fff), (unsigned)(ok_r3d_kept_triangles() % 10000),
+                         (unsigned)(ok_r3d_triangles() % 10000));
+                (void)pr;
                 ok_text_draw(back[0], &ok_sans_regular, 2, OK_UI_H - 11, perf, 0xffff);
             }
             ok_r3d_swap();

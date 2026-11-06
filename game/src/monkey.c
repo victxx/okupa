@@ -781,12 +781,12 @@ static int solid(uint16_t c)
 
 static void blob(int x, int y, int z, int rx, int ry, int rz)
 {
-    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 6, 4);
+    ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 5, 3);
 }
 
 static void limb(int x0, int y0, int z0, int x1, int y1, int z1, int r)
 {
-    ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), H(r), 5);
+    ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), H(r), 4);
 }
 
 static int val(const ok_monkey_anim *a, int s)
@@ -1132,8 +1132,8 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     /* The tail, from its simulated chain (room coordinates). */
     if (a->tail_ready) {
         part_rows(skin, OK_PART_TAIL, 230, 0, 60);
-        for (i = 0; i < 10; i += 2) /* five links over the eleven points: cheap, still curvy */
-            ok_r3d_capsule(P(a->tail[i][0], a->tail[i][1], a->tail[i][2]), P(a->tail[i + 2][0], a->tail[i + 2][1], a->tail[i + 2][2]),
+        for (i = 0; i < 9; i += 3) /* three links over the eleven points: cheap, still curvy */
+            ok_r3d_capsule(P(a->tail[i][0], a->tail[i][1], a->tail[i][2]), P(a->tail[i + 3][0], a->tail[i + 3][1], a->tail[i + 3][2]),
                            H(30 - i * 3 / 2), 4);
     }
     /* Where it is: standing in the room, or on the bed. */
@@ -1192,7 +1192,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(0, -170, 0));
     /* One whole body, round at the tummy, breathing. */
     part_rows(skin, OK_PART_TOP, ++next_id, 0, 100);
-    ok_r3d_ellipsoid(P(0, 318, 6), P(166, 160 + wave(a->ticks, 17, 3), 140), 8, 5);
+    ok_r3d_ellipsoid(P(0, 318, 6), P(166, 160 + wave(a->ticks, 17, 3), 140), 7, 4);
     /* The shoulders and head bend over it: sighs, a stretch. */
     ok_r3d_push();
     ok_r3d_translate(P(0, 295, 0));
@@ -1264,7 +1264,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(0, -450, 0));
     face->head_id = ++next_id;
     part(skin, OK_PART_HEAD, face->head_id);
-    ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 10, 7);
+    ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 9, 6);
     ok_r3d_ellipsoid(P(0, 728, 118), P(150, 38, 80), 8, 4);   /* brow */
     if (bare) { /* a tuft of hair */
         limb(0, 845, 20, -14, 880, 46, 15);
