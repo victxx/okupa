@@ -225,21 +225,18 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
                                                      "*munches*",      "*plays*",     "*yawns*",     "*heads out*",
                                                      "*heads in*"};
     int move = moves[d->activity], where = OK_PLACE_ATTIC, here = ok_house_where();
-    static char note[OK_MIND_NOTE + 3];
-    const char *said = d->line[0] ? d->line : doing[d->activity];
-    /* A question it asks wins the bubble, then its line; a thought shows in
-     * brackets when it says nothing (until there is a thought bubble). */
-    if (d->ask[0]) {
-        said = d->ask;
-    } else if (!d->line[0] && d->thought[0]) {
-        snprintf(note, sizeof note, "(%s)", d->thought);
-        said = note;
-    }
+    /* Its line (or what it does, if it says nothing); its thought in a
+     * cloud; its question waits in its own bubble for the player to answer
+     * by holding L. All three come from the verified decision. */
+    const char *said = d->line[0] ? d->line : d->thought[0] ? NULL : doing[d->activity];
     if (d->activity == OK_MIND_GO_OUTSIDE) where = OK_PLACE_GARDEN;
     if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
         (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
         move = OK_MOVE_LOOK; /* already there: it just looks around */
     ok_ui_direct(u, p, move, where, poses[d->mood], said);
+    ok_ui_listening(u, 0);
+    if (d->thought[0]) ok_ui_thought(u, d->thought);
+    if (d->ask[0]) ok_ui_ask(u, d->ask);
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
 }
 
@@ -251,6 +248,7 @@ int main(void)
     ok_tech tech;
     time_t now = time(NULL), last = now, saved_at = now, last_input = now;
     ok_mind thought; /* the mind's latest decision */
+    int listening = 0; /* a clip is with 0G */
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
@@ -388,20 +386,23 @@ int main(void)
          * screens L and R turn pages instead.) */
         if (!tech_on && (keysDown() & KEY_L) && !ok_dsi_mind_ear_busy()) {
             ok_dsi_ear_start();
-            ui.say = "I'm listening...";
-            ui.say_ticks = 60 * 6;
+            ok_ui_ask(&ui, NULL); /* it is being answered */
+            ok_ui_listening(&ui, 1);
         }
         if ((keysUp() & KEY_L) && ok_dsi_ear_recording()) {
             size_t len;
             const uint8_t *wav = ok_dsi_ear_stop(&len);
             if (wav) {
                 ok_dsi_mind_hear(wav, len);
-                ui.say = "Hmm, let me think...";
+                ok_ui_listening(&ui, 2); /* "Thinking..." until 0G has turned it into words */
             } else {
+                ok_ui_listening(&ui, 0);
                 ui.say = "Hold L while you talk!";
+                ui.say_ticks = 60 * 3;
             }
-            ui.say_ticks = 60 * 4;
         }
+        if (listening && !ok_dsi_mind_ear_busy() && !ok_dsi_ear_recording()) ok_ui_listening(&ui, 0);
+        listening = ok_dsi_mind_ear_busy();
         if (!tech_on && (keysDown() & KEY_R)) {
             ok_dsi_mind_look();
             ui.say = "Let me look at you...";
