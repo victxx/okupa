@@ -18,6 +18,11 @@ typedef struct {
     /* Optional: once admitted, stay connected (answering pings) while this
      * returns 1, so the next message goes out with no new handshake. */
     int (*hold)(void *ctx);
+    /* Optional: signed transactions (wire form) to hand over the moment the
+     * peer's Status arrives, before a busy peer hangs up on us. */
+    const uint8_t *const *txs;
+    const size_t *tx_lens;
+    size_t tx_count;
     void *ctx;
 } ok_io;
 
@@ -29,6 +34,7 @@ typedef struct {
     int outcome;
     int handshake, hello, status, pong; /* how far it got */
     unsigned held;                      /* messages handled while holding */
+    int tx_written;                     /* the Transactions message went out */
     char client[48];
     uint64_t disconnect; /* reason, when outcome is OK_SESSION_DISCONNECTED */
     ok_eth_status remote;

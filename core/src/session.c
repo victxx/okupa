@@ -153,6 +153,14 @@ static int converse(const ok_io *io, ok_rlpx_session *s, const uint8_t pub[64], 
                 bad ? ", MISMATCH " : "", bad ? bad : "");
             if (bad) return finish(rep, OK_SESSION_MISMATCH);
             rep->status = 1;
+            /* Many public peers are full and hang up a moment after Status:
+             * hand the transactions over right now, then carry on. */
+            if (io->tx_count && !rep->tx_written &&
+                ok_eth_transactions(io->txs, io->tx_lens, io->tx_count, out, sizeof out, &len) == OK_OK &&
+                send_message(io, s, OK_P2P_ETH_OFFSET + OK_ETH_TRANSACTIONS, out, len, snappy)) {
+                rep->tx_written = 1;
+                say(io, "sent Transactions (%lu)", (unsigned long)io->tx_count);
+            }
         } else {
             say(io, "got message 0x%02llx (%lu bytes), ignored", (unsigned long long)id, (unsigned long)len);
         }
