@@ -490,6 +490,28 @@ static void page_data(frame f, const uint8_t (*font)[8], const ok_tech *t, const
     }
 }
 
+/* The live feed: the newest lines, coloured by where they come from. */
+static void feed(frame f, const uint8_t (*font)[8], const ok_facts *fa, int y, int lines)
+{
+    uint32_t n = fa->log_count, k, first = n > (uint32_t)lines ? n - (uint32_t)lines : 0;
+    char v[48];
+    rect(f, 0, y - 4, W, 1, PANEL);
+    text(f, font, 4, y, "Live", ACCENT, 1);
+    text(f, font, 44, y, "E=Ethereum G=0G D=DSi", DIM, 1);
+    if (!n) {
+        text(f, font, 4, y + 12, "Nothing yet", DIM, 1);
+        return;
+    }
+    for (k = first; k < n; k++) {
+        const char *src = fa->log[k % OK_FACTS_LOG].src == 'G' ? "G" : fa->log[k % OK_FACTS_LOG].src == 'E' ? "E" : "D";
+        uint32_t t = fa->log[k % OK_FACTS_LOG].t;
+        snprintf(v, sizeof v, "%02lu:%02lu %s %.24s", (unsigned long)(t / 60 % 60), (unsigned long)(t % 60), src,
+                 fa->log[k % OK_FACTS_LOG].text);
+        text(f, font, 0, y + 12 + (int)(k - first) * 9, v,
+             *src == 'G' ? OG : *src == 'E' ? LINK : TEXT, 1);
+    }
+}
+
 /* ---- Frame --------------------------------------------------------------------- */
 
 #define TAB_W 32
@@ -568,6 +590,9 @@ void ok_tech_render(const ok_tech *t, const ok_facts *fa, const uint8_t (*font)[
         return;
     }
     text(top, font, 4, 6, page_title[t->page], ACCENT, 2);
-    para(top, font, 4, 30, page_text[t->page], TEXT, 15);
+    {
+        int y = para(top, font, 4, 30, page_text[t->page], TEXT, 9) + 8;
+        feed(top, font, fa, y, (H - y - 12) / 9);
+    }
     page_data(bottom, font, t, fa);
 }

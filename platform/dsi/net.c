@@ -40,7 +40,7 @@ static const profile sepolia = {"sepolia", &ok_sepolia,
                                 "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net",
                                 ok_sepolia_bootnodes, &ok_sepolia_bootnode_count};
 static const profile *net = &mainnet;
-#define MAX_NODES 64 /* public nodes are often full: try many */
+#define MAX_NODES 160 /* public nodes are often full: try many */
 #define MAX_KNOWN 6  /* Wi-Fi networks remembered */
 #define LINES 14
 
@@ -68,6 +68,12 @@ static struct {
     char ssid[33], password[64];
 } known[MAX_KNOWN];
 static int known_count;
+static time_t boot_time;
+
+uint32_t ok_dsi_uptime(void)
+{
+    return (uint32_t)(time(NULL) - boot_time);
+}
 
 /* Wait for the next frame while letting other threads run: dswifi's network
  * stack and the game loop both need the processor. */
@@ -642,6 +648,7 @@ static void crawl(int seconds, uint8_t fork[4], int seeds_from, int seeds_to)
         next_frame();
     }
     line(3, "v4: %d seen %u rx %u bond %u ok", c.count, c.received, c.bonded, c.found_count);
+    ok_facts_log(ok_dsi_uptime(), 'E', "discv4: %d nodes, %u replies", c.count, c.received);
     ok_facts_now.v4_sent = (int)c.sent;
     ok_facts_now.v4_received = (int)c.received;
     ok_facts_now.v4_nodes = c.count;
@@ -745,6 +752,8 @@ static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
     save_watch_from();
     line(LINES - 2, "Block %llu: %u txs, root %s", (unsigned long long)h->number, (unsigned)c->count,
          c->root_ok ? "ok" : "BAD");
+    ok_facts_log(ok_dsi_uptime(), 'E', "block %llu: %u tx, root %s", (unsigned long long)h->number, (unsigned)c->count,
+                 c->root_ok ? "ok" : "BAD");
     if (c->found < 0) return;
     f->incl_block = h->number;
     memcpy(f->incl_block_hash, h->hash, 32);
@@ -774,6 +783,7 @@ static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
     {
         char text[48];
         snprintf(text, sizeof text, "In block %llu!", (unsigned long long)h->number);
+        ok_facts_log(ok_dsi_uptime(), 'E', "OUR TX in block %llu (#%u)", (unsigned long long)h->number, (unsigned)c->found);
         say(text);
         line(LINES - 1, "%s", text);
     }
@@ -883,11 +893,21 @@ static int dial(int i, int row)
     if (rep.tx_written) {
         char text[48];
         handed++;
+        ok_facts_log(ok_dsi_uptime(), 'E', "tx %02x%02x%02x%02x handed (%d)", pending_hash[0], pending_hash[1],
+                     pending_hash[2], pending_hash[3], handed);
         snprintf(text, sizeof text, "Hello handed to %d nodes", handed);
         say(text);
         line(LINES - 1, "%s", text);
     }
     end_peer_fact(&rep);
+    {
+        char who[16];
+        snprintf(who, sizeof who, "%.15s", rep.client[0] ? rep.client : "?");
+        if (strchr(who, '/')) *strchr(who, '/') = 0;
+        if (rep.outcome == OK_SESSION_PASS) ok_facts_log(ok_dsi_uptime(), 'E', "%s kept us (%u msgs)", who, rep.held);
+        else if (rep.status) ok_facts_log(ok_dsi_uptime(), 'E', "%s: Status, then full", who);
+        else if (rep.hello) ok_facts_log(ok_dsi_uptime(), 'E', "%s: full", who);
+    }
     if (rep.outcome == OK_SESSION_PASS) {
         line(row, "%u.%u.%u.%u: was online", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
         return 1;
@@ -966,6 +986,7 @@ static int postman(void *arg)
             struct in_addr ip;
             ip.s_addr = Wifi_GetIP();
             line(0, "Wi-Fi: %s", inet_ntoa(ip));
+            ok_facts_log(ok_dsi_uptime(), 'D', "Wi-Fi up: %s", inet_ntoa(ip));
         }
         pick_dns();
         ok_forkid(net->net, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
@@ -988,11 +1009,11 @@ static int postman(void *arg)
         w.lookup = lookup;
         w.found = dns_found;
         say("Reading the node list");
-        ok_dnsdisc_walk_tree(&w, net->tree, fork, 24);
+        ok_dnsdisc_walk_tree(&w, net->tree, fork, 48);
         if (!w.seq && dns_server.s_addr != htonl(0x01010101)) {
             dns_server.s_addr = htonl(0x01010101);
             line(1, "DNS: 1.1.1.1 (fallback)");
-            ok_dnsdisc_walk_tree(&w, net->tree, fork, 24);
+            ok_dnsdisc_walk_tree(&w, net->tree, fork, 48);
         }
         dns_to = node_count;
         ok_facts_now.dns_seq = w.seq;
@@ -1000,11 +1021,12 @@ static int postman(void *arg)
         ok_facts_now.dns_records = (int)w.records;
         ok_facts_now.dns_nodes = dns_to - dns_from;
         line(2, w.seq ? "DNS list: %d nodes" : "DNS list: no answer (%d)", dns_to - dns_from);
+        if (w.seq) ok_facts_log(ok_dsi_uptime(), 'E', "DNS list signed ok: %d nodes", dns_to - dns_from);
 
         /* 3. Lesser-known nodes through discovery v4: these have room more often. */
         from = node_count;
         say("Searching for nodes");
-        crawl(30, fork, dns_from, dns_to);
+        crawl(45, fork, dns_from, dns_to);
         ok_facts_now.candidates = node_count;
         if (try_nodes(from, node_count)) continue;
         if (try_nodes(dns_from, dns_to)) continue;
@@ -1014,7 +1036,7 @@ static int postman(void *arg)
             snprintf(text, sizeof text, "Ready: %d nodes take letters", ready_peers);
             say(text);
         } else {
-            say("Nodes busy, retrying soon");
+            say(pending_len && handed ? "Letter out, nodes full: again" : "All nodes full, trying more");
         }
         line(LINES - 1, "All busy, again in 20 s");
         pause_seconds(20);
@@ -1027,5 +1049,6 @@ void ok_dsi_net_start(void)
     static int started;
     if (started) return;
     started = 1;
+    boot_time = time(NULL);
     cothread_create(postman, NULL, 64 * 1024, COTHREAD_DETACHED);
 }
