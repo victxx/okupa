@@ -35,7 +35,7 @@ const ok_part *ok_monkey_part(int part)
 
 const char *ok_wear_name(int wear)
 {
-    static const char *n[OK_WEARS] = {"Nothing", "Headphones", "Bandana", "Glasses", "Scarf", "Flower", "Leaf", "Cap"};
+    static const char *n[OK_WEARS] = {"Nothing", "Headphones", "Bandana", "Glasses", "Scarf", "Flower", "Leaf", "Cap", "Smiley mask"};
     return wear >= 0 && wear < OK_WEARS ? n[wear] : "";
 }
 
@@ -107,6 +107,412 @@ void ok_monkey_skin(const ok_look *look, uint16_t skin[OK_SKIN * OK_SKIN])
     fill(skin, p->x, p->y, p->w, p->h, shade(top, 9, 10));
 }
 
+/* ------------------------------------------------------------- animation */
+
+#define Q 256 /* springs hold values times this */
+
+/* Stiffness and damping per spring, in 1/256 per tick. Stiff springs follow
+ * closely; soft ones lag and overshoot, which is what makes it look alive. */
+static const uint8_t stiff[OK_SPRINGS] = {
+    180, 60, 60, 70, 50, 60, 110, 110, 110, 110, 200, 200, /* bob .. legs */
+    90, 50, 30, 20,                                        /* tail, each joint softer */
+    60, 200, 60, 40, 25, 250,                              /* ear, squash, mask, yaw, lie, ball */
+};
+static const uint8_t damp[OK_SPRINGS] = {
+    91, 61, 60, 65, 56, 60, 77, 77, 77, 77, 112, 112,
+    43, 28, 22, 18,
+    22, 56, 70, 64, 56, 179,
+};
+
+static uint32_t rnd(ok_monkey_anim *a)
+{
+    uint32_t x = a->seed ? a->seed : 0x9e3779b9u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return a->seed = x;
+}
+
+static int below(ok_monkey_anim *a, int n)
+{
+    return (int)(rnd(a) % (uint32_t)n);
+}
+
+/* sin of (ticks * speed / 4096 turns), scaled to -n..n. */
+static int wave(uint32_t ticks, int speed, int n)
+{
+    return (int)((int64_t)ok_r3d_sin((int)(ticks * (uint32_t)speed)) * n / 4096);
+}
+
+static void start(ok_monkey_anim *a, int move)
+{
+    a->move = move;
+    a->move_t = 0;
+    a->stage = 0;
+    a->bites = 0;
+}
+
+void ok_monkey_init(ok_monkey_anim *a, const ok_monkey_room *room, int asleep, uint32_t seed)
+{
+    memset(a, 0, sizeof *a);
+    a->room = *room;
+    a->seed = seed | 1;
+    a->x = a->goal_x = room->home_x;
+    a->z = a->goal_z = room->home_z;
+    a->s[OK_SPRING_SQUASH].x = 100 * Q;
+    a->next_idle = 90;
+    if (asleep) {
+        a->move = OK_MOVE_SLEEP;
+        a->x = room->bed_x;
+        a->z = room->bed_z + 420;
+        a->s[OK_SPRING_LIE].x = 100 * Q;
+    }
+}
+
+void ok_monkey_event(ok_monkey_anim *a, int event)
+{
+    if (a->move == OK_MOVE_SLEEP || a->move == OK_MOVE_TO_BED || a->move == OK_MOVE_WAKE) return;
+    a->goal_x = a->x; /* whatever it was walking to can wait */
+    a->goal_z = a->z;
+    a->walking = 0;
+    switch (event) {
+    case OK_EVENT_FEED: start(a, OK_MOVE_EAT); break;
+    case OK_EVENT_PLAY: start(a, OK_MOVE_PLAY); break;
+    case OK_EVENT_PET: start(a, OK_MOVE_PETTED); break;
+    case OK_EVENT_REFUSE: start(a, OK_MOVE_REFUSE); break;
+    default: start(a, OK_MOVE_WAVE); break;
+    }
+}
+
+/* The next thing to do while nothing is asked of it, by mood. */
+static void pick(ok_monkey_anim *a, int wear)
+{
+    static const uint8_t idle[] = {OK_MOVE_LOOK, OK_MOVE_SCRATCH, OK_MOVE_STRETCH, OK_MOVE_WANDER, OK_MOVE_LOOK, OK_MOVE_HOP};
+    static const uint8_t happy[] = {OK_MOVE_HOP, OK_MOVE_WAVE, OK_MOVE_WANDER, OK_MOVE_LOOK, OK_MOVE_HOP, OK_MOVE_SCRATCH};
+    static const uint8_t bored[] = {OK_MOVE_SIGH, OK_MOVE_LOOK, OK_MOVE_SIGH, OK_MOVE_WANDER, OK_MOVE_SCRATCH, OK_MOVE_STRETCH};
+    static const uint8_t lonely[] = {OK_MOVE_LOOK, OK_MOVE_WAVE, OK_MOVE_LOOK, OK_MOVE_SIGH, OK_MOVE_WAVE, OK_MOVE_LOOK};
+    static const uint8_t sleepy[] = {OK_MOVE_STRETCH, OK_MOVE_LOOK, OK_MOVE_SIGH, OK_MOVE_STRETCH, OK_MOVE_SCRATCH, OK_MOVE_LOOK};
+    const uint8_t *set = a->mood == OK_POSE_HAPPY ? happy : a->mood == OK_POSE_BORED ? bored
+                         : a->mood == OK_POSE_LONELY ? lonely : a->mood == OK_POSE_SLEEPY ? sleepy : idle;
+    int m = set[below(a, 6)];
+    if (wear == OK_WEAR_SMILEY && below(a, 4) == 0) m = OK_MOVE_PEEK;
+    if (a->mood == OK_POSE_HUNGRY) m = below(a, 3) ? OK_MOVE_LOOK : OK_MOVE_SIGH;
+    start(a, m);
+    a->look = below(a, 2) ? 1 : -1;
+}
+
+/* Walks towards the goal; 1 once there. */
+static int walk(ok_monkey_anim *a, int32_t gx, int32_t gz)
+{
+    int32_t dx = gx - a->x, dz = gz - a->z, d;
+    a->goal_x = gx;
+    a->goal_z = gz;
+    d = (int32_t)(dx < 0 ? -dx : dx) + (dz < 0 ? -dz : dz);
+    if (d < 8) {
+        a->walking = 0;
+        return 1;
+    }
+    a->walking = 1;
+    {
+        int ang = ok_r3d_atan2(dx, dz);
+        a->x += (int32_t)((int64_t)ok_r3d_sin(ang) * 4 / 4096);
+        a->z += (int32_t)((int64_t)ok_r3d_cos(ang) * 4 / 4096);
+        if ((dx > 0) != (gx - a->x > 0) && dx) a->x = gx;
+        if ((dz > 0) != (gz - a->z > 0) && dz) a->z = gz;
+    }
+    return 0;
+}
+
+static void done(ok_monkey_anim *a, int min, int range)
+{
+    start(a, OK_MOVE_IDLE);
+    a->next_idle = min + below(a, range);
+}
+
+void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
+{
+    int32_t t[OK_SPRINGS];
+    int i, mt, yaw_free = 1;
+    uint32_t k;
+    memset(t, 0, sizeof t);
+    a->ticks++;
+    mt = ++a->move_t;
+    a->mood = mood;
+    k = a->ticks;
+    if (mood == OK_POSE_ASLEEP && a->move != OK_MOVE_TO_BED && a->move != OK_MOVE_SLEEP) start(a, OK_MOVE_TO_BED);
+    if (mood != OK_POSE_ASLEEP && (a->move == OK_MOVE_TO_BED || a->move == OK_MOVE_SLEEP)) start(a, OK_MOVE_WAKE);
+    if (a->move == OK_MOVE_IDLE && --a->next_idle <= 0) pick(a, wear);
+    mt = a->move_t;
+
+    /* The mood sets the resting pose. */
+    t[OK_SPRING_SQUASH] = 100 + wave(k, 17, 1);
+    t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 9;
+    t[OK_SPRING_TAIL0] = wave(k, 19, 9);
+    switch (mood) {
+    case OK_POSE_HAPPY:
+        t[OK_SPRING_BOB] = wave(k, 70, 14) < 0 ? -wave(k, 70, 14) : wave(k, 70, 14);
+        t[OK_SPRING_ROLL] = wave(k, 35, 5);
+        t[OK_SPRING_RAISE_L] = 18 + wave(k, 70, 6);
+        t[OK_SPRING_RAISE_R] = 18 - wave(k, 70, 6);
+        t[OK_SPRING_TAIL0] = wave(k, 35, 20);
+        t[OK_SPRING_TILT] = wave(k, 35, 4);
+        break;
+    case OK_POSE_HUNGRY:
+        t[OK_SPRING_LEAN] = 7;
+        t[OK_SPRING_NOD] = 11;
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -30;
+        t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 48;
+        t[OK_SPRING_BOB] = wave(k, 15, 3);
+        if (k % 400 < 30) t[OK_SPRING_ROLL] = wave(k, 600, 3); /* tummy rumble */
+        t[OK_SPRING_TAIL0] = wave(k, 12, 5) - 6;
+        break;
+    case OK_POSE_SLEEPY:
+        t[OK_SPRING_NOD] = 13 + wave(k, 11, 7);
+        t[OK_SPRING_TILT] = 7;
+        t[OK_SPRING_BOB] = wave(k, 11, 6) - 8;
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 3;
+        t[OK_SPRING_TAIL0] = wave(k, 9, 4) - 10;
+        break;
+    case OK_POSE_BORED:
+        t[OK_SPRING_LEAN] = -4;
+        t[OK_SPRING_NOD] = 5;
+        t[OK_SPRING_ROLL] = wave(k, 9, 4);
+        t[OK_SPRING_TILT] = -6 + wave(k, 9, 3);
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 4;
+        t[OK_SPRING_TAIL0] = wave(k, 9, 4) - 12;
+        t[OK_SPRING_BOB] = -5;
+        break;
+    case OK_POSE_LONELY:
+        t[OK_SPRING_NOD] = -4;
+        t[OK_SPRING_TILT] = 5;
+        t[OK_SPRING_TURN] = wave(k, 7, 8);
+        t[OK_SPRING_BOB] = wave(k, 20, 4);
+        break;
+    default:
+        t[OK_SPRING_BOB] = wave(k, 17, 5);
+        t[OK_SPRING_TURN] = wave(k, 7, 8);
+        t[OK_SPRING_TILT] = wave(k, 11, 3);
+        t[OK_SPRING_RAISE_L] = 9 + wave(k, 17, 2);
+        t[OK_SPRING_RAISE_R] = 9 - wave(k, 17, 2);
+    }
+
+    /* What it is doing on top of that. */
+    switch (a->move) {
+    case OK_MOVE_LOOK:
+        t[OK_SPRING_TURN] = mt < 80 ? 38 * a->look : mt < 150 ? -26 * a->look : 0;
+        t[OK_SPRING_NOD] += mt > 40 && mt < 70 ? -6 : 0;
+        t[OK_SPRING_TILT] += 6 * a->look;
+        if (mt > 190) done(a, 90, 200);
+        break;
+    case OK_MOVE_SCRATCH:
+        t[OK_SPRING_RAISE_R] = mt > 15 && mt < 110 ? 148 + wave(k, 300, 7) : 9;
+        t[OK_SPRING_FWD_R] = mt > 15 && mt < 110 ? 32 : 0;
+        t[OK_SPRING_TILT] = mt < 110 ? -12 : 0;
+        t[OK_SPRING_TURN] = -8;
+        if (mt > 140) done(a, 120, 240);
+        break;
+    case OK_MOVE_STRETCH:
+        if (mt > 10 && mt < 95) {
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 142;
+            t[OK_SPRING_LEAN] = -10;
+            t[OK_SPRING_NOD] = -14;
+            t[OK_SPRING_SQUASH] = 109;
+            t[OK_SPRING_BOB] = 12;
+        }
+        if (mt > 130) done(a, 150, 240);
+        break;
+    case OK_MOVE_HOP: {
+        int h = mt - 12;
+        if (mt < 12) {
+            t[OK_SPRING_BOB] = -22; /* crouch */
+            t[OK_SPRING_SQUASH] = 86;
+        } else if (h < 22) {
+            t[OK_SPRING_BOB] = (int)(4 * 130 * h * (22 - h) / (22 * 22)); /* the jump */
+            t[OK_SPRING_SQUASH] = h < 8 ? 114 : 100;
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 70;
+            t[OK_SPRING_LEG_L] = t[OK_SPRING_LEG_R] = -12;
+        } else if (h < 30) {
+            t[OK_SPRING_SQUASH] = 88; /* landing */
+            t[OK_SPRING_BOB] = -14;
+        }
+        if (mt > 70) done(a, 90, 180);
+        break;
+    }
+    case OK_MOVE_PEEK:
+        if (mt < 150) {
+            t[OK_SPRING_MASK] = mt > 12 ? 100 : 0;
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = mt < 40 || mt > 120 ? 35 : 12;
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = mt < 40 || mt > 120 ? 95 : 10;
+            t[OK_SPRING_ROLL] = wave(k, 60, 6);
+            t[OK_SPRING_TILT] = wave(k, 60, 10);
+        }
+        if (mt > 150 && mt < 190) t[OK_SPRING_BOB] = 30; /* boo! */
+        if (mt > 230) done(a, 150, 260);
+        break;
+    case OK_MOVE_WANDER:
+        yaw_free = 0;
+        if (a->stage == 0) {
+            if (mt == 1) a->phase = below(a, 3);
+            if (walk(a, a->room.spot_x[a->phase], a->room.spot_z[a->phase])) a->stage = 1, a->move_t = 0;
+        } else if (a->stage == 1) {
+            t[OK_SPRING_NOD] = -10;
+            t[OK_SPRING_TURN] = mt < 60 ? 20 * a->look : -20 * a->look;
+            if (mt > 140) a->stage = 2;
+        } else if (walk(a, a->room.home_x, a->room.home_z)) {
+            done(a, 120, 240);
+        }
+        break;
+    case OK_MOVE_SIGH:
+        if (mt < 90) {
+            t[OK_SPRING_BOB] = mt < 30 ? 10 : -16;
+            t[OK_SPRING_NOD] = mt < 30 ? -6 : 18;
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 1;
+            t[OK_SPRING_TAIL0] = -16;
+        }
+        if (mt > 130) done(a, 150, 240);
+        break;
+    case OK_MOVE_WAVE:
+        t[OK_SPRING_RAISE_R] = mt < 100 ? 128 + wave(k, 220, 24) : 9;
+        t[OK_SPRING_FWD_R] = mt < 100 ? 22 : 0;
+        t[OK_SPRING_TILT] = mt < 100 ? 9 : 0;
+        t[OK_SPRING_BOB] += mt < 100 ? wave(k, 110, 4) : 0;
+        if (mt > 120) done(a, 120, 240);
+        break;
+    case OK_MOVE_EAT: {
+        int bite = mt > 30 && mt < 150 ? (mt - 30) % 40 : 99;
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -18;
+        t[OK_SPRING_FWD_R] = 72;
+        t[OK_SPRING_FWD_L] = 40;
+        if (bite < 14) {
+            t[OK_SPRING_FWD_R] = 112;
+            t[OK_SPRING_RAISE_R] = -34;
+            t[OK_SPRING_NOD] = 8;
+        }
+        if (bite == 12) a->bites++;
+        t[OK_SPRING_NOD] += bite >= 14 && bite < 99 ? wave(k, 400, 3) : 0; /* chewing */
+        if (mt > 160) {
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 120;
+            t[OK_SPRING_FWD_R] = t[OK_SPRING_FWD_L] = 0;
+            t[OK_SPRING_BOB] = (mt - 160) < 20 ? (mt - 160) * 4 : 0;
+        }
+        if (mt > 210) done(a, 120, 200);
+        break;
+    }
+    case OK_MOVE_PLAY: {
+        int toss = mt % 72, air = toss - 14;
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 22;
+        t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 70;
+        if (air >= 0 && air < 46) {
+            t[OK_SPRING_BALL] = 4 * 340 * air * (46 - air) / (46 * 46);
+            t[OK_SPRING_NOD] = -(int)(t[OK_SPRING_BALL] / 18);
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 110;
+        } else if (toss < 14) {
+            t[OK_SPRING_BOB] = toss < 7 ? -10 : 8;
+        }
+        if (air == 46) a->bites++;
+        if (mt > 72 * 3) done(a, 90, 160);
+        break;
+    }
+    case OK_MOVE_PETTED:
+        if (mt < 150) {
+            t[OK_SPRING_TILT] = 14 + wave(k, 55, 10);
+            t[OK_SPRING_ROLL] = wave(k, 55, 6);
+            t[OK_SPRING_TAIL0] = wave(k, 160, 26);
+            t[OK_SPRING_BOB] = wave(k, 110, 8) < 0 ? 0 : wave(k, 110, 8);
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -10;
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 30;
+        }
+        if (mt > 170) done(a, 90, 180);
+        break;
+    case OK_MOVE_REFUSE:
+        if (mt < 60) {
+            t[OK_SPRING_TURN] = wave(k, 240, 24);
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = -38;
+            t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 62;
+            t[OK_SPRING_LEAN] = -5;
+        }
+        if (mt > 80) done(a, 120, 200);
+        break;
+    case OK_MOVE_TO_BED:
+        yaw_free = 0;
+        if (a->stage == 0) {
+            if (walk(a, a->room.bed_x, a->room.bed_z + 420)) a->stage = 1, a->move_t = 0;
+        } else {
+            t[OK_SPRING_LIE] = 100;
+            if (mt > 70) start(a, OK_MOVE_SLEEP);
+        }
+        t[OK_SPRING_NOD] = 12;
+        break;
+    case OK_MOVE_SLEEP:
+        t[OK_SPRING_LIE] = 100;
+        t[OK_SPRING_BOB] = wave(k, 10, 4);
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 20;
+        t[OK_SPRING_TURN] = 0;
+        t[OK_SPRING_TILT] = 10;
+        t[OK_SPRING_TAIL0] = 0;
+        a->x = a->room.bed_x;
+        a->z = a->room.bed_z + 420;
+        break;
+    case OK_MOVE_WAKE:
+        yaw_free = 0;
+        if (a->stage == 0) {
+            t[OK_SPRING_LIE] = 0;
+            if (mt > 70) a->stage = 1, a->move_t = 0;
+        } else if (a->stage == 1) {
+            t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = mt > 10 && mt < 80 ? 142 : 9;
+            t[OK_SPRING_LEAN] = mt < 80 ? -10 : 0;
+            t[OK_SPRING_SQUASH] = mt > 10 && mt < 80 ? 108 : 100;
+            if (mt > 110) a->stage = 2;
+        } else if (walk(a, a->room.home_x, a->room.home_z)) {
+            done(a, 120, 200);
+        }
+        break;
+    default: break;
+    }
+
+    /* Walking: legs and arms swing, the body bobs twice a stride. */
+    if (a->move == OK_MOVE_IDLE && (a->x != a->room.home_x || a->z != a->room.home_z)) walk(a, a->room.home_x, a->room.home_z);
+    if (a->walking) {
+        t[OK_SPRING_LEG_L] = wave(k, 150, 30);
+        t[OK_SPRING_LEG_R] = -wave(k, 150, 30);
+        t[OK_SPRING_FWD_L] = -wave(k, 150, 22);
+        t[OK_SPRING_FWD_R] = wave(k, 150, 22);
+        t[OK_SPRING_BOB] = (wave(k, 300, 12) < 0 ? -wave(k, 300, 12) : wave(k, 300, 12)) - 4;
+        t[OK_SPRING_LEAN] = 6;
+        t[OK_SPRING_ROLL] = wave(k, 150, 4);
+        t[OK_SPRING_TAIL0] = wave(k, 150, 14);
+        t[OK_SPRING_YAW] = ok_r3d_atan2(a->goal_x - a->x, a->goal_z - a->z) * 360 / OK_TURN;
+        if (t[OK_SPRING_YAW] > 180) t[OK_SPRING_YAW] -= 360;
+    } else {
+        t[OK_SPRING_YAW] = yaw_free ? 0 : a->s[OK_SPRING_YAW].x / Q;
+        if (a->move == OK_MOVE_TO_BED || a->move == OK_MOVE_SLEEP || a->move == OK_MOVE_WAKE) t[OK_SPRING_YAW] = 0;
+    }
+
+    /* Follow-through: the tail whips a beat behind, ears flop against a hop,
+     * the head lags the body. */
+    t[OK_SPRING_TAIL1] = a->s[OK_SPRING_TAIL0].x / Q;
+    t[OK_SPRING_TAIL2] = a->s[OK_SPRING_TAIL1].x / Q;
+    t[OK_SPRING_TAIL3] = a->s[OK_SPRING_TAIL2].x / Q;
+    t[OK_SPRING_EAR] = -a->s[OK_SPRING_BOB].v * 3 / 512;
+    t[OK_SPRING_NOD] -= a->s[OK_SPRING_BOB].v * 3 / 1280;
+
+    /* Turning the shortest way round. */
+    {
+        int32_t d = t[OK_SPRING_YAW] * Q - a->s[OK_SPRING_YAW].x;
+        while (d > 180 * Q) d -= 360 * Q, a->s[OK_SPRING_YAW].x += 360 * Q;
+        while (d < -180 * Q) d += 360 * Q, a->s[OK_SPRING_YAW].x -= 360 * Q;
+    }
+    for (i = 0; i < OK_SPRINGS; i++) {
+        ok_spring *s = &a->s[i];
+        s->v += (t[i] * Q - s->x) * stiff[i] / 2048 - s->v * damp[i] / 256;
+        s->x += s->v;
+    }
+
+    /* Blinks at random, now and then twice. */
+    if (a->blink > 0) a->blink--;
+    else if (below(a, 200) == 0) a->blink = below(a, 3) ? 7 : 20;
+}
+
 /* ------------------------------------------------------------------ body */
 
 static int next_id;
@@ -135,57 +541,14 @@ static void limb(int x0, int y0, int z0, int x1, int y1, int z1, int r)
     ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), H(r), 8);
 }
 
-/* sin of an angle, as a small integer in -n..n. */
-static int wave(uint32_t ticks, int speed, int n)
+static int val(const ok_monkey_anim *a, int s)
 {
-    return (int)((int64_t)ok_r3d_sin((int)(ticks * (uint32_t)speed)) * n / 4096);
+    return a->s[s].x / Q;
 }
 
-typedef struct {
-    int bob, lean, nod, turn, tilt, raise[2], forward[2], tail, shake;
-} rig;
-
-static void pose_rig(int pose, uint32_t t, rig *r)
+static int deg(const ok_monkey_anim *a, int s)
 {
-    memset(r, 0, sizeof *r);
-    r->tail = wave(t, 23, 8);
-    r->raise[0] = r->raise[1] = 8;
-    switch (pose) {
-    case OK_POSE_HAPPY: {
-        int hop = wave(t, 90, 60);
-        r->bob = hop < 0 ? -hop : hop;
-        r->raise[0] = 135 + wave(t, 180, 18);
-        r->raise[1] = 135 - wave(t, 180, 18);
-        r->tilt = wave(t, 45, 8);
-        r->tail = wave(t, 90, 20);
-        break;
-    }
-    case OK_POSE_HUNGRY:
-        r->lean = 6;
-        r->nod = 10;
-        r->raise[0] = r->raise[1] = -32;
-        r->forward[0] = r->forward[1] = 48;
-        r->shake = (t / 60) % 4 == 0 ? wave(t, 700, 8) : 0;
-        r->bob = wave(t, 30, 3);
-        break;
-    case OK_POSE_SLEEPY:
-        r->nod = 12 + wave(t, 14, 6);
-        r->tilt = 6;
-        r->bob = wave(t, 14, 5) - 6;
-        r->raise[0] = r->raise[1] = 3;
-        break;
-    case OK_POSE_ASLEEP:
-        r->bob = wave(t, 20, 4);
-        r->raise[0] = r->raise[1] = 25;
-        r->tail = 0;
-        break;
-    default:
-        r->bob = wave(t, 40, 5);
-        r->turn = wave(t, 9, 10);
-        r->tilt = wave(t, 13, 3);
-        r->raise[0] = 8 + wave(t, 40, 3);
-        r->raise[1] = 8 - wave(t, 40, 3);
-    }
+    return (int)((int64_t)a->s[s].x * OK_TURN / (360 * Q));
 }
 
 static void headphones(void)
@@ -193,7 +556,7 @@ static void headphones(void)
     static const int arc[7][2] = {{248, 640}, {235, 735}, {180, 830}, {0, 905}, {-180, 830}, {-235, 735}, {-248, 640}};
     int i;
     solid(RGB(6, 6, 7));
-    for (i = 0; i < 6; i++) limb(arc[i][0], arc[i][1], -20, arc[i + 1][0], arc[i + 1][1], -20, 18);
+    for (i = 0; i < 6; i++) limb(arc[i][0], arc[i][1], -20, arc[i + 1][0], arc[i + 1][1], -20, 20);
     solid(RGB(28, 9, 8));
     blob(-255, 625, -10, 70, 100, 100);
     blob(255, 625, -10, 70, 100, 100);
@@ -211,7 +574,37 @@ static void flower(void)
     blob(175, 830, 140, 26, 26, 18);
 }
 
-static void wear(int which)
+/* The smiley mask: on the side of the head, or pulled down over the face. */
+static void smiley(const ok_monkey_anim *a, ok_monkey_face *f)
+{
+    int m = val(a, OK_SPRING_MASK), cx, cy;
+    int x = 160 + (0 - 160) * m / 100, y = 775 + (610 - 775) * m / 100, z = 120 + (262 - 120) * m / 100;
+    int ry = 45 + (0 - 45) * m / 100, rz = -22 + (0 + 22) * m / 100;
+    ok_r3d_push();
+    ok_r3d_translate(P(x, y, z));
+    ok_r3d_rotate_y(DEG(ry));
+    ok_r3d_rotate_z(DEG(rz));
+    f->smiley_id = solid(RGB(31, 26, 3));
+    ok_r3d_ellipsoid(P(0, 0, 0), P(118, 118, 30), 14, 6);
+    solid(RGB(4, 4, 3));
+    limb(-112, 10, -10, -150, 30, -120, 9);
+    if (ok_r3d_project(P(0, 0, 31), &cx, &cy, NULL)) {
+        int ux, uy, vx, vy;
+        ok_r3d_project(P(100, 0, 31), &ux, &uy, NULL);
+        ok_r3d_project(P(0, 100, 31), &vx, &vy, NULL);
+        f->mask_x = cx;
+        f->mask_y = cy;
+        f->mask_ux = ux - cx;
+        f->mask_uy = uy - cy;
+        f->mask_vx = vx - cx;
+        f->mask_vy = vy - cy;
+    } else {
+        f->smiley_id = 0;
+    }
+    ok_r3d_pop();
+}
+
+static void wear(int which, const ok_monkey_anim *a, ok_monkey_face *f)
 {
     switch (which) {
     case OK_WEAR_HEADPHONES: headphones(); break;
@@ -229,7 +622,7 @@ static void wear(int which)
         solid(RGB(10, 22, 8));
         ok_r3d_push();
         ok_r3d_translate(P(60, 975, 0));
-        ok_r3d_rotate_z(DEG(25));
+        ok_r3d_rotate_z(DEG(25) + deg(a, OK_SPRING_EAR) / 2);
         blob(0, 0, 0, 75, 20, 42);
         ok_r3d_pop();
         break;
@@ -240,59 +633,79 @@ static void wear(int which)
         solid(RGB(29, 28, 26));
         blob(0, 885, -10, 28, 20, 28);
         break;
+    case OK_WEAR_SMILEY: smiley(a, f); break;
     default: break;
     }
 }
 
-void ok_monkey_draw(const ok_look *look, const uint16_t *skin, int pose, uint32_t ticks, ok_monkey_face *face)
+static void banana(int s, int bites)
 {
-    rig r;
-    int s, i, legs, top, hands;
-    pose_rig(pose, ticks, &r);
+    static const int pts[4][3] = {{50, -175, 35}, {48, -120, 70}, {32, -70, 96}, {8, -40, 110}};
+    int i, n = 3 - (bites > 3 ? 3 : bites);
+    solid(RGB(31, 27, 8));
+    for (i = 0; i < n; i++)
+        limb(s * pts[i][0], pts[i][1], pts[i][2], s * pts[i + 1][0], pts[i + 1][1], pts[i + 1][2], 26);
+    solid(RGB(14, 9, 3));
+    if (n) blob(s * pts[n][0], pts[n][1], pts[n][2], 18, 18, 18);
+}
+
+void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
+{
+    static const int tail[6][3] = {{0, 0, 0}, {150, -40, -40}, {100, 80, 30}, {20, 120, 50}, {-60, 80, 30}, {-45, -40, 10}};
+    int s, i, lie = val(a, OK_SPRING_LIE), sq = val(a, OK_SPRING_SQUASH), hands, mood = a->mood, mv = a->move;
+    int32_t x, y, z;
+    lie = lie < 0 ? 0 : lie > 100 ? 100 : lie;
     memset(face, 0, sizeof *face);
-    face->pose = pose;
-    face->wear = look->wear;
-    face->blink = pose == OK_POSE_IDLE ? ticks % 200 >= 193 : pose == OK_POSE_HUNGRY ? ticks % 260 >= 253 : 0;
-    face->open = pose == OK_POSE_SLEEPY && ticks % 300 > 230;
     next_id = 100;
+    /* Where it is: standing in the room, or on the bed. */
+    x = a->x + (a->room.bed_x - a->x) * lie / 100;
+    y = a->room.bed_y * lie / 100;
+    z = a->z + (a->room.bed_z - a->z) * lie / 100;
     ok_r3d_push();
-    if (pose == OK_POSE_ASLEEP) {
-        ok_r3d_translate(P(0, 150, 0));
-        ok_r3d_rotate_z(DEG(90));
-        ok_r3d_translate(P(0, -190, 0));
-    } else {
+    ok_r3d_translate(P(x, y, z));
+    if (lie < 60) {
         ok_r3d_material(0, 0, OK_R3D_SHADOW);
-        ok_r3d_disc(P(30, 5, 0), H(250), H(185), 12);
+        ok_r3d_disc(P(20, 5, 0), H(240 - lie), H(180 - lie), 12);
     }
-    ok_r3d_translate(P(r.shake, 0, 0));
-    /* Legs and feet. */
-    legs = ++next_id;
-    part(skin, OK_PART_LEG, legs);
-    limb(-75, 70, 0, -75, 190, 0, 55);
-    limb(75, 70, 0, 75, 190, 0, 55);
+    ok_r3d_rotate_y(deg(a, OK_SPRING_YAW) * (100 - lie) / 100);
+    if (lie) {
+        ok_r3d_translate(P(0, 160, 0));
+        ok_r3d_rotate_z(DEG(90) * lie / 100);
+        ok_r3d_translate(P(0, -190, 0));
+    }
+    /* Legs swing from the hips. */
     hands = ++next_id;
-    part(skin, OK_PART_HANDS, hands);
-    ok_r3d_ellipsoid(P(-85, 38, 35), P(70, 40, 95), 10, 6);
-    ok_r3d_ellipsoid(P(85, 38, 35), P(70, 40, 95), 10, 6);
-    /* The body bobs and leans around the hips. */
+    for (s = -1; s <= 1; s += 2) {
+        ok_r3d_push();
+        ok_r3d_translate(P(s * 75, 190, 0));
+        ok_r3d_rotate_x(-deg(a, s < 0 ? OK_SPRING_LEG_L : OK_SPRING_LEG_R));
+        part(skin, OK_PART_LEG, hands + 1);
+        limb(0, -120, 0, 0, 0, 0, 55);
+        part(skin, OK_PART_HANDS, hands);
+        ok_r3d_ellipsoid(P(s * 10, -152, 35), P(70, 40, 95), 10, 6);
+        ok_r3d_pop();
+    }
+    next_id++;
+    /* The body: bob, lean, roll and squash around the hips. */
     ok_r3d_push();
-    ok_r3d_translate(P(0, 170 + r.bob, 0));
-    ok_r3d_rotate_x(DEG(r.lean));
+    ok_r3d_translate(P(0, 170 + val(a, OK_SPRING_BOB), 0));
+    ok_r3d_rotate_x(deg(a, OK_SPRING_LEAN));
+    ok_r3d_rotate_z(deg(a, OK_SPRING_ROLL));
+    ok_r3d_scale(H(200 - sq), H(sq), H(200 - sq));
     ok_r3d_translate(P(0, -170, 0));
-    /* Tail, curling up on its right. */
+    /* Tail: each joint turns by its own, lagging spring. */
     part(skin, OK_PART_TAIL, ++next_id);
     ok_r3d_push();
     ok_r3d_translate(P(60, 160, -110));
-    ok_r3d_rotate_y(DEG(r.tail));
-    limb(150, -40, -40, 0, 0, 0, 32);
-    limb(250, 40, -10, 150, -40, -40, 32);
-    limb(270, 160, 40, 250, 40, -10, 32);
-    limb(210, 240, 70, 270, 160, 40, 32);
-    limb(165, 200, 80, 210, 240, 70, 32);
+    for (i = 0; i < 5; i++) {
+        static const int joint[5] = {OK_SPRING_TAIL0, OK_SPRING_TAIL1, OK_SPRING_TAIL2, OK_SPRING_TAIL3, OK_SPRING_TAIL3};
+        ok_r3d_rotate_z(deg(a, joint[i]) * (i ? 6 : 10) / 10);
+        limb(tail[i + 1][0], tail[i + 1][1], tail[i + 1][2], 0, 0, 0, 32 - i * 2);
+        ok_r3d_translate(P(tail[i + 1][0], tail[i + 1][1], tail[i + 1][2]));
+    }
     ok_r3d_pop();
-    top = ++next_id;
-    part(skin, OK_PART_TOP, top);
-    ok_r3d_ellipsoid(P(0, 290, 0), P(175, 170, 145), 12, 8);
+    part(skin, OK_PART_TOP, ++next_id);
+    ok_r3d_ellipsoid(P(0, 290, 0), P(175, 170 + wave(a->ticks, 17, 3), 145), 12, 8);
     if (look->top == OK_TOP_HOODIE) {
         part(skin, OK_PART_HOOD, ++next_id);
         ok_r3d_ellipsoid(P(0, 430, -75), P(150, 75, 100), 10, 6);
@@ -308,62 +721,113 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, int pose, uint32_
         int k = s > 0;
         ok_r3d_push();
         ok_r3d_translate(P(s * 150, 390, 10));
-        ok_r3d_rotate_z(DEG(s * r.raise[k]));
-        ok_r3d_rotate_x(-DEG(r.forward[k]));
+        ok_r3d_rotate_z(s * deg(a, k ? OK_SPRING_RAISE_R : OK_SPRING_RAISE_L));
+        ok_r3d_rotate_x(-deg(a, k ? OK_SPRING_FWD_R : OK_SPRING_FWD_L));
         part(skin, OK_PART_SLEEVE, ++next_id);
         limb(s * 45, -150, 30, 0, 0, 0, 48);
         part(skin, OK_PART_HANDS, hands);
         ok_r3d_ellipsoid(P(s * 50, -175, 35), P(55, 55, 55), 8, 6);
+        if (k && mv == OK_MOVE_EAT && a->move_t < 165) banana(s, a->bites);
         ok_r3d_pop();
+    }
+    if (mv == OK_MOVE_PLAY) {
+        int h = val(a, OK_SPRING_BALL);
+        solid(RGB(29, 10, 8));
+        ok_r3d_ellipsoid(P(0, 330 + h, 230 - h / 6), P(62, 62, 62), 10, 7);
+        solid(RGB(30, 29, 26));
+        ok_r3d_ellipsoid(P(0, 330 + h, 230 - h / 6), P(64, 16, 64), 10, 3);
     }
     /* Head, turning on the neck. */
     ok_r3d_push();
     ok_r3d_translate(P(0, 430, 0));
-    ok_r3d_rotate_y(DEG(r.turn));
-    ok_r3d_rotate_x(DEG(r.nod));
-    ok_r3d_rotate_z(DEG(r.tilt));
+    ok_r3d_rotate_y(deg(a, OK_SPRING_TURN));
+    ok_r3d_rotate_x(deg(a, OK_SPRING_NOD));
+    ok_r3d_rotate_z(deg(a, OK_SPRING_TILT));
     ok_r3d_translate(P(0, -430, 0));
     face->head_id = ++next_id;
     part(skin, OK_PART_HEAD, face->head_id);
     ok_r3d_ellipsoid(P(0, 630, 0), P(240, 230, 230), 12, 9);
-    if (look->wear != OK_WEAR_HEADPHONES) {
-        part(skin, OK_PART_EAR, face->head_id);
-        blob(-235, 640, -10, 45, 85, 85);
-        blob(235, 640, -10, 45, 85, 85);
-        part(skin, OK_PART_EAR_IN, ++next_id);
-        blob(-255, 640, 5, 25, 55, 55);
-        blob(255, 640, 5, 25, 55, 55);
-    }
+    if (look->wear != OK_WEAR_HEADPHONES)
+        for (s = -1; s <= 1; s += 2) {
+            ok_r3d_push();
+            ok_r3d_translate(P(s * 215, 650, -10));
+            ok_r3d_rotate_z(s * (deg(a, OK_SPRING_EAR) + wave(a->ticks, 29, 1) * DEG(2)));
+            part(skin, OK_PART_EAR, face->head_id);
+            blob(s * 20, -10, 0, 45, 85, 85);
+            part(skin, OK_PART_EAR_IN, face->head_id + 50);
+            blob(s * 40, -10, 15, 25, 55, 55);
+            ok_r3d_pop();
+        }
     face->mask_id = ++next_id;
     part(skin, OK_PART_EYES, face->mask_id);
     blob(-75, 645, 145, 105, 115, 95);
     blob(75, 645, 145, 105, 115, 95);
     part(skin, OK_PART_MUZZLE, face->mask_id);
     blob(0, 555, 170, 135, 95, 85);
-    wear(look->wear);
+    wear(look->wear, a, face);
     for (i = 0; i < 2; i++)
         if (!ok_r3d_project(P(i ? 75 : -75, 640, 232), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
     if (!ok_r3d_project(P(0, 540, 255), &face->mouth_x, &face->mouth_y, &face->mouth_z)) face->mouth_x = -100;
+    if (!ok_r3d_project(P(0, 900, 0), &face->top_x, &face->top_y, NULL)) face->top_x = -100;
     ok_r3d_pop();
     ok_r3d_pop();
+    /* Tucked in. */
+    if (lie > 50) {
+        solid(RGB(7, 13, 24));
+        ok_r3d_ellipsoid(P(-10, 210, 25), P(195, 265, 200), 12, 7);
+    }
     ok_r3d_pop();
+
+    /* The face for this moment. */
+    face->glasses = look->wear == OK_WEAR_GLASSES;
+    face->look = a->move == OK_MOVE_LOOK ? (val(a, OK_SPRING_TURN) > 12 ? 1 : val(a, OK_SPRING_TURN) < -12 ? -1 : 0) : 0;
+    face->eyes = 'o';
+    face->mouth = 's';
+    switch (mood) {
+    case OK_POSE_HUNGRY: face->eyes = 'd', face->mouth = 'w'; break;
+    case OK_POSE_SLEEPY: face->eyes = 'h', face->mouth = a->ticks % 420 > 330 ? 'y' : '.'; break;
+    case OK_POSE_BORED: face->eyes = 'h', face->mouth = '-'; break;
+    case OK_POSE_LONELY: face->eyes = 'o', face->mouth = '.'; break;
+    case OK_POSE_HAPPY: face->mouth = 'O'; break;
+    default: break;
+    }
+    switch (mv) {
+    case OK_MOVE_HOP: face->eyes = 'j', face->mouth = 'O'; break;
+    case OK_MOVE_STRETCH: if (a->move_t > 15 && a->move_t < 95) face->eyes = 's', face->mouth = 'y'; break;
+    case OK_MOVE_PEEK: face->mouth = a->move_t > 150 ? 'O' : 's', face->eyes = a->move_t > 150 ? 'j' : 'o'; break;
+    case OK_MOVE_SIGH: face->eyes = 'h', face->mouth = a->move_t < 40 ? 'O' : '-'; break;
+    case OK_MOVE_WAVE: face->eyes = 'o', face->mouth = 'O'; break;
+    case OK_MOVE_SCRATCH: face->eyes = 'h'; break;
+    case OK_MOVE_EAT: face->eyes = a->move_t > 160 ? 'j' : 'o', face->mouth = a->move_t > 160 ? 'O' : (a->ticks / 6) % 2 ? 'c' : '.'; break;
+    case OK_MOVE_PLAY: face->eyes = val(a, OK_SPRING_BALL) > 60 ? 'u' : 'j', face->mouth = 'O'; break;
+    case OK_MOVE_PETTED: face->eyes = 'j', face->mouth = 'O', face->blush = 1, face->hearts = a->move_t; break;
+    case OK_MOVE_REFUSE: face->eyes = 's', face->mouth = '-'; break;
+    case OK_MOVE_TO_BED: face->eyes = 'h', face->mouth = '.'; break;
+    case OK_MOVE_SLEEP: face->eyes = 's', face->mouth = '.', face->zzz = (int)(a->ticks % 1000000); break;
+    case OK_MOVE_WAKE: face->eyes = a->stage < 2 ? 'h' : 'o', face->mouth = a->stage == 1 ? 'y' : 's'; break;
+    default: break;
+    }
+    if (a->blink && (face->eyes == 'o' || face->eyes == 'd' || face->eyes == 'u')) face->eyes = 'b';
 }
 
 /* ------------------------------------------------------------------ face */
 
-static void sprite(uint16_t *frame, const ok_monkey_face *f, int cx, int cy, const char *const rows[], int n)
+static void sprite(uint16_t *frame, const ok_monkey_face *f, int cx, int cy, const char *const rows[], int n, int masked)
 {
     int r, c, w = (int)strlen(rows[0]);
     for (r = 0; r < n; r++)
         for (c = 0; c < w; c++) {
             int x = cx - w / 2 + c, y = cy - n / 2 + r, id = ok_r3d_id_at(x, y);
             char k = rows[r][c];
-            if (k == '.' || (id != f->head_id && id != f->mask_id)) continue;
-            frame[y * OK_R3D_W + x] = k == '#' ? INK : k == 'o' ? WHITE : k == 'p' ? BLUSH : RGB(27, 11, 11);
+            if (k == '.' || x < 0 || y < 0 || x >= OK_R3D_W || y >= OK_R3D_H) continue;
+            if (masked && id != f->head_id && id != f->mask_id) continue;
+            frame[y * OK_R3D_W + x] = k == '#' ? INK : k == 'o' ? WHITE : k == 'p' ? BLUSH : k == 'h' ? RGB(30, 9, 12)
+                                      : k == 'z' ? RGB(26, 27, 31) : RGB(27, 11, 11);
         }
 }
 
 static const char *const eye_open[] = {".##.", "#oo#", "#o##", "####", "####", ".##."};
+static const char *const eye_up[] = {".##.", "#oo#", "#oo#", "#o##", "####", ".##."};
 static const char *const eye_down[] = {".##.", "####", "#o##", "#oo#", ".##."};
 static const char *const eye_half[] = {"####", "#o##", ".##."};
 static const char *const eye_shut[] = {"#..#", ".##."};
@@ -374,54 +838,96 @@ static const char *const mouth_open[] = {"#####", "#rrr#", ".###."};
 static const char *const mouth_wobble[] = {".#.#.", "#.#.#"};
 static const char *const mouth_yawn[] = {".##.", "#rr#", "#rr#", ".##."};
 static const char *const mouth_small[] = {".##."};
+static const char *const mouth_flat[] = {"####"};
+static const char *const mouth_chew[] = {".##.", "#rr#", ".##."};
 static const char *const cheek[] = {"pp"};
+static const char *const blush[] = {"pppp"};
 static const char *const brow_l[] = {"..##", "##.."};
 static const char *const brow_r[] = {"##..", "..##"};
 static const char *const glasses[] = {"..####..", ".#....#.", "#......#", "#......#", "#......#", "#......#",
                                       ".#....#.", "..####.."};
 static const char *const bridge[] = {"###"};
+static const char *const heart[] = {".hh.hh.", "hhhhhhh", "hhhhhhh", ".hhhhh.", "..hhh..", "...h..."};
+static const char *const zed[] = {"zzzz", "..z.", ".z..", "zzzz"};
+static const char *const zed_big[] = {"zzzzz", "...z.", "..z..", ".z...", "zzzzz"};
 
 /* A face point counts only if nothing stands in front of it (the head turned
- * away, an arm across it). */
+ * away, an arm or the mask across it). */
 static int seen(int x, int y, int32_t z)
 {
     int32_t d = ok_r3d_depth_at(x, y);
     return x > -50 && d && z >= d - d / 32;
 }
 
+/* The smiley's face: drawn in the mask's own plane, so it turns with it. */
+static void smiley_face(uint16_t *frame, const ok_monkey_face *f)
+{
+    int64_t det = (int64_t)f->mask_ux * f->mask_vy - (int64_t)f->mask_uy * f->mask_vx;
+    int r = (f->mask_ux < 0 ? -f->mask_ux : f->mask_ux) + (f->mask_uy < 0 ? -f->mask_uy : f->mask_uy) +
+            (f->mask_vx < 0 ? -f->mask_vx : f->mask_vx) + (f->mask_vy < 0 ? -f->mask_vy : f->mask_vy) + 2, x, y;
+    if (!f->smiley_id || !det) return;
+    for (y = f->mask_y - r; y <= f->mask_y + r; y++)
+        for (x = f->mask_x - r; x <= f->mask_x + r; x++) {
+            int64_t dx = x - f->mask_x, dy = y - f->mask_y;
+            /* Local coordinates, 100 = the rim: d = a U + b V. */
+            int64_t a = (dx * f->mask_vy - dy * f->mask_vx) * 100 / det;
+            int64_t b = (dy * f->mask_ux - dx * f->mask_uy) * 100 / det;
+            int64_t e, rr;
+            int ink = 0;
+            if (ok_r3d_id_at(x, y) != f->smiley_id) continue;
+            e = (a < 0 ? -a : a) - 34;
+            if (e * e * 24 * 24 + (b - 28) * (b - 28) * 11 * 11 < 11 * 11 * 24 * 24) ink = 1; /* eyes */
+            rr = a * a + (b - 4) * (b - 4);
+            if (rr > 44 * 44 && rr < 60 * 60 && b < -10) ink = 1; /* the smile */
+            if (ink) frame[y * OK_R3D_W + x] = INK;
+        }
+}
+
 void ok_monkey_face_draw(uint16_t *frame, const ok_monkey_face *f)
 {
     int i;
+    smiley_face(frame, f);
     for (i = 0; i < 2; i++) {
-        int x = f->eye_x[i], y = f->eye_y[i];
-        if (!seen(x, y, f->eye_z[i])) continue;
-        switch (f->pose) {
-        case OK_POSE_HAPPY: sprite(frame, f, x, y, eye_joy, 2); break;
-        case OK_POSE_SLEEPY: sprite(frame, f, x, y + 1, eye_half, 3); break;
-        case OK_POSE_ASLEEP: sprite(frame, f, x, y + 1, eye_shut, 2); break;
-        case OK_POSE_HUNGRY:
-            if (f->blink) sprite(frame, f, x, y + 1, eye_blink, 1);
-            else sprite(frame, f, x, y, eye_down, 5);
-            sprite(frame, f, x + (i ? 1 : -1), y - 5, i ? brow_r : brow_l, 2);
+        int x = f->eye_x[i] + f->look, y = f->eye_y[i];
+        if (!seen(f->eye_x[i], y, f->eye_z[i])) continue;
+        switch (f->eyes) {
+        case 'j': sprite(frame, f, x, y, eye_joy, 2, 1); break;
+        case 'h': sprite(frame, f, x, y + 1, eye_half, 3, 1); break;
+        case 's': sprite(frame, f, x, y + 1, eye_shut, 2, 1); break;
+        case 'b': sprite(frame, f, x, y + 1, eye_blink, 1, 1); break;
+        case 'u': sprite(frame, f, x, y, eye_up, 6, 1); break;
+        case 'd':
+            sprite(frame, f, x, y, eye_down, 5, 1);
+            sprite(frame, f, x + (i ? 1 : -1), y - 5, i ? brow_r : brow_l, 2, 1);
             break;
-        default:
-            if (f->blink) sprite(frame, f, x, y + 1, eye_blink, 1);
-            else sprite(frame, f, x, y, eye_open, 6);
+        default: sprite(frame, f, x, y, eye_open, 6, 1);
         }
-        if (f->pose != OK_POSE_HUNGRY) sprite(frame, f, x + (i ? 4 : -4), y + 5, cheek, 1);
-        if (f->wear == OK_WEAR_GLASSES) sprite(frame, f, x, y, glasses, 8);
+        if (f->eyes != 'd') sprite(frame, f, f->eye_x[i] + (i ? 4 : -4), y + 5, f->blush ? blush : cheek, 1, 1);
     }
-    if (f->wear == OK_WEAR_GLASSES && seen(f->eye_x[0], f->eye_y[0], f->eye_z[0]) && seen(f->eye_x[1], f->eye_y[1], f->eye_z[1]))
-        sprite(frame, f, (f->eye_x[0] + f->eye_x[1]) / 2, f->eye_y[0] - 1, bridge, 1);
-    if (!seen(f->mouth_x, f->mouth_y, f->mouth_z)) return;
-    switch (f->pose) {
-    case OK_POSE_HAPPY: sprite(frame, f, f->mouth_x, f->mouth_y, mouth_open, 3); break;
-    case OK_POSE_HUNGRY: sprite(frame, f, f->mouth_x, f->mouth_y, mouth_wobble, 2); break;
-    case OK_POSE_SLEEPY:
-        if (f->open) sprite(frame, f, f->mouth_x, f->mouth_y + 1, mouth_yawn, 4);
-        else sprite(frame, f, f->mouth_x, f->mouth_y, mouth_small, 1);
-        break;
-    case OK_POSE_ASLEEP: sprite(frame, f, f->mouth_x, f->mouth_y, mouth_small, 1); break;
-    default: sprite(frame, f, f->mouth_x, f->mouth_y, mouth_smile, 2);
+    if (f->glasses && seen(f->eye_x[0], f->eye_y[0], f->eye_z[0]) && seen(f->eye_x[1], f->eye_y[1], f->eye_z[1])) {
+        for (i = 0; i < 2; i++) sprite(frame, f, f->eye_x[i], f->eye_y[i], glasses, 8, 1);
+        sprite(frame, f, (f->eye_x[0] + f->eye_x[1]) / 2, f->eye_y[0] - 1, bridge, 1, 1);
     }
+    if (seen(f->mouth_x, f->mouth_y, f->mouth_z)) {
+        switch (f->mouth) {
+        case 'O': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_open, 3, 1); break;
+        case 'w': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_wobble, 2, 1); break;
+        case 'y': sprite(frame, f, f->mouth_x, f->mouth_y + 1, mouth_yawn, 4, 1); break;
+        case '.': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_small, 1, 1); break;
+        case '-': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_flat, 1, 1); break;
+        case 'c': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_chew, 3, 1); break;
+        default: sprite(frame, f, f->mouth_x, f->mouth_y, mouth_smile, 2, 1);
+        }
+    }
+    /* Hearts rise while it is petted; z's drift up while it sleeps. */
+    if (f->hearts && f->top_x > -50)
+        for (i = 0; i < 3; i++) {
+            int t = (f->hearts + i * 40) % 120;
+            if (t < 100) sprite(frame, f, f->top_x + (i - 1) * 14 + (t / 12 % 2 ? 1 : -1), f->top_y - t / 3, heart, 6, 0);
+        }
+    if (f->zzz && f->top_x > -50)
+        for (i = 0; i < 2; i++) {
+            int t = (f->zzz + i * 90) % 180;
+            sprite(frame, f, f->top_x + 12 + t / 10, f->top_y - 4 - t / 5, i ? zed_big : zed, i ? 5 : 4, 0);
+        }
 }

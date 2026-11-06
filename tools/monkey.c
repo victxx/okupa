@@ -32,10 +32,27 @@ static void centred(uint16_t *canvas, int cw, int cx, int y, const char *s, uint
     text(canvas, cw, cx - (int)strlen(s) * 4, y, s, c);
 }
 
-/* One view of the monkey, the camera turned round it by yaw. */
-static void shot(const ok_look *look, const uint16_t *tex, int pose, uint32_t ticks, int yaw)
+/* One view of the monkey, the camera turned round it by yaw: in a mood,
+ * doing a move (or -1 for whatever it does by itself), ticks into it. */
+static void shot(const ok_look *look, const uint16_t *tex, int pose, int move, int ticks, int yaw)
 {
+    static ok_monkey_anim a;
+    ok_monkey_room room;
     ok_monkey_face face;
+    int i;
+    memset(&room, 0, sizeof room);
+    room.bed_x = 250;
+    room.bed_z = -420;
+    ok_monkey_init(&a, &room, pose == OK_POSE_ASLEEP, 7);
+    a.next_idle = 1000000;
+    if (move == OK_MOVE_EAT) ok_monkey_event(&a, OK_EVENT_FEED);
+    if (move == OK_MOVE_PLAY) ok_monkey_event(&a, OK_EVENT_PLAY);
+    if (move == OK_MOVE_PETTED) ok_monkey_event(&a, OK_EVENT_PET);
+    if (move == OK_MOVE_PEEK || move == OK_MOVE_STRETCH || move == OK_MOVE_WAVE || move == OK_MOVE_HOP) {
+        a.move = move;
+        a.move_t = 0;
+    }
+    for (i = 0; i < ticks; i++) ok_monkey_step(&a, pose, look->wear);
     ok_r3d_begin(frame, CHARCOAL);
     ok_r3d_camera(OK_V3(0, 6.2, 28), OK_V3(0, 4.7, 0), 300);
     ok_r3d_light(OK_V3(-0.5, 1.0, 0.7), OK_V3(0.48, 0.46, 0.42), OK_V3(0.62, 0.62, 0.66));
@@ -43,8 +60,7 @@ static void shot(const ok_look *look, const uint16_t *tex, int pose, uint32_t ti
     ok_r3d_disc(OK_V3(0, 0, 0), OK_FX(4.5), OK_FX(3.2), 20);
     ok_r3d_push();
     ok_r3d_rotate_y(yaw);
-    if (pose == OK_POSE_ASLEEP) ok_r3d_translate(OK_V3(2.5, 0.2, 0));
-    ok_monkey_draw(look, tex, pose, ticks, &face);
+    ok_monkey_draw(look, tex, &a, &face);
     ok_r3d_pop();
     ok_r3d_finish();
     ok_monkey_face_draw(frame, &face);
@@ -63,18 +79,19 @@ static void cell(uint16_t *canvas, int cw, int col, int row, int top, const char
 
 static void looks(const char *dir)
 {
-    enum { COLS = 4, CW = 8 + COLS * (CELL_W + 8), CH = 32 + 5 * (CELL_H + 22) + 32 };
+    enum { COLS = 4, CW = 8 + COLS * (CELL_W + 8), CH = 32 + 6 * (CELL_H + 22) + 52 };
     static uint16_t canvas[CW * CH];
-    static const char *moods[OK_POSES] = {"Idle", "Happy", "Hungry", "Sleepy", "Asleep"};
+    static const char *moods[12] = {"Idle", "Hungry", "Sleepy", "Bored", "Eat", "Play", "Petted", "Peekaboo", "Hop",
+                                    "Stretch", "Wave", "Asleep"};
     char path[512];
     ok_look look = {OK_WEAR_NONE, OK_TOP_HOODIE, 0};
     int i;
     for (i = 0; i < CW * CH; i++) canvas[i] = CHARCOAL;
-    text(canvas, CW, 8, 8, "Instead of the beanie: what it can wear", LABEL);
+    text(canvas, CW, 8, 8, "What it can wear", LABEL);
     for (i = 0; i < OK_WEARS; i++) {
         look.wear = (uint8_t)i;
         ok_monkey_skin(&look, skin);
-        shot(&look, skin, OK_POSE_IDLE, 0, 0);
+        shot(&look, skin, OK_POSE_IDLE, -1, 40, 0);
         cell(canvas, CW, i % COLS, i / COLS, 28, ok_wear_name(i));
     }
     text(canvas, CW, 8, 28 + 2 * (CELL_H + 22), "Tops, any of 8 colours", LABEL);
@@ -84,7 +101,7 @@ static void looks(const char *dir)
         static const char *names[4] = {"Hoodie", "T-shirt", "Stripes", "T-shirt"};
         for (i = 0; i < 4; i++) {
             ok_monkey_skin(&tops[i], skin);
-            shot(&tops[i], skin, OK_POSE_IDLE, 0, 0);
+            shot(&tops[i], skin, OK_POSE_IDLE, -1, 40, 0);
             cell(canvas, CW, i, 2, 48, names[i]);
         }
         for (i = 0; i < OK_COLOURS; i++) {
@@ -93,14 +110,18 @@ static void looks(const char *dir)
                 for (x = 0; x < 18; x++) canvas[(y0 - 2 + y) * CW + x0 + x] = ok_top_colour(i);
         }
     }
-    text(canvas, CW, 8, 48 + 3 * (CELL_H + 22), "Moods", LABEL);
-    look.wear = OK_WEAR_HEADPHONES;
+    text(canvas, CW, 8, 48 + 3 * (CELL_H + 22), "Moods and moves", LABEL);
+    look.wear = OK_WEAR_SMILEY;
     look.top = OK_TOP_TEE;
     look.colour = 1;
     ok_monkey_skin(&look, skin);
-    for (i = 0; i < OK_POSES; i++) {
-        uint32_t t = i == OK_POSE_HAPPY ? 8 : i == OK_POSE_SLEEPY ? 250 : 30;
-        shot(&look, skin, i, t, 0);
+    for (i = 0; i < 12; i++) {
+        static const int pose[12] = {OK_POSE_IDLE, OK_POSE_HUNGRY, OK_POSE_SLEEPY, OK_POSE_BORED, OK_POSE_IDLE, OK_POSE_IDLE,
+                                     OK_POSE_IDLE, OK_POSE_IDLE, OK_POSE_IDLE, OK_POSE_IDLE, OK_POSE_IDLE, OK_POSE_ASLEEP};
+        static const int move[12] = {-1, -1, -1, -1, OK_MOVE_EAT, OK_MOVE_PLAY, OK_MOVE_PETTED, OK_MOVE_PEEK, OK_MOVE_HOP,
+                                     OK_MOVE_STRETCH, OK_MOVE_WAVE, -1};
+        static const int when[12] = {40, 60, 380, 60, 52, 40, 60, 80, 22, 60, 50, 60};
+        shot(&look, skin, pose[i], move[i], when[i], 0);
         cell(canvas, CW, i % COLS, 3 + i / COLS, 68, moods[i]);
     }
     snprintf(path, sizeof path, "%s/monkey-looks.png", dir);
@@ -168,11 +189,11 @@ static void map(const char *dir)
     }
     for (i = 0; i < CW * CH; i++) canvas[i] = CHARCOAL;
     text(canvas, CW, 8, 8, "Test pattern on the skin", LABEL);
-    shot(&look, skin, OK_POSE_IDLE, 0, 0);
+    shot(&look, skin, OK_POSE_IDLE, -1, 1, 0);
     cell(canvas, CW, 0, 0, 28, "front");
-    shot(&look, skin, OK_POSE_IDLE, 0, OK_TURN / 4);
+    shot(&look, skin, OK_POSE_IDLE, -1, 1, OK_TURN / 4);
     cell(canvas, CW, 1, 0, 28, "side");
-    shot(&look, skin, OK_POSE_IDLE, 0, OK_TURN / 2);
+    shot(&look, skin, OK_POSE_IDLE, -1, 1, OK_TURN / 2);
     cell(canvas, CW, 2, 0, 28, "back");
     snprintf(path, sizeof path, "%s/monkey-skin-map.png", dir);
     png_write(path, canvas, CW, CH, 2);
