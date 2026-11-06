@@ -25,6 +25,7 @@ typedef struct {
 #define OK_R3D_EDGE 2   /* outlined where it stands in front of another object */
 #define OK_R3D_SHADOW 4 /* darkens what is already drawn, writes no depth */
 #define OK_R3D_BOTH 8   /* both sides visible */
+#define OK_R3D_TEXTURED 16 /* colours from the texture, lit like the rest */
 
 static inline ok_v3 ok_v3_make(ok_fx x, ok_fx y, ok_fx z)
 {
@@ -48,6 +49,13 @@ void ok_r3d_light(ok_v3 to_light, ok_v3 light, ok_v3 ambient);
 /* colour is a DS colour; id names the object for outlines (1..254). */
 void ok_r3d_material(uint16_t colour, int id, int flags);
 
+/* The texture for TEXTURED materials: texels of DS colours, stride texels
+ * per row. Each ellipsoid or capsule wraps around one rectangle of it: left
+ * to right once around (the front in the middle, the seam at the back), top
+ * to bottom from its top pole to its bottom one. w must be a power of two. */
+void ok_r3d_texture(const uint16_t *texels, int stride);
+void ok_r3d_uv(int x, int y, int w, int h);
+
 /* The model transform, a small stack. */
 void ok_r3d_push(void);
 void ok_r3d_pop(void);
@@ -68,8 +76,11 @@ void ok_r3d_quad(ok_v3 a, ok_v3 b, ok_v3 c, ok_v3 d);
 
 /* Draws the outlines; the frame is then complete. */
 void ok_r3d_finish(void);
-/* Where a point (in the current transform) lands on screen; 0 if behind. */
-int ok_r3d_project(ok_v3 p, int *x, int *y);
+/* Where a point (in the current transform) lands on screen; 0 if behind the
+ * camera. depth (may be NULL) is comparable with ok_r3d_depth_at. */
+int ok_r3d_project(ok_v3 p, int *x, int *y, int32_t *depth);
+/* Depth drawn at a pixel: larger is nearer, 0 = nothing. */
+int32_t ok_r3d_depth_at(int x, int y);
 /* The object drawn at a pixel (0 = background). */
 int ok_r3d_id_at(int x, int y);
 /* Triangles drawn since ok_r3d_begin (the DSi hardware takes about 2048). */

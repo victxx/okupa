@@ -83,7 +83,7 @@ static void sprite(const face_mask *m, int cx, int cy, const char *rows[], int n
 
 static void at(ok_v3 p, int *x, int *y)
 {
-    if (!ok_r3d_project(p, x, y)) *x = *y = -100;
+    if (!ok_r3d_project(p, x, y, NULL)) *x = *y = -100;
 }
 
 /* ---------------------------------------------------------------- A: monkey */

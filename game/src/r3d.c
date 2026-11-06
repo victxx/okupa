@@ -38,6 +38,7 @@ typedef struct {
     int32_t x, y;  /* screen, 1/16 pixel */
     int32_t z;     /* 2^34 / depth: larger is nearer */
     int32_t l;     /* light, Q12 */
+    int32_t u, v;  /* texel, 1/16 */
     int ok;
     ok_v3 w, n;    /* world position and normal */
 } vert;
@@ -58,6 +59,9 @@ static uint16_t tone[4];
 static int cur_id, cur_flags;
 static vert vb[MAX_VERTS];
 static int triangles;
+static const uint16_t *tex;
+static int tex_stride, uv_x, uv_y, uv_w = 1, uv_h = 1;
+static uint8_t lut[4][3][32]; /* channel value under each tone */
 
 ok_fx ok_fx_mul(ok_fx a, ok_fx b)
 {
@@ -182,6 +186,18 @@ void ok_r3d_material(uint16_t colour, int id, int flags)
                       (int)((int64_t)g * (ambient_rgb.y + light_rgb.y * k / 3) / 4096),
                       (int)((int64_t)b * (ambient_rgb.z + light_rgb.z * k / 3) / 4096));
     }
+    for (k = 0; k < 4 && (flags & OK_R3D_TEXTURED); k++) {
+        int c, i;
+        for (c = 0; c < 3; c++) {
+            ok_fx f = c == 0 ? ambient_rgb.x + light_rgb.x * k / 3 : c == 1 ? ambient_rgb.y + light_rgb.y * k / 3
+                                                                      : ambient_rgb.z + light_rgb.z * k / 3;
+            for (i = 0; i < 32; i++) {
+                int v = (int)((int64_t)i * f / 4096);
+                lut[k][c][i] = (uint8_t)(v > 31 ? 31 : v);
+            }
+        }
+    }
+    if ((flags & OK_R3D_TEXTURED) && !tex) flags &= ~OK_R3D_TEXTURED;
     cur_id = id & 255;
     cur_flags = flags;
     if (flags & OK_R3D_EDGE) {
@@ -189,6 +205,20 @@ void ok_r3d_material(uint16_t colour, int id, int flags)
         edge_on[cur_id] = 1;
         edge_colour[cur_id] = rgb((t & 31) * 9 / 20, (t >> 5 & 31) * 9 / 20, (t >> 10 & 31) * 9 / 20 + 1);
     }
+}
+
+void ok_r3d_texture(const uint16_t *texels, int stride)
+{
+    tex = texels;
+    tex_stride = stride;
+}
+
+void ok_r3d_uv(int x, int y, int w, int h)
+{
+    uv_x = x;
+    uv_y = y;
+    uv_w = w > 0 ? w : 1;
+    uv_h = h > 0 ? h : 1;
 }
 
 void ok_r3d_push(void)
@@ -256,6 +286,7 @@ static void put(int k, ok_v3 p, ok_v3 n)
     vy = dot(d, cam.u);
     vz = dot(d, cam.f);
     v->ok = 0;
+    v->u = v->v = 0;
     if (vz < NEAR) return;
     sx = (int64_t)W * 8 + (int64_t)vx * cam.focal * 16 / vz;
     sy = (int64_t)H * 8 - (int64_t)vy * cam.focal * 16 / vz;
@@ -291,7 +322,8 @@ static void raster(const vert *a, const vert *b, const vert *c)
     int64_t area = (int64_t)(b->x - a->x) * (c->y - a->y) - (int64_t)(b->y - a->y) * (c->x - a->x);
     int32_t minx, maxx, miny, maxy, x, y, x0, x1, y0, y1;
     int64_t dax, dbx, dcx, day, dby, dcy, wa0, wb0, wc0;
-    int64_t dzdx, dldx;
+    int64_t dzdx, dldx, dudx = 0, dvdx = 0;
+    int textured = cur_flags & OK_R3D_TEXTURED;
     if (area == 0) return;
     if (area > 0) {
         if (!(cur_flags & OK_R3D_BOTH)) return;
@@ -330,8 +362,12 @@ static void raster(const vert *a, const vert *b, const vert *c)
     }
     dzdx = (dax * a->z + dbx * b->z + dcx * c->z) * 256 / area;
     dldx = (dax * a->l + dbx * b->l + dcx * c->l) * 256 / area;
+    if (textured) {
+        dudx = (dax * a->u + dbx * b->u + dcx * c->u) * 256 / area;
+        dvdx = (dax * a->v + dbx * b->v + dcx * c->v) * 256 / area;
+    }
     for (y = y0; y <= y1; y++) {
-        int64_t wa = wa0 + day * (y - y0), wb = wb0 + dby * (y - y0), wc = wc0 + dcy * (y - y0), z, l;
+        int64_t wa = wa0 + day * (y - y0), wb = wb0 + dby * (y - y0), wc = wc0 + dcy * (y - y0), z, l, u = 0, v = 0;
         uint16_t *row = fb + y * W;
         int32_t *zrow = zbuf + y * W;
         uint8_t *irow = ids + y * W;
@@ -340,7 +376,11 @@ static void raster(const vert *a, const vert *b, const vert *c)
         if (x > x1) continue;
         z = lerp8(wa, wb, wc, a->z, b->z, c->z, area);
         l = lerp8(wa, wb, wc, a->l, b->l, c->l, area);
-        for (; x <= x1; x++, wa += dax, wb += dbx, wc += dcx, z += dzdx, l += dldx) {
+        if (textured) {
+            u = lerp8(wa, wb, wc, a->u, b->u, c->u, area);
+            v = lerp8(wa, wb, wc, a->v, b->v, c->v, area);
+        }
+        for (; x <= x1; x++, wa += dax, wb += dbx, wc += dcx, z += dzdx, l += dldx, u += dudx, v += dvdx) {
             if ((wa | wb | wc) < 0) break;
             if ((int32_t)(z >> 8) <= zrow[x]) continue;
             if (cur_flags & OK_R3D_SHADOW) {
@@ -350,7 +390,15 @@ static void raster(const vert *a, const vert *b, const vert *c)
             }
             zrow[x] = (int32_t)(z >> 8);
             irow[x] = (uint8_t)cur_id;
-            row[x] = tone[tone_of((int32_t)(l >> 8))];
+            if (textured) {
+                int k = tone_of((int32_t)(l >> 8)), tu = (int)(u >> 12), tv = (int)(v >> 12);
+                uint16_t t;
+                tv = tv < 0 ? 0 : tv >= uv_h ? uv_h - 1 : tv;
+                t = tex[(uv_y + tv) * tex_stride + uv_x + (tu & (uv_w - 1))];
+                row[x] = (uint16_t)(0x8000u | lut[k][0][t & 31] | lut[k][1][t >> 5 & 31] << 5 | lut[k][2][t >> 10 & 31] << 10);
+            } else {
+                row[x] = tone[tone_of((int32_t)(l >> 8))];
+            }
         }
     }
 }
@@ -412,6 +460,13 @@ static ok_v3 sphere_at(int i, int stacks, int j, int slices)
     return ok_v3_make(ok_fx_mul(s, ok_r3d_cos(ph)), ok_r3d_cos(th), ok_fx_mul(s, ok_r3d_sin(ph)));
 }
 
+/* Once around from the back, so the front lands in the middle of the strip. */
+static void set_uv(int k, int i, int rows, int j, int slices)
+{
+    vb[k].u = (int32_t)(((int64_t)slices * 3 - (int64_t)j * 4) * uv_w * 16 / (4 * slices));
+    vb[k].v = (int32_t)((int64_t)i * uv_h * 16 / rows);
+}
+
 static void grid(int rows, int slices)
 {
     int i, j;
@@ -433,6 +488,7 @@ void ok_r3d_ellipsoid(ok_v3 c, ok_v3 r, int slices, int stacks)
             ok_v3 n = norm(ok_v3_make((ok_fx)((int64_t)s.x * 4096 / r.x), (ok_fx)((int64_t)s.y * 4096 / r.y),
                                       (ok_fx)((int64_t)s.z * 4096 / r.z)));
             put(i * (slices + 1) + j, p, n);
+            set_uv(i * (slices + 1) + j, i, stacks, j, slices);
         }
     grid(stacks, slices);
 }
@@ -450,6 +506,7 @@ void ok_r3d_capsule(ok_v3 a, ok_v3 b, ok_fx radius, int slices)
             ok_v3 s = sphere_at(i <= HALF ? i : i - 1, 2 * HALF, j, slices);
             ok_v3 n = add(add(scale(u, s.x), scale(w, s.y)), scale(v, s.z));
             put(i * (slices + 1) + j, add(i <= HALF ? b : a, scale(n, radius)), n);
+            set_uv(i * (slices + 1) + j, i, rows, j, slices);
         }
     grid(rows, slices);
 }
@@ -501,13 +558,20 @@ void ok_r3d_finish(void)
         }
 }
 
-int ok_r3d_project(ok_v3 p, int *x, int *y)
+int ok_r3d_project(ok_v3 p, int *x, int *y, int32_t *depth)
 {
     put(0, p, ok_v3_make(0, 4096, 0));
     if (!vb[0].ok) return 0;
     *x = vb[0].x >> 4;
     *y = vb[0].y >> 4;
+    if (depth) *depth = vb[0].z;
     return 1;
+}
+
+int32_t ok_r3d_depth_at(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+    return zbuf[y * W + x];
 }
 
 int ok_r3d_id_at(int x, int y)
