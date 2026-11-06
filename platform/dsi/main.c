@@ -1,6 +1,7 @@
 /* Okupa on the Nintendo DSi: the room on the top screen, touch below. The
  * same core and game code as the host; this file only owns the hardware. */
 #include "account.h"
+#include "mind.h"
 #include "net.h"
 #include "okupa_checks.h"
 #include "okupa.h"
@@ -91,7 +92,7 @@ static int save(const ok_pet *p, const uint8_t drawing[512])
 
 int main(void)
 {
-    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0;
+    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, show_mind = 0;
     time_t now = time(NULL), last = now, saved_at = now;
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
@@ -138,6 +139,20 @@ int main(void)
             redraw = 1;
             snprintf(ui.net_status, sizeof ui.net_status, "%s", ok_dsi_net_summary());
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
+            if (show_mind && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_mind_lines(), sizeof ui.dev);
+        }
+        /* Y on the Dev screen: one decision of the okupa's mind on 0G. */
+        if (ui.scene == OK_UI_DEV && (keysDown() & KEY_Y) && !ok_dsi_mind_busy()) {
+            ok_dsi_mind_start(storage ? net_dir : NULL, &pet);
+            show_mind = 1;
+            show_net = 0;
+        }
+        {
+            const char *thought = ok_dsi_mind_take_line();
+            if (thought) {
+                ui.say = thought;
+                ui.say_ticks = 60 * 8;
+            }
         }
         if (keysHeld() & KEY_TOUCH) {
             int r;
@@ -148,6 +163,7 @@ int main(void)
                 memset(ui.dev, 0, sizeof ui.dev);
                 snprintf(ui.dev[0], sizeof ui.dev[0], "Running the core checks...");
                 show_net = 0;
+                show_mind = 0;
                 tm = localtime(&now);
                 ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
                 present(top, bottom);
@@ -172,7 +188,7 @@ int main(void)
                 ok_dsi_account_open(storage ? key_path : NULL, &ui);
             }
             if (r == OK_UI_WALLET_SCRIBBLE) ok_dsi_account_scribble(touch.px, touch.py, &ui);
-            if (r == OK_UI_RUN_NETWORK) show_net = 1; /* the postman is always running: just show it */
+            if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
             ok_ui_release(&ui);
