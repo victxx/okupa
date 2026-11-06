@@ -33,7 +33,7 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 
     /* The line goes back to the mood line after three seconds. */
-    for (i = 0; i < 180; i++) ok_ui_tick(&u);
+    for (i = 0; i < 180; i++) ok_ui_tick(&u, &p);
     assert(u.say == NULL);
 
     /* Sketchbook: a stroke leaves no gaps, the eraser removes it, Done goes home. */
@@ -107,6 +107,19 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 200, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
+
+    /* The okupa's mind: a move starts at the next break; out through the door to the terrace and back. */
+    p.asleep = 0;
+    ok_ui_direct(&u, &p, OK_MOVE_WAVE, 0, OK_POSE_HAPPY, "Hello there!");
+    assert(!strcmp(u.say, "Hello there!"));
+    for (i = 0; i < 1200 && u.anim.move != OK_MOVE_WAVE; i++) ok_ui_tick(&u, &p);
+    assert(u.anim.move == OK_MOVE_WAVE);
+    ok_ui_direct(&u, &p, OK_MOVE_TO_DOOR, OK_PLACE_GARDEN, -1, NULL);
+    for (i = 0; i < 3000 && ok_house_where() != OK_PLACE_GARDEN; i++) ok_ui_tick(&u, &p);
+    assert(ok_house_where() == OK_PLACE_GARDEN);
+    ok_ui_direct(&u, &p, OK_MOVE_TO_DOOR, OK_PLACE_ATTIC, -1, "");
+    for (i = 0; i < 3000 && ok_house_where() != OK_PLACE_ATTIC; i++) ok_ui_tick(&u, &p);
+    assert(ok_house_where() == OK_PLACE_ATTIC);
 
     /* Every scene renders, with and without a font. */
     ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);

@@ -1,27 +1,18 @@
 #include "okupa_ui.h"
 #include "okupa_act.h"
+#include "okupa_text.h"
+#include "okupa_icons.h"
+#include "okupa_intro.h"
 #include "qrcodegen.h"
 #include <stdio.h>
 #include <string.h>
 
-/* Placeholder art: a cosy room and a little person, all from rectangles and
- * circles until the real okupa and house are drawn. */
+/* The top screen is the attic with the okupa in 3D (okupa_house.h); here
+ * are the labels over it and the bottom screen's buttons, drawn in plain C. */
 #define RGB(r, g, b) ((uint16_t)(0x8000u | (r) | ((g) << 5) | ((b) << 10)))
 #define INK RGB(6, 5, 5)
 #define PAPER RGB(31, 30, 27)
-#define WALL RGB(28, 25, 20)
-#define WALL_LINE RGB(26, 23, 18)
-#define FLOOR RGB(21, 14, 9)
-#define FLOOR_LINE RGB(18, 11, 7)
-#define WOOD RGB(15, 9, 5)
-#define DESK RGB(27, 25, 22)
 #define MUTED RGB(17, 16, 15)
-#define SKIN RGB(31, 24, 18)
-#define HAIR RGB(10, 6, 3)
-#define SHIRT RGB(29, 12, 9)
-#define PANTS RGB(7, 10, 20)
-#define BLANKET RGB(10, 16, 27)
-#define GREEN RGB(10, 22, 10)
 
 typedef uint16_t *frame;
 
@@ -48,7 +39,8 @@ static void frame_box(frame f, int x, int y, int w, int h, uint16_t fill, uint16
     rect(f, x + 1, y + 2, w - 2, h - 4, fill);
 }
 
-static void text(frame f, const uint8_t (*font)[8], int x, int y, const char *s, uint16_t c, int scale)
+/* Monospace 8x8, for the Dev screen's columns of numbers. */
+static void mono(frame f, const uint8_t (*font)[8], int x, int y, const char *s, uint16_t c, int scale)
 {
     int row, col;
     if (!font) return;
@@ -60,175 +52,307 @@ static void text(frame f, const uint8_t (*font)[8], int x, int y, const char *s,
     }
 }
 
-static void centred(frame f, const uint8_t (*font)[8], int cx, int y, const char *s, uint16_t c, int scale)
+/* Everything else in the sans: weight 1 regular, 2 bold. y is where an 8x8
+ * line would start, so the capitals sit in the same place. */
+static void text(frame f, const uint8_t (*font)[8], int x, int y, const char *s, uint16_t c, int weight)
 {
-    text(f, font, cx - (int)strlen(s) * 4 * scale, y, s, c, scale);
+    (void)font;
+    ok_text_draw(f, weight >= 2 ? &ok_sans_bold : &ok_sans_regular, x, y - 2, s, c);
 }
 
-/* Up to two lines of at most 28 characters, broken at spaces. */
-static void bubble(frame f, const uint8_t (*font)[8], const char *s)
+static int width(const char *s, int weight)
 {
-    char line[2][29] = {{0}};
-    size_t n = strlen(s), cut = n;
-    frame_box(f, 8, 148, 240, 38, PAPER, INK);
-    rect(f, 120, 144, 8, 5, PAPER);
-    if (n > 28) {
-        for (cut = 28; cut > 0 && s[cut] != ' '; cut--) {}
-        if (cut == 0) cut = 28;
-    }
-    memcpy(line[0], s, cut > 28 ? 28 : cut);
-    if (cut < n) strncpy(line[1], s + cut + (s[cut] == ' '), 28);
-    centred(f, font, 128, line[1][0] ? 155 : 163, line[0], INK, 1);
-    if (line[1][0]) centred(f, font, 128, 169, line[1], INK, 1);
+    return ok_text_width(weight >= 2 ? &ok_sans_bold : &ok_sans_regular, s);
 }
 
-static void needs_panel(frame f, const uint8_t (*font)[8], const ok_pet *p)
+static void centred(frame f, const uint8_t (*font)[8], int cx, int y, const char *s, uint16_t c, int weight)
 {
-    static const char *names[OK_NEEDS] = {"Food", "Sleep", "Fun", "Love"};
-    int i;
-    frame_box(f, 6, 6, 104, 48, PAPER, MUTED);
-    for (i = 0; i < OK_NEEDS; i++) {
-        int y = 11 + i * 10, v = p->need[i] * 48 / OK_NEED_MAX;
-        uint16_t c = p->need[i] < 35 ? RGB(28, 8, 6) : p->need[i] < 65 ? RGB(28, 22, 6) : RGB(9, 22, 10);
-        text(f, font, 11, y, names[i], INK, 1);
-        rect(f, 56, y + 1, 48, 6, RGB(24, 23, 21));
-        rect(f, 56, y + 1, v, 6, c);
-    }
+    text(f, font, cx - width(s, weight) / 2, y, s, c, weight);
 }
 
-static void window_view(frame f, int hour)
+/* ------------------------------------------------------------ drawing kit */
+
+static uint16_t half(uint16_t c)
 {
-    uint16_t sky = hour >= 7 && hour < 18 ? RGB(15, 23, 31) : hour >= 18 && hour < 21 ? RGB(30, 17, 10) : RGB(3, 4, 11);
-    frame_box(f, 156, 22, 72, 60, PAPER, WOOD);
-    rect(f, 160, 26, 64, 52, sky);
-    if (hour >= 21 || hour < 7) {
-        rect(f, 170, 34, 1, 1, PAPER);
-        rect(f, 200, 30, 1, 1, PAPER);
-        rect(f, 214, 50, 1, 1, PAPER);
-        disc(f, 186, 46, 5, RGB(30, 29, 22));
-    } else {
-        disc(f, 208, 40, 6, RGB(31, 29, 12));
-    }
-    rect(f, 191, 26, 2, 52, PAPER);
-    rect(f, 160, 51, 64, 2, PAPER);
+    return (uint16_t)(0x8000u | (c >> 1 & 0x3def));
 }
 
-static void face(frame f, int cx, int cy, int mood, uint32_t ticks)
+/* A box with corners rounded to radius r. */
+static void round_box(frame f, int x, int y, int w, int h, int r, uint16_t c)
 {
-    int blink = ticks % 180 < 6;
-    disc(f, cx, cy, 11, SKIN);
-    rect(f, cx - 11, cy - 11, 23, 7, HAIR);
-    rect(f, cx - 12, cy - 6, 4, 6, HAIR);
-    rect(f, cx + 9, cy - 6, 4, 6, HAIR);
-    if (mood == OK_MOOD_ASLEEP || mood == OK_MOOD_SLEEPY || blink) {
-        rect(f, cx - 6, cy + 1, 4, 1, INK);
-        rect(f, cx + 3, cy + 1, 4, 1, INK);
-    } else {
-        rect(f, cx - 5, cy - 1, 2, 3, INK);
-        rect(f, cx + 4, cy - 1, 2, 3, INK);
-    }
-    if (mood == OK_MOOD_HAPPY) {
-        rect(f, cx - 3, cy + 6, 7, 1, INK);
-        rect(f, cx - 4, cy + 5, 1, 1, INK);
-        rect(f, cx + 4, cy + 5, 1, 1, INK);
-    } else if (mood == OK_MOOD_HUNGRY || mood == OK_MOOD_LONELY) {
-        rect(f, cx - 1, cy + 5, 3, 3, INK);
-    } else {
-        rect(f, cx - 2, cy + 6, 5, 1, INK);
-    }
-}
-
-static void room(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p, int hour, int minute)
-{
-    int i, mood = ok_pet_mood(p);
-    char clock[8];
-    rect(f, 0, 0, OK_UI_W, 118, WALL);
-    for (i = 12; i < OK_UI_W; i += 24) rect(f, i, 0, 1, 118, WALL_LINE);
-    rect(f, 0, 118, OK_UI_W, 74, FLOOR);
-    for (i = 130; i < OK_UI_H; i += 14) rect(f, 0, i, OK_UI_W, 1, FLOOR_LINE);
-    rect(f, 0, 116, OK_UI_W, 3, WOOD);
-    window_view(f, hour);
-    /* The wall: the newest four framed drawings, each one seen in a block. */
-    {
-        int k, first = u->wall_count > 4 ? u->wall_count - 4 : 0;
-        for (k = first; k < u->wall_count; k++) {
-            int fx = 8 + (k - first) * 36, fy = 60, x, y;
-            frame_box(f, fx, fy, 36, 36, WOOD, WOOD);
-            rect(f, fx + 2, fy + 2, 32, 32, PAPER);
-            for (y = 0; y < 32; y++)
-                for (x = 0; x < 32; x++)
-                    if (ok_drawing_get(u->wall[k], 2 * x, 2 * y) || ok_drawing_get(u->wall[k], 2 * x + 1, 2 * y) ||
-                        ok_drawing_get(u->wall[k], 2 * x, 2 * y + 1) || ok_drawing_get(u->wall[k], 2 * x + 1, 2 * y + 1))
-                        f[(fy + 2 + y) * OK_UI_W + fx + 2 + x] = INK;
+    int j;
+    for (j = 0; j < h; j++) {
+        int k = j < r ? j : j >= h - r ? h - 1 - j : r, in = 0;
+        if (k < r) {
+            int dy = 2 * r - 2 * k - 1, e = 0;
+            while ((e + 1) * (e + 1) <= 4 * r * r - dy * dy) e++;
+            in = r - e / 2;
         }
+        rect(f, x + in, y + j, w - 2 * in, 1, c);
     }
-    /* Bed, plant. */
-    rect(f, 14, 104, 84, 30, WOOD);
-    rect(f, 18, 98, 22, 12, PAPER);
-    rect(f, 40, 100, 56, 22, BLANKET);
-    rect(f, 232, 104, 14, 14, WOOD);
-    disc(f, 239, 96, 9, GREEN);
-    if (p->asleep) {
-        face(f, 30, 96, OK_MOOD_ASLEEP, u->ticks);
-        text(f, font, 46, 76 - (int)(u->ticks / 20 % 4), "z", INK, 1);
-        text(f, font, 54, 68 - (int)(u->ticks / 20 % 4), "Z", INK, 1);
-        for (i = 0; i < OK_UI_W * OK_UI_H; i++) f[i] = (uint16_t)(0x8000u | (f[i] & 0x7bdeu) >> 1); /* lights off */
-    } else {
-        int bob = (int)(u->ticks / 30 % 2), x = 136;
-        rect(f, x - 7, 128, 6, 16, PANTS);
-        rect(f, x + 2, 128, 6, 16, PANTS);
-        rect(f, x - 10, 106 + bob, 21, 24 - bob, SHIRT);
-        rect(f, x - 14, 108 + bob, 4, 16, SKIN);
-        rect(f, x + 11, 108 + bob, 4, 16, SKIN);
-        face(f, x, 94 + bob, mood, u->ticks);
-    }
-    needs_panel(f, font, p);
-    snprintf(clock, sizeof clock, "%02d:%02d", hour % 24, minute % 60);
-    frame_box(f, 196, 6, 54, 12, PAPER, MUTED);
-    text(f, font, 203, 8, clock, INK, 1);
-    bubble(f, font, u->say ? u->say : ok_pet_line(p, hour));
 }
 
-/* Bottom screen buttons: four columns, two rows. */
+/* Darkens what is behind a rounded box: the glass under the top screen's labels. */
+static void glass(frame f, int x, int y, int w, int h)
+{
+    int i, j;
+    for (j = y; j < y + h; j++)
+        for (i = x; i < x + w; i++) {
+            int corner = (j == y || j == y + h - 1) && (i == x || i == x + w - 1);
+            if (i < 0 || j < 0 || i >= OK_UI_W || j >= OK_UI_H || corner) continue;
+            f[j * OK_UI_W + i] = half(half(f[j * OK_UI_W + i])) + (uint16_t)RGB(2, 2, 3) - 0x8000u;
+        }
+}
+
+/* Pixel art: one character per pixel, '.' clear. */
+static uint16_t ink_of(char k)
+{
+    switch (k) {
+    case 'y': return RGB(31, 27, 8);
+    case 'Y': return RGB(25, 18, 3);
+    case 'k': return RGB(5, 4, 4);
+    case 'w': return RGB(31, 31, 30);
+    case 'r': return RGB(29, 8, 9);
+    case 'R': return RGB(20, 4, 6);
+    case 'p': return RGB(31, 19, 22);
+    case 't': return RGB(28, 22, 14);
+    case 'g': return RGB(17, 18, 20);
+    case 'G': return RGB(24, 25, 27);
+    case 'b': return RGB(8, 14, 28);
+    case 'M': return RGB(30, 28, 16);
+    case 'n': return RGB(12, 8, 5);
+    case 'e': return RGB(10, 22, 12);
+    default: return RGB(31, 0, 31);
+    }
+}
+
+static void pixels(frame f, int x, int y, const char *const *rows, int n, int scale)
+{
+    int r, c;
+    for (r = 0; r < n; r++)
+        for (c = 0; rows[r][c]; c++)
+            if (rows[r][c] != '.') rect(f, x + c * scale, y + r * scale, scale, scale, ink_of(rows[r][c]));
+}
+
+/* ------------------------------------------------------------ top screen */
+
+static void icons_ready(void)
+{
+    static int done;
+    if (!done) ok_icons_build();
+    done = 1;
+}
+
+/* The four needs along the bottom: an icon and a bar each, on glass. */
+static void needs(frame f, const ok_pet *p)
+{
+    static const int icon[OK_NEEDS] = {OK_ICON_FEED, OK_ICON_SLEEP, OK_ICON_PLAY, OK_ICON_PET};
+    int i;
+    for (i = 0; i < OK_NEEDS; i++) {
+        int x = 5 + i * 62, y = 173, v = p->need[i] * 34 / OK_NEED_MAX;
+        uint16_t c = p->need[i] < 35 ? RGB(30, 9, 7) : p->need[i] < 65 ? RGB(30, 23, 6) : RGB(10, 25, 12);
+        glass(f, x, y, 60, 16);
+        ok_icons_draw(icon[i], f, x + 10, y + 8, 16);
+        rect(f, x + 21, y + 6, 36, 5, RGB(3, 3, 4));
+        rect(f, x + 22, y + 7, v, 3, c);
+        rect(f, x + 22, y + 7, v, 1, RGB(31, 31, 28)); /* a glint along the top */
+        rect(f, x + 22, y + 7, v, 1, c | RGB(8, 8, 8));
+    }
+}
+
+static void clock_pill(frame f, const uint8_t (*font)[8], int hour, int minute)
+{
+    static const char *const sun[] = {"...y...", ".y.y.y.", "..yyy..", "yyyYyyy", "..yyy..", ".y.y.y.", "...y..."};
+    static const char *const moon[] = {"..MMM..", ".MM....", "MM.....", "MM.....", "MM.....", ".MM..M.", "..MMM.."};
+    char clock[8];
+    snprintf(clock, sizeof clock, "%02d:%02d", hour % 24, minute % 60);
+    glass(f, 4, 4, 56, 13);
+    pixels(f, 8, 7, hour >= 7 && hour < 20 ? sun : moon, 7, 1);
+    text(f, font, 18, 7, clock, RGB(30, 29, 27), 1);
+}
+
+/* What it says, in a bubble above its head with a tail pointing at it:
+ * up to two lines of at most 200 pixels, broken at spaces. */
+static void bubble(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy)
+{
+    char line[2][48] = {{0}};
+    size_t n = strlen(s), cut = n;
+    int w, h, x, y, tx, lines, k;
+    while (cut > 0 && cut < n + 1) {
+        char head[48];
+        snprintf(head, sizeof head, "%.*s", (int)cut, s);
+        if (width(head, 1) <= 200 || cut == 1) break;
+        for (cut--; cut > 0 && s[cut] != ' '; cut--) {}
+    }
+    if (cut == 0) cut = n > 40 ? 40 : n;
+    snprintf(line[0], sizeof line[0], "%.*s", (int)cut, s);
+    if (cut < n) snprintf(line[1], sizeof line[1], "%s", s + cut + (s[cut] == ' '));
+    lines = line[1][0] ? 2 : 1;
+    w = (width(line[0], 1) > width(line[1], 1) ? width(line[0], 1) : width(line[1], 1)) + 16;
+    h = lines * 11 + 9;
+    if (hx < -50) hx = 128, hy = 110;
+    x = hx - w / 2;
+    x = x < 4 ? 4 : x + w > OK_UI_W - 4 ? OK_UI_W - 4 - w : x;
+    y = hy - h - 12;
+    if (y < 20) y = 20;
+    tx = hx < x + 12 ? x + 12 : hx > x + w - 12 ? x + w - 12 : hx;
+    round_box(f, x - 1, y + 1, w + 2, h + 2, 6, RGB(2, 2, 3)); /* a soft drop shadow */
+    round_box(f, x - 1, y - 1, w + 2, h + 2, 6, INK);
+    round_box(f, x, y, w, h, 5, PAPER);
+    for (k = 0; k < 6; k++) { /* the tail, leaning towards the head */
+        int lean = (hx - tx) * k / 24;
+        rect(f, tx - 4 + k / 2 + lean, y + h + k, 8 - k, 1, PAPER);
+        rect(f, tx - 5 + k / 2 + lean, y + h + k, 1, 1, INK);
+        rect(f, tx + 4 - k / 2 + lean, y + h + k, 1, 1, INK);
+    }
+    centred(f, font, x + w / 2, y + 6, line[0], INK, 1);
+    if (lines == 2) centred(f, font, x + w / 2, y + 17, line[1], INK, 1);
+}
+
+static uint16_t skin[OK_SKIN * OK_SKIN];
+static ok_look skin_look = {255, 255, 255};
+
+/* The wall as a number, to notice a new picture. */
+static uint32_t wall_sum(const ok_ui *u)
+{
+    uint32_t s = (uint32_t)u->wall_count + 1;
+    int k, i;
+    for (k = 0; k < u->wall_count && k < OK_UI_WALL; k++)
+        for (i = 0; i < (int)sizeof u->wall[k]; i++) s = s * 31 + u->wall[k][i];
+    return s;
+}
+
+/* The wall's pictures in the attic's six frames and, the same, on the
+ * terrace. One not yet hung waits off the wall for its show. */
+static void hang_pictures(const ok_ui *u)
+{
+    int k, newest = u->wall_count - 1, waiting = u->wall_known && !u->hang_t && wall_sum(u) != u->wall_seen;
+    for (k = 0; k < 6; k++) {
+        const uint8_t *pic = k < u->wall_count && k < OK_UI_WALL ? u->wall[k] : NULL;
+        ok_house_frame(k, waiting && k == newest ? NULL : pic);
+        ok_house_frame(6 + k, pic);
+    }
+    ok_house_hanging(u->hang_t ? u->hang_slot : -1, u->hang_t);
+}
+
+static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p, int hour, int minute,
+                       const char *line)
+{
+    ok_monkey_face face;
+    hang_pictures(u);
+    if (memcmp(&skin_look, &u->look, sizeof skin_look)) {
+        ok_monkey_skin(&u->look, skin);
+        skin_look = u->look;
+    }
+    ok_house_draw(f, hour, minute, p->asleep, NULL, &u->look, skin, &u->anim, &face); /* frames fill as drawings are sent */
+    clock_pill(f, font, hour, minute);
+    needs(f, p);
+    if (line && !(p->asleep && line == ok_pet_line(p, hour))) bubble(f, font, line, face.top_x, face.top_y);
+}
+
+/* --------------------------------------------------------- bottom screen */
+
+/* Buttons: four columns, two rows. */
 enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_PHOTO, B_MAIL, B_DEV, BUTTONS };
 static const char *labels[BUTTONS] = {"Feed", "Play", "Pet", "Sleep", "Draw", "Photo", "Mail", "Dev"};
 static const int soon[BUTTONS] = {0, 0, 0, 0, 0, 1, 1, 0};
+static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(31, 20, 21), RGB(20, 19, 30),
+                                         RGB(30, 24, 16), RGB(24, 24, 24), RGB(24, 24, 24), RGB(21, 27, 22)};
 #define BX(i) (8 + ((i) % 4) * 62)
 #define BY(i) (36 + ((i) / 4) * 66)
 #define BW 54
 #define BH 58
+/* Out to the terrace and back, beside the closet. */
+#define OUT_X 140
+#define OUT_Y 8
+#define OUT_W 42
+#define OUT_H 20
+/* The closet, top right, clear of the buttons. */
+#define CLOSET_X 186
+#define CLOSET_Y 8
+#define CLOSET_W 62
+#define CLOSET_H 20
 
-static void icon(frame f, int i, int cx, int cy, uint16_t c)
+static void button(frame f, const uint8_t (*font)[8], int i, const char *label, int pressed, const ok_pet *p)
 {
-    switch (i) {
-    case B_FEED: disc(f, cx, cy + 2, 8, RGB(27, 6, 6)); rect(f, cx, cy - 9, 2, 5, WOOD); break;
-    case B_PLAY: disc(f, cx, cy, 9, RGB(8, 14, 28)); rect(f, cx - 9, cy - 1, 19, 2, PAPER); break;
-    case B_PET: disc(f, cx - 4, cy - 2, 5, RGB(28, 9, 14)); disc(f, cx + 4, cy - 2, 5, RGB(28, 9, 14));
-        rect(f, cx - 7, cy, 15, 4, RGB(28, 9, 14)); rect(f, cx - 4, cy + 4, 9, 3, RGB(28, 9, 14));
-        rect(f, cx - 1, cy + 7, 3, 2, RGB(28, 9, 14)); break;
-    case B_SLEEP: disc(f, cx, cy, 9, RGB(28, 26, 12)); disc(f, cx + 5, cy - 3, 8, PAPER); break;
-    case B_DRAW: rect(f, cx - 8, cy + 6, 16, 3, c); rect(f, cx - 2, cy - 9, 5, 14, RGB(29, 22, 6));
-        rect(f, cx - 1, cy + 5, 3, 2, INK); break;
-    case B_PHOTO: rect(f, cx - 10, cy - 5, 21, 14, c); disc(f, cx, cy + 2, 4, PAPER); rect(f, cx - 4, cy - 8, 8, 3, c); break;
-    case B_MAIL: rect(f, cx - 10, cy - 6, 21, 14, c); rect(f, cx - 8, cy - 4, 17, 10, PAPER);
-        rect(f, cx - 4, cy, 9, 1, c); break;
-    default: rect(f, cx - 8, cy - 2, 17, 4, c); rect(f, cx - 2, cy - 8, 4, 17, c); break;
+    static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY, OK_ICON_PET, OK_ICON_SLEEP,
+                                      OK_ICON_DRAW, OK_ICON_PHOTO, OK_ICON_MAIL, OK_ICON_DEV};
+    int x = BX(i), y = BY(i) + (pressed ? 2 : 0);
+    uint16_t card = soon[i] ? RGB(19, 18, 17) : PAPER;
+    if (!pressed) round_box(f, x, BY(i) + 3, BW, BH, 6, RGB(3, 3, 3)); /* shadow */
+    round_box(f, x, y, BW, BH, 6, pressed ? half(card) + (uint16_t)RGB(6, 6, 6) - 0x8000u : card);
+    round_box(f, x + 3, y + 3, BW - 6, 34, 5, soon[i] ? RGB(16, 15, 15) : accent[i]);
+    ok_icons_draw(i == B_SLEEP && p->asleep ? OK_ICON_WAKE : icon[i], f, x + BW / 2, y + 20 - (pressed ? 0 : 1), 32);
+    centred(f, font, x + BW / 2, y + 44, label, soon[i] ? RGB(11, 10, 10) : INK, 2);
+    if (soon[i]) {
+        round_box(f, x + BW - 30, y - 4, 32, 11, 4, RGB(29, 11, 8));
+        centred(f, font, x + BW - 14, y - 2, "soon", PAPER, 1);
     }
+}
+
+/* A chip saying how it feels, with a coloured dot. */
+static void mood_chip(frame f, const uint8_t (*font)[8], const ok_pet *p, int x, int y)
+{
+    static const char *word[] = {"Happy", "Hungry", "Sleepy", "Bored", "Missed you", "Asleep"};
+    static const uint16_t dot[] = {RGB(10, 25, 12), RGB(30, 12, 6), RGB(16, 16, 30), RGB(24, 22, 18), RGB(30, 16, 22),
+                                   RGB(12, 14, 26)};
+    int m = ok_pet_mood(p), w;
+    m = m < 0 || m > 5 ? 0 : m;
+    w = width(word[m], 1) + 20;
+    round_box(f, x, y, w, 16, 7, RGB(14, 13, 12));
+    disc(f, x + 8, y + 8, 3, dot[m]);
+    text(f, font, x + 14, y + 5, word[m], RGB(29, 28, 26), 1);
 }
 
 static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p)
 {
     int i;
-    centred(f, font, 128, 10, "OKUPA", PAPER, 2);
-    for (i = 0; i < BUTTONS; i++) {
-        uint16_t c = soon[i] ? MUTED : INK;
-        const char *label = i == B_SLEEP && p->asleep ? "Wake" : labels[i];
-        frame_box(f, BX(i), BY(i), BW, BH, soon[i] ? RGB(22, 21, 19) : PAPER, INK);
-        icon(f, i, BX(i) + BW / 2, BY(i) + 20, c);
-        centred(f, font, BX(i) + BW / 2, BY(i) + 40, label, c, 1);
-        if (soon[i]) centred(f, font, BX(i) + BW / 2, BY(i) + 4, "soon", RGB(26, 9, 6), 1);
+    text(f, font, 11, 12, "OKUPA", RGB(4, 3, 2), 2); /* a shadow under the name */
+    text(f, font, 10, 11, "OKUPA", RGB(31, 26, 3), 2);
+    mood_chip(f, font, p, 62, 9);
+    for (i = 0; i < BUTTONS; i++)
+        button(f, font, i, i == B_SLEEP && p->asleep ? "Wake" : labels[i], u->pressed == i + 1 && u->pressed_ticks > 0, p);
+    round_box(f, CLOSET_X, CLOSET_Y + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), CLOSET_W, CLOSET_H, 7,
+              u->pressed == 100 && u->pressed_ticks ? RGB(22, 20, 12) : RGB(31, 26, 3));
+    ok_icons_draw(OK_ICON_WEAR, f, CLOSET_X + 13, CLOSET_Y + 10, 16);
+    text(f, font, CLOSET_X + 25, CLOSET_Y + 7, "Wear", INK, 2);
+    round_box(f, OUT_X, OUT_Y + (u->pressed == 101 && u->pressed_ticks ? 1 : 0), OUT_W, OUT_H, 7,
+              u->pressed == 101 && u->pressed_ticks ? RGB(12, 18, 12) : RGB(17, 26, 15));
+    ok_icons_draw(OK_ICON_HOME, f, OUT_X + 11, OUT_Y + 10, 16);
+    text(f, font, OUT_X + 21, OUT_Y + 7, ok_house_where() == OK_PLACE_GARDEN ? "In" : "Out", INK, 2);
+    centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(19, 17, 15), 1);
+}
+
+/* The closet: tops, colours, things to wear. */
+#define TOP_Y 40
+#define SWATCH_Y 74
+#define WEAR_Y 102
+#define WEAR_X(i) (8 + ((i) % 3) * 82)
+#define WEAR_ROW(i) (WEAR_Y + ((i) / 3) * 22)
+#define DONE_X 176
+#define DONE_Y 168
+
+static void closet(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    int i;
+    text(f, font, 10, 10, "Closet", RGB(31, 26, 3), 2);
+    for (i = 0; i < OK_TOPS; i++) {
+        int on = u->look.top == i;
+        round_box(f, 8 + i * 82, TOP_Y, 76, 24, 5, on ? RGB(31, 26, 3) : PAPER);
+        centred(f, font, 8 + i * 82 + 38, TOP_Y + 8, ok_top_name(i), INK, 1);
     }
-    centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(20, 18, 15), 1);
+    for (i = 0; i < OK_COLOURS; i++) {
+        int x = 8 + i * 31, on = u->look.colour == i;
+        round_box(f, x, SWATCH_Y, 26, 22, 5, on ? PAPER : RGB(4, 4, 4));
+        round_box(f, x + 3, SWATCH_Y + 3, 20, 16, 4, ok_top_colour(i));
+    }
+    for (i = 0; i < OK_WEARS; i++) {
+        int on = u->look.wear == i;
+        round_box(f, WEAR_X(i), WEAR_ROW(i), 76, 19, 5, on ? RGB(31, 26, 3) : PAPER);
+        centred(f, font, WEAR_X(i) + 38, WEAR_ROW(i) + 6, ok_wear_name(i), INK, 1);
+    }
+    round_box(f, DONE_X, DONE_Y, 72, 20, 5, RGB(10, 25, 12));
+    centred(f, font, DONE_X + 36, DONE_Y + 6, "Done", INK, 1);
 }
 
 /* Sketchbook: the 64x64 drawing at twice the size, tools on the right. */
@@ -259,7 +383,7 @@ static void dev(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
     int i;
     centred(f, font, 128, 6, "Dev: the core on this console", PAPER, 1);
-    for (i = 0; i < OK_UI_DEV_LINES; i++) text(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
+    for (i = 0; i < OK_UI_DEV_LINES; i++) mono(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
     frame_box(f, 4, 166, 60, 22, PAPER, INK);
     centred(f, font, 34, 173, "Net", INK, 1);
     frame_box(f, 66, 166, 58, 22, PAPER, INK);
@@ -375,44 +499,171 @@ static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
     centred(f, font, 193, 173, "Connect", INK, 1);
 }
 
+/* The mood the okupa shows: the pet's, or happy for a while after a treat. */
+static int pose(const ok_ui *u, const ok_pet *p)
+{
+    switch (ok_pet_mood(p)) {
+    case OK_MOOD_ASLEEP: return OK_POSE_ASLEEP;
+    case OK_MOOD_HUNGRY: return OK_POSE_HUNGRY;
+    case OK_MOOD_SLEEPY: return OK_POSE_SLEEPY;
+    case OK_MOOD_BORED: return OK_POSE_BORED;
+    case OK_MOOD_LONELY: return OK_POSE_LONELY;
+    }
+    if (u->mind_ticks && u->mind_mood) return u->mind_mood - 1; /* only while the pet itself is content */
+    return u->happy_ticks ? OK_POSE_HAPPY : OK_POSE_IDLE;
+}
+
 void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const uint8_t (*font)[8],
                   uint16_t top[OK_UI_W * OK_UI_H], uint16_t bottom[OK_UI_W * OK_UI_H])
 {
     int x, y;
-    room(top, font, u, p, hour, minute);
-    rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(9, 8, 8));
+    const char *line = u->say ? u->say : ok_pet_line(p, hour);
+    if (u->scene == OK_UI_SPLASH) {
+        ok_intro_splash(top, bottom, u->intro_t);
+        return;
+    }
+    if (u->scene == OK_UI_FILM) {
+        ok_intro_film(top, bottom, u->intro_t);
+        return;
+    }
+    icons_ready();
+    rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
     for (y = 4; y < OK_UI_H; y += 8)
-        for (x = 4; x < OK_UI_W; x += 8) rect(bottom, x, y, 1, 1, RGB(12, 11, 11));
+        for (x = 4; x < OK_UI_W; x += 8) rect(bottom, x, y, 1, 1, RGB(11, 10, 10));
     if (u->scene == OK_UI_SKETCH) {
         sketch(bottom, font, u);
-        bubble(top, font, "Draw me something for the house!");
+        line = "Draw me something for the house!";
     } else if (u->scene == OK_UI_DEV) {
         dev(bottom, font, u);
     } else if (u->scene == OK_UI_WIFI) {
         wifi(bottom, font, u);
-        bubble(top, font, u->wifi_status[0] ? u->wifi_status : "Which Wi-Fi do we use?");
+        line = u->wifi_status[0] ? u->wifi_status : "Which Wi-Fi do we use?";
     } else if (u->scene == OK_UI_PASSWORD) {
         password(bottom, font, u);
-        bubble(top, font, "Psst. I won't peek.");
+        line = "Psst. I won't peek.";
     } else if (u->scene == OK_UI_WALLET) {
         wallet(bottom, font, u);
-        bubble(top, font, u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!");
+        line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
+    } else if (u->scene == OK_UI_CLOSET) {
+        closet(bottom, font, u);
+        if (!u->say) line = "How do I look?";
     } else {
         home_buttons(bottom, font, u, p);
     }
+    top_screen(top, font, u, p, hour, minute, line);
 }
 
 void ok_ui_init(ok_ui *u)
 {
+    ok_monkey_room room;
     memset(u, 0, sizeof *u);
     u->last_x = u->last_y = -1;
+    u->look.wear = OK_WEAR_NONE; /* the smiley mask lies on the floor until it is worn */
+    ok_house_room(&room);
+    ok_monkey_init(&u->anim, &room, 0, 0x6f6b7570u);
 }
 
-int ok_ui_tick(ok_ui *u)
+void ok_ui_start_intro(ok_ui *u)
 {
+    u->scene = OK_UI_SPLASH;
+    u->intro_t = 0;
+}
+
+static void say(ok_ui *u, const char *line);
+
+void ok_ui_direct(ok_ui *u, const ok_pet *p, int move, int where, int mood, const char *line)
+{
+    if (u->scene == OK_UI_SPLASH || u->scene == OK_UI_FILM || p->asleep) return;
+    if (move == OK_MOVE_TO_DOOR) {
+        if (where == ok_house_where() || (where != OK_PLACE_ATTIC && where != OK_PLACE_GARDEN)) return;
+        u->going = where + 1;
+    }
+    ok_monkey_direct(&u->anim, move);
+    if (mood >= 0 && mood < OK_POSES && mood != OK_POSE_ASLEEP) {
+        u->mind_mood = mood + 1;
+        u->mind_ticks = 600;
+    }
+    if (line && line[0]) {
+        snprintf(u->mind_line, sizeof u->mind_line, "%s", line);
+        say(u, u->mind_line);
+    }
+}
+
+/* Out to the terrace or back in: the okupa is placed in the new spot. */
+static void go(ok_ui *u, const ok_pet *p, int where)
+{
+    ok_monkey_room room;
+    ok_house_place(where);
+    if (where == OK_PLACE_GARDEN) ok_house_garden(&room);
+    else ok_house_room(&room);
+    ok_monkey_init(&u->anim, &room, p->asleep, u->anim.seed);
+    u->ready = 1;
+}
+
+int ok_ui_tick(ok_ui *u, const ok_pet *p)
+{
+    if (u->scene == OK_UI_SPLASH || u->scene == OK_UI_FILM) {
+        if (u->scene == OK_UI_SPLASH && u->intro_t == 60) u->sound = 1 + OK_SFX_JINGLE;
+        if (++u->intro_t >= (u->scene == OK_UI_SPLASH ? OK_SPLASH_TICKS : OK_FILM_TICKS)) {
+            u->scene = u->scene == OK_UI_SPLASH ? OK_UI_FILM : OK_UI_HOME;
+            u->intro_t = 0;
+        }
+        return u->intro_t % 2 == 0 ? OK_UI_CHANGED : OK_UI_NOTHING;
+    }
+    if (ok_house_where() == OK_PLACE_GARDEN && p->asleep) go(u, p, OK_PLACE_ATTIC); /* bed is indoors */
+    if (u->mind_ticks) u->mind_ticks--;
+    if (u->going && u->anim.at_door) { /* through the door: it comes in (or out) by the other side */
+        int where = u->going - 1;
+        u->going = 0;
+        go(u, p, where);
+        u->anim.x = u->anim.room.door_x;
+        u->anim.z = u->anim.room.door_z;
+    }
+    if (!u->ready) { /* the first frame knows the loaded pet: asleep, its drawing */
+        ok_monkey_room room;
+        ok_house_room(&room);
+        ok_monkey_init(&u->anim, &room, p->asleep, 0x6f6b7570u ^ (uint32_t)p->updated);
+        u->ready = 1;
+    }
+    /* The wall: a picture the console just saw in a block gets hung, in
+     * the attic, with the okupa there to see it. */
+    if (!u->wall_known) {
+        u->wall_known = 1;
+        u->wall_seen = wall_sum(u);
+    } else if (!u->hang_t && wall_sum(u) != u->wall_seen) {
+        if (u->wall_count <= 0) {
+            u->wall_seen = wall_sum(u);
+        } else if (ok_house_where() == OK_PLACE_ATTIC) {
+            u->wall_seen = wall_sum(u);
+            u->hang_slot = u->wall_count - 1;
+            u->hang_t = 1;
+        } else if (!u->going) {
+            ok_ui_direct(u, p, OK_MOVE_TO_DOOR, OK_PLACE_ATTIC, OK_POSE_HAPPY, NULL);
+        }
+    }
+    if (u->hang_t) {
+        if (u->hang_t == 22) { /* it lands on its nail */
+            u->sound = 1 + OK_SFX_POP;
+            u->happy_ticks = 360;
+            if (!p->asleep) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
+        }
+        if (u->hang_t == 60) u->sound = 1 + OK_SFX_YAY;
+        if (++u->hang_t > OK_HOUSE_HANG_TICKS) u->hang_t = 0;
+    }
     u->ticks++;
     if (u->say_ticks && --u->say_ticks == 0) u->say = NULL;
-    return u->ticks % 6 == 0 ? OK_UI_CHANGED : OK_UI_NOTHING; /* 10 fps is plenty for this art */
+    if (u->happy_ticks) u->happy_ticks--;
+    if (u->pressed_ticks) u->pressed_ticks--;
+    ok_monkey_step(&u->anim, pose(u, p), u->look.wear);
+    /* Sounds that go with what it does: each bite, each catch, each hop. */
+    if (u->anim.move != u->heard_move) u->heard_bites = 0;
+    if (u->anim.bites != u->heard_bites) u->sound = 1 + (u->anim.move == OK_MOVE_EAT ? OK_SFX_EAT : OK_SFX_POP);
+    if ((u->anim.move == OK_MOVE_HOP && u->anim.move_t == 12) || (u->anim.move == OK_MOVE_PEEK && u->anim.move_t == 150))
+        u->sound = 1 + OK_SFX_BOING;
+    if (u->anim.move == OK_MOVE_EAT && u->anim.move_t == 161) u->sound = 1 + OK_SFX_YAY;
+    u->heard_bites = u->anim.bites;
+    u->heard_move = u->anim.move;
+    return u->ticks % 2 == 0 ? OK_UI_CHANGED : OK_UI_NOTHING;
 }
 
 static int inside(int x, int y, int bx, int by, int bw, int bh)
@@ -455,6 +706,12 @@ void ok_ui_release(ok_ui *u)
 int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
 {
     int i;
+    if (u->scene == OK_UI_SPLASH || u->scene == OK_UI_FILM) { /* a touch skips ahead */
+        if (held) return OK_UI_NOTHING;
+        u->scene = u->scene == OK_UI_SPLASH ? OK_UI_FILM : OK_UI_HOME;
+        u->intro_t = 0;
+        return OK_UI_CHANGED;
+    }
     if (u->scene == OK_UI_SKETCH) {
         if (inside(x, y, CX, CY, 128, 128)) {
             if (u->drawing_sent) return OK_UI_NOTHING; /* the signed pixels must stay as sent */
@@ -475,8 +732,13 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
                 return OK_UI_SEND_DRAWING;
             }
             if (i == T_DONE) {
+                int k;
                 u->scene = OK_UI_HOME;
-                say(u, "I'll keep it safe. One day it goes on the wall.");
+                for (k = 0; k < (int)sizeof u->drawing && !u->drawing[k]; k++) {}
+                if (u->drawing_sent) say(u, "It's on its way. Watch the wall!");
+                else if (k < (int)sizeof u->drawing) say(u, "I love it! Send it and it goes on the wall.");
+                else say(u, "Nothing yet? Maybe next time.");
+                if (k < (int)sizeof u->drawing) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
             }
             return OK_UI_CHANGED;
         }
@@ -548,9 +810,46 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         }
         return OK_UI_CHANGED;
     }
+    if (u->scene == OK_UI_CLOSET) {
+        for (i = 0; i < OK_TOPS; i++)
+            if (inside(x, y, 8 + i * 82, TOP_Y, 76, 24)) u->look.top = (uint8_t)i;
+        for (i = 0; i < OK_COLOURS; i++)
+            if (inside(x, y, 8 + i * 31, SWATCH_Y, 26, 22)) u->look.colour = (uint8_t)i;
+        for (i = 0; i < OK_WEARS; i++)
+            if (inside(x, y, WEAR_X(i), WEAR_ROW(i), 76, 19)) u->look.wear = (uint8_t)i;
+        u->sound = 1 + OK_SFX_POP;
+        if (inside(x, y, DONE_X, DONE_Y, 72, 20)) {
+            u->sound = 1 + OK_SFX_HELLO;
+            u->scene = OK_UI_HOME;
+            say(u, "Thanks! I feel brand new.");
+            ok_monkey_event(&u->anim, OK_EVENT_HELLO);
+        }
+        return OK_UI_CHANGED;
+    }
+    if (inside(x, y, OUT_X, OUT_Y, OUT_W, OUT_H)) {
+        u->pressed = 101;
+        u->pressed_ticks = 8;
+        u->sound = 1 + OK_SFX_POP;
+        if (p->asleep) {
+            say(u, "Shh... it's asleep.");
+            return OK_UI_CHANGED;
+        }
+        go(u, p, ok_house_where() == OK_PLACE_GARDEN ? OK_PLACE_ATTIC : OK_PLACE_GARDEN);
+        say(u, ok_house_where() == OK_PLACE_GARDEN ? "Fresh air! Look at the gallery." : "Home, sweet attic.");
+        return OK_UI_CHANGED;
+    }
+    if (inside(x, y, CLOSET_X, CLOSET_Y, CLOSET_W, CLOSET_H)) {
+        u->scene = OK_UI_CLOSET;
+        u->pressed = 100;
+        u->pressed_ticks = 8;
+        return OK_UI_CHANGED;
+    }
     for (i = 0; i < BUTTONS; i++) {
         int action, ok;
         if (!inside(x, y, BX(i), BY(i), BW, BH)) continue;
+        u->pressed = i + 1;
+        u->pressed_ticks = 8;
+        u->sound = 1 + OK_SFX_TAP;
         switch (i) {
         case B_DRAW: u->scene = OK_UI_SKETCH; u->eraser = 0; return OK_UI_CHANGED;
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
@@ -561,6 +860,17 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
                  : p->asleep ? OK_DO_WAKE : OK_DO_SLEEP;
         ok = ok_pet_do(p, action, now);
         say(u, p->asleep && action != OK_DO_SLEEP ? "Zzz... (it's sleeping)" : ok_pet_reply(action, ok));
+        if (!p->asleep && action != OK_DO_SLEEP && action != OK_DO_WAKE) {
+            ok_monkey_event(&u->anim, !ok ? OK_EVENT_REFUSE : action == OK_DO_FEED ? OK_EVENT_FEED
+                                      : action == OK_DO_PLAY ? OK_EVENT_PLAY : OK_EVENT_PET);
+            if (ok) u->happy_ticks = 600;
+            u->sound = 1 + (!ok ? OK_SFX_NOPE : action == OK_DO_PET ? OK_SFX_YAY : OK_SFX_TAP);
+        } else if (!ok && action == OK_DO_SLEEP) {
+            ok_monkey_event(&u->anim, OK_EVENT_REFUSE);
+            u->sound = 1 + OK_SFX_NOPE;
+        } else if (ok && action == OK_DO_WAKE) {
+            u->sound = 1 + OK_SFX_HELLO;
+        }
         return OK_UI_CHANGED;
     }
     return OK_UI_NOTHING;

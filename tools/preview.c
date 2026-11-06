@@ -2,9 +2,9 @@
  * art can be looked at without a console. Not evidence of what the ARM runs.
  *   build/okupa-preview <out dir> */
 #include "okupa_act.h"
-#include "okupa_eth.h"
 #include "okupa_font.h"
 #include "okupa_ui.h"
+#include "png.h"
 #include "okupa_session.h"
 #include "okupa_tech.h"
 #include <stdio.h>
@@ -14,78 +14,24 @@
 #define H (2 * OK_UI_H + 8)
 
 static uint16_t top[OK_UI_W * OK_UI_H], bottom[OK_UI_W * OK_UI_H];
-static uint8_t raw[H * (1 + 3 * W)];
 
-static void be32(FILE *f, uint32_t v)
-{
-    uint8_t b[4] = {(uint8_t)(v >> 24), (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v};
-    fwrite(b, 1, 4, f);
-}
-
-static void chunk(FILE *f, const char *type, const uint8_t *data, uint32_t n)
-{
-    uint32_t crc = ok_crc32(ok_crc32(0, type, 4), data, n);
-    be32(f, n);
-    fwrite(type, 1, 4, f);
-    fwrite(data, 1, n, f);
-    be32(f, crc);
-}
-
-/* PNG with a zlib stream of stored (uncompressed) blocks: simple and exact. */
+/* Top screen above the bottom one, an 8-pixel gap between them. */
 static void png(const char *path)
 {
-    static uint8_t z[sizeof raw + sizeof raw / 65535 * 5 + 64];
-    uint8_t ihdr[13] = {0, 0, W >> 8, W & 255, 0, 0, H >> 8, H & 255, 8, 2, 0, 0, 0};
-    uint32_t a = 1, b = 0;
-    size_t i, at = 0, zn = 0;
-    int y, x;
-    FILE *f;
-    for (y = 0; y < H; y++) {
-        raw[y * (1 + 3 * W)] = 0;
-        for (x = 0; x < W; x++) {
-            uint16_t c = y < OK_UI_H ? top[y * W + x] : y >= OK_UI_H + 8 ? bottom[(y - OK_UI_H - 8) * W + x] : 0x8000;
-            uint8_t *p = raw + y * (1 + 3 * W) + 1 + 3 * x;
-            p[0] = (uint8_t)((c & 31) * 255 / 31);
-            p[1] = (uint8_t)((c >> 5 & 31) * 255 / 31);
-            p[2] = (uint8_t)((c >> 10 & 31) * 255 / 31);
-        }
-    }
-    z[zn++] = 0x78;
-    z[zn++] = 0x01;
-    while (at < sizeof raw) {
-        size_t n = sizeof raw - at > 65535 ? 65535 : sizeof raw - at;
-        z[zn++] = at + n == sizeof raw;
-        z[zn++] = (uint8_t)n;
-        z[zn++] = (uint8_t)(n >> 8);
-        z[zn++] = (uint8_t)~n;
-        z[zn++] = (uint8_t)(~n >> 8);
-        memcpy(z + zn, raw + at, n);
-        zn += n;
-        at += n;
-    }
-    for (i = 0; i < sizeof raw; i++) {
-        a = (a + raw[i]) % 65521;
-        b = (b + a) % 65521;
-    }
-    z[zn++] = (uint8_t)(b >> 8);
-    z[zn++] = (uint8_t)b;
-    z[zn++] = (uint8_t)(a >> 8);
-    z[zn++] = (uint8_t)a;
-    if (!(f = fopen(path, "wb"))) {
-        perror(path);
-        return;
-    }
-    fwrite("\x89PNG\r\n\x1a\n", 1, 8, f);
-    chunk(f, "IHDR", ihdr, 13);
-    chunk(f, "IDAT", z, (uint32_t)zn);
-    chunk(f, "IEND", NULL, 0);
-    fclose(f);
-    printf("okupa-preview: %s\n", path);
+    static uint16_t canvas[W * H];
+    int i;
+    for (i = 0; i < W * H; i++) canvas[i] = 0x8000;
+    memcpy(canvas, top, sizeof top);
+    memcpy(canvas + W * (OK_UI_H + 8), bottom, sizeof bottom);
+    png_write(path, canvas, W, H, 1);
 }
 
-static void shot(const char *dir, const char *name, const ok_ui *u, const ok_pet *p, int hour)
+/* Lets the okupa live a little (the pet stays as it is), then takes the picture. */
+static void shot(const char *dir, const char *name, ok_ui *u, const ok_pet *p, int hour)
 {
     char path[512];
+    int i;
+    for (i = 0; i < 90; i++) ok_ui_tick(u, p);
     ok_ui_render(u, p, hour, 42, ok_font(), top, bottom);
     snprintf(path, sizeof path, "%s/%s.png", dir, name);
     png(path);
@@ -141,6 +87,51 @@ static void tech_shots(const char *dir)
     }
 }
 
+/* Six little pictures as a player might draw them, for the wall. */
+static void doodle(uint8_t *d, int kind)
+{
+    int x, y;
+    memset(d, 0, OK_DRAWING_BYTES);
+    for (y = 0; y < 64; y++)
+        for (x = 0; x < 64; x++) {
+            int dx = x - 32, dy = y - 32, r2 = dx * dx + dy * dy, on = 0;
+            switch (kind) {
+            case 0: on = (r2 < 22 * 22 && r2 > 19 * 19) || (r2 < 9 && (dx == -8 || dx == 8 || 1) && dy == -6 && (dx < -5 || dx > 5)) ||
+                         (dy > 4 && dy < 8 && dx * dx < 120 && r2 > 100); break; /* a smiley */
+            case 1: on = (y > 30 && y < 56 && x > 14 && x < 50 && (x == 15 || x == 49 || y == 55 || y == 31)) ||
+                         (y <= 30 && y > 8 && (y - 8 == 32 - x || y - 8 == x - 32)) || (x > 27 && x < 36 && y > 42 && y < 56 && (x == 28 || x == 35 || y == 43)); break; /* a house */
+            case 2: on = ((y + (x / 6 % 2 ? x % 6 : 6 - x % 6)) % 14) < 2; break; /* waves */
+            case 3: on = r2 < 12 * 12 || ((dx == 0 || dy == 0 || dx == dy || dx == -dy) && r2 > 16 * 16 && r2 < 27 * 27); break; /* a sun */
+            case 4: on = (y > 50 && y < 53) || (x > 30 && x < 34 && y > 20 && y < 52) || ((x - 32) * (x - 32) + (y - 18) * (y - 18) * 2 < 120); break; /* a tree */
+            default: on = ((dx > 0 ? dx : -dx) + (dy > 0 ? dy : -dy) < 24 && (dx > 0 ? dx : -dx) + (dy > 0 ? dy : -dy) > 20) || r2 < 16; break; /* a gem */
+            }
+            if (on) ok_drawing_set(d, (unsigned)x, (unsigned)y, 1);
+        }
+}
+
+/* The wall full of pictures seen in blocks, and a new one being hung. */
+static void wall_shots(const char *dir, ok_ui *u, const ok_pet *p)
+{
+    char path[512];
+    int k, i;
+    static const int at[3] = {10, 34, 70};
+    u->scene = OK_UI_HOME;
+    u->ready = 0;
+    u->wall_known = 0;
+    u->wall_count = 5;
+    for (k = 0; k < 6; k++) doodle(u->wall[k], k);
+    for (i = 0; i < 30; i++) ok_ui_tick(u, p);
+    u->wall_count = 6; /* the sixth one is seen in a block */
+    for (k = 0; k < 3; k++) {
+        while (u->hang_t < at[k] && i++ < 400) ok_ui_tick(u, p);
+        ok_ui_render(u, p, 11, 20, ok_font(), top, bottom);
+        snprintf(path, sizeof path, "%s/home-hang-%d.png", dir, k + 1);
+        png(path);
+    }
+    while (u->hang_t) ok_ui_tick(u, p);
+    shot(dir, "home-wall", u, p, 11);
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "build/preview";
@@ -152,17 +143,33 @@ int main(int argc, char **argv)
     ok_pet_init(&p, t);
     ok_ui_init(&u);
     shot(dir, "home-morning", &u, &p, 10);
+    ok_ui_touch(&u, &p, 159, 60, 0, t); /* Pet */
+    shot(dir, "home-petted", &u, &p, 10);
     p.need[OK_NEED_HUNGER] = 20;
+    u.say = NULL;
     shot(dir, "home-hungry-evening", &u, &p, 19);
     p.asleep = 1;
+    u.ready = 0;
     shot(dir, "home-asleep-night", &u, &p, 23);
     p.asleep = 0;
+    u.ready = 0;
+    p.need[OK_NEED_HUNGER] = 70;
+    u.scene = OK_UI_CLOSET;
+    u.look.top = OK_TOP_STRIPES;
+    u.look.colour = 3;
+    shot(dir, "closet", &u, &p, 12);
     u.scene = OK_UI_SKETCH;
     for (i = 0; i < 64; i++) {
         ok_drawing_set(u.drawing, (unsigned)i, (unsigned)(32 + (i % 16 < 8 ? i % 8 : 8 - i % 8)), 1);
         ok_drawing_set(u.drawing, 32, (unsigned)i, i > 10 && i < 50);
     }
     shot(dir, "sketchbook", &u, &p, 15);
+    {
+        static ok_ui w;
+        ok_ui_init(&w);
+        wall_shots(dir, &w, &p);
+        for (i = 0; i < 12; i++) ok_house_frame(i, NULL);
+    }
     u.scene = OK_UI_DEV;
     snprintf(u.dev[0], sizeof u.dev[0], "keccak256(abc)      ok  0 ms");
     snprintf(u.dev[1], sizeof u.dev[1], "sign tx (eth-acct)  ok 41 ms");
