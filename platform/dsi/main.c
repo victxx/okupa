@@ -470,8 +470,10 @@ int main(void)
                 size_t len;
                 if (!ok_dsi_net_pending(hash)) {
                     uint64_t nonce = ok_dsi_net_take_nonce();
-                    if (ok_dsi_account_hello(ok_dsi_net_chain_id(), nonce, tx, sizeof tx, &len, hash))
+                    if (ok_dsi_account_hello(ok_dsi_net_chain_id(), nonce, tx, sizeof tx, &len, hash)) {
                         ok_dsi_net_send(tx, len, hash);
+                        ok_facts_log(ok_dsi_uptime(), 'E', "signed hello %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+                    }
                 }
             }
             if (r == OK_UI_SEND_DRAWING && storage) {
@@ -487,6 +489,7 @@ int main(void)
                 } else if (ok_dsi_account_act(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), ui.drawing, tx, sizeof tx,
                                               &len, hash)) {
                     ok_dsi_net_send(tx, len, hash);
+                    ok_facts_log(ok_dsi_uptime(), 'E', "signed drawing %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
                     memcpy(sent_pixels, ui.drawing, 512);
                     memcpy(sent_hash, hash, 32);
                     sent_waiting = 1;

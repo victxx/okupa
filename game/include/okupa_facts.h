@@ -10,6 +10,7 @@
 
 #define OK_FACTS_PEERS 8 /* the last dial attempts, newest first */
 #define OK_FACTS_BLOCKS 4
+#define OK_FACTS_LOG 32
 
 typedef struct {
     uint8_t ip[4];
@@ -99,9 +100,25 @@ typedef struct {
     char ssid[33];
     uint8_t ip[4];
     int rssi;
+
+    /* What just happened, newest last: a live feed for the screens. */
+    struct {
+        uint32_t t;   /* seconds since the console started */
+        char src;     /* 'E' Ethereum, 'G' 0G, 'D' the DSi itself */
+        char text[40];
+    } log[OK_FACTS_LOG];
+    uint32_t log_count; /* entries ever written; the ring keeps the last OK_FACTS_LOG */
 } ok_facts;
 
 /* The one record, owned by the platform. */
 extern ok_facts ok_facts_now;
+
+/* Adds a line to the live feed. now is seconds since start (any clock that
+ * only moves forward). */
+void ok_facts_log(uint32_t now, char src, const char *fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 3, 4)))
+#endif
+    ;
 
 #endif
