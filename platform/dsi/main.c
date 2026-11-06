@@ -198,12 +198,20 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
                                              OK_MOVE_TO_DOOR};
     static const int poses[OK_FEELINGS] = {OK_POSE_HAPPY, OK_POSE_HUNGRY, OK_POSE_SLEEPY,
                                            OK_POSE_BORED, OK_POSE_LONELY, OK_POSE_IDLE};
+    /* When the mind stays quiet, the bubble shows what it decided to do, so
+     * every decision from 0G is seen; the body's own idle glances and small
+     * moves between decisions are local animation, never shown as said. */
+    static const char *const doing[OK_ACTIVITIES] = {"*looks around*", "*scratches*", "*stretches*", "*hops*",
+                                                     "*peeks*",        "*wanders*",   "*sighs*",     "*waves*",
+                                                     "*munches*",      "*plays*",     "*yawns*",     "*heads out*",
+                                                     "*heads in*"};
     int move = moves[d->activity], where = OK_PLACE_ATTIC, here = ok_house_where();
+    const char *said = d->line[0] ? d->line : doing[d->activity];
     if (d->activity == OK_MIND_GO_OUTSIDE) where = OK_PLACE_GARDEN;
     if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
         (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
         move = OK_MOVE_LOOK; /* already there: it just looks around */
-    ok_ui_direct(u, p, move, where, poses[d->mood], d->line);
+    ok_ui_direct(u, p, move, where, poses[d->mood], said);
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
 }
 
