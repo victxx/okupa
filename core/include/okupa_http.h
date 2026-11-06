@@ -8,6 +8,9 @@
  * transport (TCP, TLS) belongs to the platform. */
 ok_result ok_http_request(const char *method, const char *host, const char *path, const char *headers,
                           const char *body, size_t body_len, char *out, size_t cap, size_t *len);
+/* The same, asking the server to keep the connection open for the next one. */
+ok_result ok_http_request_alive(const char *method, const char *host, const char *path, const char *headers,
+                                const char *body, size_t body_len, char *out, size_t cap, size_t *len);
 
 typedef struct {
     int status;

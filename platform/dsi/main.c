@@ -2,11 +2,14 @@
  * same core and game code as the host; this file only owns the hardware. */
 #include "account.h"
 #include "audio.h"
+#include "mind.h"
 #include "net.h"
 #include "okupa_music.h"
 #include "okupa_checks.h"
 #include "okupa.h"
 #include "okupa_font.h"
+#include "okupa_house.h"
+#include "okupa_monkey.h"
 #include "okupa_save.h"
 #include "okupa_facts.h"
 #include "okupa_tech.h"
@@ -184,13 +187,34 @@ static void machine_facts(int checks)
     }
 }
 
+/* A verified decision of the okupa's mind becomes what the 3D okupa does:
+ * its move, a mood while it is fresh and the line it says. The mind only
+ * suggests going to bed; the pet decides whether it is tired enough. */
+static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
+{
+    static const int moves[OK_ACTIVITIES] = {OK_MOVE_LOOK,   OK_MOVE_SCRATCH, OK_MOVE_STRETCH, OK_MOVE_HOP,
+                                             OK_MOVE_PEEK,   OK_MOVE_WANDER,  OK_MOVE_SIGH,    OK_MOVE_WAVE,
+                                             OK_MOVE_EAT,    OK_MOVE_PLAY,    OK_MOVE_IDLE,    OK_MOVE_TO_DOOR,
+                                             OK_MOVE_TO_DOOR};
+    static const int poses[OK_FEELINGS] = {OK_POSE_HAPPY, OK_POSE_HUNGRY, OK_POSE_SLEEPY,
+                                           OK_POSE_BORED, OK_POSE_LONELY, OK_POSE_IDLE};
+    int move = moves[d->activity], where = OK_PLACE_ATTIC, here = ok_house_where();
+    if (d->activity == OK_MIND_GO_OUTSIDE) where = OK_PLACE_GARDEN;
+    if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
+        (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
+        move = OK_MOVE_LOOK; /* already there: it just looks around */
+    ok_ui_direct(u, p, move, where, poses[d->mood], d->line);
+    if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
+}
+
 int main(void)
 {
-    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0;
+    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0;
     uint32_t frame_at, late = 0, draw_us = 0;
     ok_look worn;
     ok_tech tech;
-    time_t now = time(NULL), last = now, saved_at = now;
+    time_t now = time(NULL), last = now, saved_at = now, last_input = now;
+    ok_mind thought; /* the mind's latest decision */
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
@@ -229,6 +253,8 @@ int main(void)
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
     ok_dsi_net_start();
+    ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
+    ok_dsi_mind_start(storage ? net_dir : NULL);
     ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
     frame_at = cpuGetTiming();
@@ -299,6 +325,7 @@ int main(void)
         if (redraw) {
             snprintf(ui.net_status, sizeof ui.net_status, "%s", ok_dsi_net_summary());
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
+            else if (show_mind && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_mind_lines(), sizeof ui.dev);
             else if (ui.scene == OK_UI_DEV && ui.dev[OK_UI_DEV_LINES - 1][0])
                 snprintf(ui.dev[OK_UI_DEV_LINES - 4], sizeof ui.dev[0], "Frame: %lu.%lu ms to draw",
                          (unsigned long)(draw_us / 1000), (unsigned long)(draw_us / 100 % 10));
@@ -309,6 +336,18 @@ int main(void)
                              hash[2], hash[3], ok_dsi_net_handed());
             }
         }
+        /* The okupa's mind on 0G lives in its own thread: tell it what the
+         * okupa notices, take what it decided. Y on the Dev screen shows it
+         * and pauses or resumes it. */
+        if (keysDown() || (keysHeld() & KEY_TOUCH)) last_input = now;
+        ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, (uint32_t)(now - last_input),
+                            (keysDown() & KEY_TOUCH) ? "touched the screen" : NULL);
+        if (ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
+            if (show_mind) ok_dsi_mind_toggle();
+            show_mind = 1;
+            show_net = 0;
+        }
+        if (ok_dsi_mind_take(&thought)) obey(&ui, &pet, &thought, (int64_t)now);
         if (tech_on) {
             if ((keysDown() & KEY_TOUCH)) {
                 touchRead(&touch);
@@ -333,6 +372,7 @@ int main(void)
                 memset(ui.dev, 0, sizeof ui.dev);
                 snprintf(ui.dev[0], sizeof ui.dev[0], "Running the core checks...");
                 show_net = 0;
+                show_mind = 0;
                 tm = localtime(&now);
                 ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
                 present(top, bottom);
@@ -392,7 +432,7 @@ int main(void)
                     }
                 }
             }
-            if (r == OK_UI_RUN_NETWORK) show_net = 1; /* the postman is always running: just show it */
+            if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
             ok_ui_release(&ui);
