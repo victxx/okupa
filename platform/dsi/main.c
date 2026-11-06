@@ -352,6 +352,39 @@ static int send_letter(const char *text, char sent_day[11], const char *today)
     return 1;
 }
 
+/* The Mail button: the letters the okupa sent (letters.txt: "date hash
+ * text" a line), the newest one in the bubble. */
+static void show_mail(ok_ui *u, const char *dir)
+{
+    static char said[200];
+    char path[64], line[256], last[256] = "", on_path[64];
+    int count = 0, on = 0;
+    FILE *f;
+    snprintf(on_path, sizeof on_path, "%.40sletters-on.txt", dir);
+    if ((f = fopen(on_path, "r"))) {
+        on = 1;
+        fclose(f);
+    }
+    snprintf(path, sizeof path, "%.40sletters.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        while (fgets(line, sizeof line, f))
+            if (strlen(line) > 28) {
+                count++;
+                snprintf(last, sizeof last, "%s", line);
+            }
+        fclose(f);
+    }
+    last[strcspn(last, "\r\n")] = 0;
+    if (count)
+        snprintf(said, sizeof said, "%d letter%s on Ethereum. Last, %.10s: %.120s", count, count > 1 ? "s" : "", last,
+                 last + 28);
+    else
+        snprintf(said, sizeof said, on ? "No letters yet. I'll write you one when something matters."
+                                       : "No letters yet. Letters are off (letters-on.txt on the SD).");
+    u->say = said;
+    u->say_ticks = 60 * 8;
+}
+
 int main(void)
 {
     int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0, threads_on = 0;
@@ -365,6 +398,7 @@ int main(void)
      * past it. */
     static ok_mind thought; /* the mind's latest decision */
     int listening = 0; /* a clip is with 0G */
+    int menu_talk = 0, menu_look = 0, menu_games = 0; /* the menu's Talk (1 start, 2 held, 3 let go), Photo, Games */
     int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0; /* Pictionary */
     char game_guess[OK_MIND_TEXT + 1] = "";
     static uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
@@ -560,12 +594,16 @@ int main(void)
         /* Talk to it: hold L and speak, let go, and 0G turns it into words it
          * answers. R: it looks at you through the camera. (On the SELECT
          * screens L and R turn pages instead.) */
-        if (!tech_on && (keysDown() & KEY_L) && !ok_dsi_mind_ear_busy()) {
+        if (!tech_on && ((keysDown() & KEY_L) || menu_talk == 1) && !ok_dsi_mind_ear_busy()) {
             ok_dsi_ear_start();
             ok_ui_ask(&ui, NULL); /* it is being answered */
             ok_ui_listening(&ui, 1);
+            if (menu_talk == 1) menu_talk = 2; /* held on the Talk button */
+        } else if (menu_talk == 1) {
+            menu_talk = 0;
         }
-        if ((keysUp() & KEY_L) && ok_dsi_ear_recording()) {
+        if ((((keysUp() & KEY_L) && menu_talk != 2) || menu_talk == 3) && ok_dsi_ear_recording()) {
+            menu_talk = 0;
             size_t len;
             const uint8_t *wav = ok_dsi_ear_stop(&len);
             if (wav) {
@@ -582,7 +620,8 @@ int main(void)
         /* Pictionary against the okupa's mind: X and it guesses the drawing
          * in the sketchbook (0G's vision model, checked here); A says it is
          * right, B wrong. */
-        if (!tech_on && (keysDown() & KEY_X) && !game_waiting) {
+        if (menu_talk == 3) menu_talk = 0;
+        if (!tech_on && ((keysDown() & KEY_X) || menu_games) && !game_waiting) {
             int k;
             for (k = 0; k < (int)sizeof ui.drawing && !ui.drawing[k]; k++) {}
             if (k == (int)sizeof ui.drawing) {
@@ -626,7 +665,9 @@ int main(void)
                          game_you);
             game_asked = 0;
         }
-        if (!tech_on && (keysDown() & KEY_R)) {
+        menu_games = 0;
+        if (!tech_on && ((keysDown() & KEY_R) || menu_look)) {
+            menu_look = 0;
             ok_dsi_mind_look();
             ui.say = "Let me look at you...";
             ui.say_ticks = 60 * 3;
@@ -788,10 +829,17 @@ int main(void)
                 }
             }
             if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
+            /* The menu's mind buttons do what the keys do: Photo is R, Games
+             * is X, Talk is L (held on the button), Mail shows the letters. */
+            if (r == OK_UI_PHOTO) menu_look = 1;
+            if (r == OK_UI_GAMES) menu_games = 1;
+            if (r == OK_UI_TALK && !held) menu_talk = 1;
+            if (r == OK_UI_MAIL && storage) show_mail(&ui, net_dir);
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
             ok_ui_release(&ui);
             held = 0;
+            if (menu_talk == 2) menu_talk = 3; /* let go of Talk: the clip goes to 0G */
         }
         /* Save what the player changed once the stylus is up, and the passing
          * time every five minutes; never more than once every two seconds. */
