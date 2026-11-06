@@ -65,6 +65,7 @@ typedef struct {
     int32_t x, z, goal_x, goal_z; /* hundredths */
     int mood, move, move_t, stage, next_idle, walking, phase;
     int blink, look, bites;
+    int gaze_turn, gaze_nod, gaze_t; /* where it is glancing while idle */
     uint32_t ticks, seed;
 } ok_monkey_anim;
 

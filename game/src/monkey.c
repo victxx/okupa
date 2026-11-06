@@ -111,16 +111,16 @@ void ok_monkey_skin(const ok_look *look, uint16_t skin[OK_SKIN * OK_SKIN])
 /* Stiffness and damping per spring, in 1/256 per tick. Stiff springs follow
  * closely; soft ones lag and overshoot, which is what makes it look alive. */
 static const uint8_t stiff[OK_SPRINGS] = {
-    180, 60, 60, 70, 50, 60, 110, 110, 110, 110, 200, 200, /* bob .. legs */
+    180, 60, 60, 70, 60, 60, 110, 110, 110, 110, 250, 250, /* bob .. legs */
     90, 50, 30, 20,                                        /* tail, each joint softer */
     60, 200, 60, 40, 25, 250,                              /* ear, squash, mask, yaw, lie, ball */
-    60, 110, 110, 200, 200, 14, 10,                        /* chest, elbows, foot lifts, tail tip */
+    60, 110, 110, 250, 250, 14, 10,                        /* chest, elbows, foot lifts, tail tip */
 };
 static const uint8_t damp[OK_SPRINGS] = {
-    91, 61, 60, 65, 56, 60, 77, 77, 77, 77, 112, 112,
+    91, 61, 60, 65, 62, 60, 77, 77, 77, 77, 125, 125,
     43, 28, 22, 18,
     22, 56, 70, 64, 56, 179,
-    60, 77, 77, 112, 112, 16, 14,
+    60, 77, 77, 125, 125, 16, 14,
 };
 
 static uint32_t rnd(ok_monkey_anim *a)
@@ -243,6 +243,14 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     if (a->move == OK_MOVE_IDLE && --a->next_idle <= 0) pick(a, wear);
     mt = a->move_t;
 
+    /* Glances: every second or three it looks somewhere else, quickly, the way
+     * eyes jump, and the head follows on its spring. */
+    if (--a->gaze_t <= 0) {
+        a->gaze_turn = below(a, 29) - 14;
+        a->gaze_nod = below(a, 11) - 5;
+        a->gaze_t = 50 + below(a, 160);
+        if (below(a, 4) == 0) a->gaze_turn = a->gaze_nod = 0; /* back to you */
+    }
     /* The mood sets the resting pose. */
     t[OK_SPRING_SQUASH] = 100 + wave(k, 17, 1);
     t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 9;
@@ -251,6 +259,7 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     t[OK_SPRING_TAIL0] = wave(k, 19, 9);
     switch (mood) {
     case OK_POSE_HAPPY:
+        t[OK_SPRING_TURN] = a->gaze_turn / 2;
         t[OK_SPRING_BOB] = wave(k, 70, 14) < 0 ? -wave(k, 70, 14) : wave(k, 70, 14);
         t[OK_SPRING_ROLL] = wave(k, 35, 5);
         t[OK_SPRING_RAISE_L] = 18 + wave(k, 70, 6);
@@ -289,15 +298,17 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         t[OK_SPRING_BOB] = -5;
         break;
     case OK_POSE_LONELY:
-        t[OK_SPRING_NOD] = -4;
+        t[OK_SPRING_NOD] = -4 + a->gaze_nod;
         t[OK_SPRING_TILT] = 5;
-        t[OK_SPRING_TURN] = wave(k, 7, 8);
+        t[OK_SPRING_TURN] = a->gaze_turn * 3 / 2;
         t[OK_SPRING_BOB] = wave(k, 20, 4);
         break;
     default:
         t[OK_SPRING_BOB] = wave(k, 17, 5);
-        t[OK_SPRING_TURN] = wave(k, 7, 8);
-        t[OK_SPRING_TILT] = wave(k, 11, 3);
+        t[OK_SPRING_TURN] = a->gaze_turn;
+        t[OK_SPRING_NOD] = a->gaze_nod;
+        t[OK_SPRING_ROLL] = wave(k, 9, 3);                    /* weight shifting from foot to foot */
+        t[OK_SPRING_TILT] = wave(k, 11, 3) - wave(k, 9, 2); /* the head stays level against it */
         t[OK_SPRING_RAISE_L] = 9 + wave(k, 17, 2);
         t[OK_SPRING_RAISE_R] = 9 - wave(k, 17, 2);
     }
@@ -462,8 +473,12 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         if (a->stage == 0) {
             if (walk(a, a->room.bed_x, a->room.bed_z + 420)) a->stage = 1, a->move_t = 0;
         } else {
-            t[OK_SPRING_LIE] = 100;
-            if (mt > 70) start(a, OK_MOVE_SLEEP);
+            if (mt < 18) { /* a little hop up onto the mattress */
+                t[OK_SPRING_BOB] = mt < 6 ? -18 : 46;
+                t[OK_SPRING_SQUASH] = mt < 6 ? 88 : 108;
+            }
+            t[OK_SPRING_LIE] = mt > 8 ? 100 : 0;
+            if (mt > 80) start(a, OK_MOVE_SLEEP);
         }
         t[OK_SPRING_NOD] = 12;
         break;
@@ -497,17 +512,30 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
     /* Walking: legs and arms swing, the body bobs twice a stride. */
     if (a->move == OK_MOVE_IDLE && (a->x != a->room.home_x || a->z != a->room.home_z)) walk(a, a->room.home_x, a->room.home_z);
     if (a->walking) {
-        int lift = (int)((int64_t)ok_r3d_cos((int)(k * 150u)) * 26 / 4096);
-        t[OK_SPRING_LEG_L] = wave(k, 150, 42);
-        t[OK_SPRING_LEG_R] = -wave(k, 150, 42);
-        t[OK_SPRING_LIFT_L] = lift > 0 ? lift : 0; /* the foot moving forward is in the air */
-        t[OK_SPRING_LIFT_R] = lift < 0 ? -lift : 0;
+        /* A real gait: the planted foot slides back exactly as fast as the
+         * body moves (half a stride per half cycle), the other swings
+         * forward through the air. */
+        int side;
+        for (side = 0; side < 2; side++) {
+            int q = (int)((k * 150u + (uint32_t)side * 2048u) & 4095u), off, lift = 0;
+            if (q < 2048) {
+                off = 27 - 54 * q / 2048;
+            } else {
+                off = -27 + 54 * (q - 2048) / 2048;
+                lift = (int)((int64_t)ok_r3d_sin((q - 2048) / 2) * 30 / 4096);
+            }
+            t[side ? OK_SPRING_LEG_R : OK_SPRING_LEG_L] = off;
+            t[side ? OK_SPRING_LIFT_R : OK_SPRING_LIFT_L] = lift;
+        }
         t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 26;
         t[OK_SPRING_FWD_L] = -wave(k, 150, 22);
         t[OK_SPRING_FWD_R] = wave(k, 150, 22);
         t[OK_SPRING_BOB] = (wave(k, 300, 12) < 0 ? -wave(k, 300, 12) : wave(k, 300, 12)) - 4;
         t[OK_SPRING_LEAN] = 6;
         t[OK_SPRING_ROLL] = wave(k, 150, 4);
+        t[OK_SPRING_TILT] = -wave(k, 150, 3); /* the head keeps level over the swaying hips */
+        t[OK_SPRING_NOD] = 3;
+        t[OK_SPRING_TURN] = 0;
         t[OK_SPRING_TAIL0] = wave(k, 150, 14);
         t[OK_SPRING_YAW] = ok_r3d_atan2(a->goal_x - a->x, a->goal_z - a->z) * 360 / OK_TURN;
         if (t[OK_SPRING_YAW] > 180) t[OK_SPRING_YAW] -= 360;
@@ -608,20 +636,24 @@ static void flower(void)
 static void smiley(const ok_monkey_anim *a, ok_monkey_face *f)
 {
     int m = val(a, OK_SPRING_MASK), cx, cy;
-    int x = 160 + (0 - 160) * m / 100, y = 775 + (610 - 775) * m / 100, z = 120 + (262 - 120) * m / 100;
-    int ry = 45 + (0 - 45) * m / 100, rz = -22 + (0 + 22) * m / 100;
+    /* On the side it sits tangent to the skull (up and out, facing where the
+     * head's surface faces) so no part of it sinks in; over the face it sits
+     * just in front of the snout. */
+    int x = 172 + (0 - 172) * m / 100, y = 772 + (600 - 772) * m / 100, z = 134 + (280 - 134) * m / 100;
+    int ry = 50 + (0 - 50) * m / 100, rx = -32 + (0 + 32) * m / 100, rz = -14 + (0 + 14) * m / 100;
     ok_r3d_push();
     ok_r3d_translate(P(x, y, z));
     ok_r3d_rotate_y(DEG(ry));
+    ok_r3d_rotate_x(DEG(rx));
     ok_r3d_rotate_z(DEG(rz));
     f->smiley_id = solid(RGB(31, 26, 3));
-    ok_r3d_ellipsoid(P(0, 0, 0), P(118, 118, 30), 14, 6);
+    ok_r3d_ellipsoid(P(0, 0, 0), P(108, 108, 24), 14, 6);
     solid(RGB(4, 4, 3));
-    limb(-112, 10, -10, -150, 30, -120, 9);
-    if (ok_r3d_project(P(0, 0, 31), &cx, &cy, NULL)) {
+    limb(-102, 8, -10, -136, 24, -90, 8);
+    if (ok_r3d_project(P(0, 0, 25), &cx, &cy, NULL)) {
         int ux, uy, vx, vy;
-        ok_r3d_project(P(100, 0, 31), &ux, &uy, NULL);
-        ok_r3d_project(P(0, 100, 31), &vx, &vy, NULL);
+        ok_r3d_project(P(92, 0, 25), &ux, &uy, NULL);
+        ok_r3d_project(P(0, 92, 25), &vx, &vy, NULL);
         f->mask_x = cx;
         f->mask_y = cy;
         f->mask_ux = ux - cx;
@@ -907,7 +939,9 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
 
     /* The face for this moment. */
     face->glasses = look->wear == OK_WEAR_GLASSES;
-    face->look = a->move == OK_MOVE_LOOK ? (val(a, OK_SPRING_TURN) > 12 ? 1 : val(a, OK_SPRING_TURN) < -12 ? -1 : 0) : 0;
+    /* The eyes get there first: they point where the head is going. */
+    face->look = a->move == OK_MOVE_LOOK ? a->look
+                 : a->move == OK_MOVE_IDLE && !a->walking ? (a->gaze_turn > 6 ? 1 : a->gaze_turn < -6 ? -1 : 0) : 0;
     face->eyes = 'o';
     face->mouth = 's';
     switch (mood) {
