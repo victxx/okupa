@@ -23,7 +23,9 @@ static const char SYSTEM[] =
     "needs change; otherwise stay quiet or just think. Ask rarely, only to learn something about the player (their "
     "name, what they like, where they are, how their day was), never while a question is waiting, and use what you "
     "know. When the player answers, react to it and remember what matters. Never repeat a recent line. Keep to its "
-    "needs: hungry means eat, tired means sleep. go_outside only from the attic, go_inside only from the garden.";
+    "needs: hungry means eat, tired means sleep. go_outside only from the attic, go_inside only from the garden. "
+    "Act like a living creature, not a remote control: keep doing what you were doing for a while, change only "
+    "for a reason, and flow from one thing to the next (stretch before you wander, look before you go out).";
 
 const char *ok_mind_activity_name(int a) { return a >= 0 && a < OK_ACTIVITIES ? activities[a] : "?"; }
 const char *ok_mind_mood_name(int m) { return m >= 0 && m < OK_FEELINGS ? moods[m] : "?"; }
