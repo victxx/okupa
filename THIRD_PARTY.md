@@ -9,6 +9,7 @@ Every external piece is pinned, hashed and licensed here. Nothing is modified in
 | BearSSL (SHA-256, HMAC, constant-time AES) | `third_party/bearssl/` (git submodule) | https://www.bearssl.org/git/BearSSL | `v0.6` = `8ef7680081c61b486622f2d983c0d3d21e83caad` | MIT | pinned by the submodule commit |
 | font8x8 (8x8 bitmap font) | `third_party/font8x8/font8x8_basic.h` | https://github.com/dhepper/font8x8 | `8e279d2d864e79128e96188a6b9526cfa3fbfef9` | Public domain | `font8x8_basic.h` 49d8df366296b203ca3211bc0672cf2a762135bf12710735b6292756b19dffd5 |
 | Pixel Operator (sans pixel font, regular and bold) | `game/src/font_sans.c` (glyphs rasterised by `tools/font_sans.py`; the TTFs are not in the repo) | https://www.dafont.com/pixel-operator.font, by Jayvee Enaguas (HarvettFox96) | release of 2018-10-04 | CC0 1.0 | `PixelOperator.ttf` 8d805274eaf227855147153182a96a86ff395ddbc7d2d378095af8831b764a3e, `PixelOperator-Bold.ttf` c1963fa21043a357212e0a9e8ae1986bc375c1759e68bd3533c4f71b164614b0 |
+| Attic textures (16 tiles) | `game/src/room_skin.c` (made by `tools/texture.py`; the source sheet stays in `local/art/`) | Generated with ChatGPT image generation on 2026-11-06 at the author's request; prompt in `tools/art/room-sheet-prompt.txt` | `room-sheet-1.png`, 1254x1254 | Output owned by the author under OpenAI's terms of use | `room-sheet-1.png` 92b10b59395f0180e00f4e036c3552ebd25b6f6d7c93538f9d35ea3e68863d60 |
 
 
 ## TLS root certificates

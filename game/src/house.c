@@ -24,11 +24,27 @@ static void blob(int x, int y, int z, int rx, int ry, int rz)
     ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 10, 7);
 }
 
+static void limb_house(int x0, int y0, int z0, int x1, int y1, int z1, int r)
+{
+    ok_r3d_capsule(P(x0, y0, z0), P(x1, y1, z1), U(r), 6);
+}
+
 static int next_id;
 
 static void mat(uint16_t c, int flags)
 {
+    ok_r3d_texture(NULL, 0);
     ok_r3d_material(c, ++next_id, flags);
+}
+
+/* A textured material: one tile of the attic's skin, repeated `per_unit`
+ * texels to a unit (0: wrapped once round a curved shape). c is its outline. */
+static void tex(int tile, int per_unit, uint16_t c, int flags)
+{
+    ok_r3d_texture(ok_room_skin, 128);
+    ok_r3d_uv(tile % 4 * 32, tile / 4 * 32, 32, 32);
+    ok_r3d_tile(per_unit);
+    ok_r3d_material(c, ++next_id, flags | OK_R3D_TEXTURED);
 }
 
 void ok_house_room(ok_monkey_room *room)
@@ -37,7 +53,7 @@ void ok_house_room(ok_monkey_room *room)
     room->home_x = 250;
     room->home_z = 300;
     room->bed_x = -620;
-    room->bed_y = 165;
+    room->bed_y = 215;
     room->bed_z = -640;
     room->spot_x[0] = 150, room->spot_z[0] = -380; /* under the window */
     room->spot_x[1] = 520, room->spot_z[1] = -330; /* by the boxes */
@@ -184,22 +200,26 @@ static struct {
 static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t *drawing)
 {
     int i, lit[24][2], lights = 0, on = l->night && !lights_off;
-    uint16_t plank = RGB(20, 13, 8), plank2 = RGB(18, 11, 7), wall = RGB(25, 21, 17), beam_c = RGB(12, 7, 4);
+    uint16_t wood = RGB(19, 12, 7), beam_c = RGB(12, 7, 4);
     next_id = 0;
     ok_r3d_begin(frame, CHARCOAL);
     ok_r3d_camera(ok_v3_make(0, U(2100), U(4600)), ok_v3_make(0, U(650), 0), 340);
     apply(l);
-    for (i = 0; i < 14; i++) {
-        mat(i % 2 ? plank : plank2, 0);
-        box(-1400 + i * 200, -100, -1100, -1200 + i * 200, 0, 1300);
-    }
-    mat(wall, 0);
+    /* Floor planks, wallpaper below the eaves, plaster above, a patch of bare brick. */
+    tex(OK_ROOM_PLANKS, 4, wood, 0);
+    box(-1400, -100, -1100, 1400, 0, 1300);
+    tex(OK_ROOM_WALLPAPER, 5, RGB(20, 22, 17), 0);
     ok_r3d_quad(P(-1400, 0, -1100), P(1400, 0, -1100), P(1400, 700, -1100), P(-1400, 700, -1100));
+    tex(OK_ROOM_PLASTER, 5, RGB(24, 21, 17), 0);
     ok_r3d_quad(P(-1400, 700, -1100), P(1400, 700, -1100), P(0, 2100, -1100), P(0, 2100, -1100));
-    mat(RGB(22, 18, 15), OK_R3D_BOTH);
+    tex(OK_ROOM_BRICK, 7, RGB(18, 8, 6), 0);
+    ok_r3d_quad(P(380, 120, -1094), P(1150, 120, -1094), P(1250, 560, -1094), P(520, 640, -1094));
+    tex(OK_ROOM_BOARDS, 6, RGB(16, 11, 7), OK_R3D_BOTH);
     ok_r3d_quad(P(-1400, 0, -1100), P(-1400, 700, -1100), P(-1400, 700, 1300), P(-1400, 0, 1300));
     ok_r3d_quad(P(1400, 0, -1100), P(1400, 700, -1100), P(1400, 700, 1300), P(1400, 0, 1300));
-    mat(beam_c, 0);
+    /* Skirting, beams and the ridge. */
+    tex(OK_ROOM_BEAM, 8, beam_c, 0);
+    box(-1400, 0, -1100, 1400, 60, -1080);
     for (i = 0; i < 2; i++) {
         int z = -1040 + i * 700, s;
         for (s = -1; s <= 1; s += 2) {
@@ -215,8 +235,8 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     ok_r3d_push();
     ok_r3d_translate(P(0, 1250, -1095));
     ok_r3d_rotate_x(OK_TURN / 4);
-    mat(beam_c, 0);
-    ok_r3d_disc(P(0, 0, 0), U(330), U(330), 16);
+    tex(OK_ROOM_FRAME, 0, RGB(22, 21, 19), 0);
+    ok_r3d_disc(P(0, 0, 0), U(340), U(340), 16);
     mat(l->sky, OK_R3D_UNLIT);
     ok_r3d_disc(P(0, 5, 0), U(280), U(280), 16);
     if (l->sun >= 0) {
@@ -229,9 +249,9 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
         mat(l->sky, OK_R3D_UNLIT);
         ok_r3d_disc(P(-85, 10, -105), U(58), U(58), 10);
     }
-    mat(beam_c, 0);
-    box(-280, 6, -20, 280, 20, 20);
-    box(-20, 6, -280, 20, 20, 280);
+    tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), 0);
+    box(-280, 6, -22, 280, 22, 22);
+    box(-22, 6, -280, 22, 22, 280);
     ok_r3d_pop();
     bulbs(-1300, 720, 0, 1950, -980, 9, on, lit, &lights);
     bulbs(0, 1950, 1300, 720, -980, 9, on, lit, &lights);
@@ -240,44 +260,73 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
         int x, y;
         for (y = 0; y < 64; y++)
             for (x = 0; x < 64; x++) art[y * 64 + x] = ok_drawing_get(drawing, (unsigned)x, (unsigned)y) ? RGB(5, 4, 4) : RGB(30, 29, 26);
-        mat(RGB(14, 9, 5), OK_R3D_EDGE);
+        tex(OK_ROOM_BEAM, 8, RGB(14, 9, 5), OK_R3D_EDGE);
         box(-1060, 330, -1100, -640, 750, -1070);
         ok_r3d_texture(art, 64);
         ok_r3d_uv(0, 0, 64, 64);
-        mat(RGB(30, 29, 26), OK_R3D_TEXTURED);
+        ok_r3d_tile(0);
+        ok_r3d_material(RGB(30, 29, 26), ++next_id, OK_R3D_TEXTURED);
         ok_r3d_quad(P(-1030, 360, -1065), P(-670, 360, -1065), P(-670, 720, -1065), P(-1030, 720, -1065));
     }
-    /* Rug, mattress and pillow, boxes, a crate with a mug and a candle, a plant in a tin. */
-    mat(RGB(27, 11, 9), 0);
-    ok_r3d_disc(P(200, 4, 300), U(650), U(420), 16);
-    mat(RGB(29, 22, 12), 0);
-    ok_r3d_disc(P(200, 6, 300), U(520), U(320), 16);
-    mat(RGB(24, 24, 26), OK_R3D_EDGE);
-    box(-1350, 0, -900, -330, 150, -380);
-    mat(RGB(29, 28, 26), OK_R3D_EDGE);
-    blob(-1130, 195, -640, 150, 55, 140);
-    mat(RGB(23, 17, 10), OK_R3D_EDGE);
+    /* A woven rug. */
+    tex(OK_ROOM_RUG, 0, RGB(20, 8, 6), 0);
+    ok_r3d_disc(P(200, 5, 300), U(660), U(430), 20);
+    /* The mattress on a pallet, pillow, a knitted blanket folded at its foot. */
+    tex(OK_ROOM_CRATE, 8, RGB(18, 12, 6), OK_R3D_EDGE);
+    box(-1380, 0, -930, -300, 60, -350);
+    tex(OK_ROOM_TICKING, 10, RGB(16, 18, 24), OK_R3D_EDGE);
+    box(-1350, 60, -900, -330, 205, -380);
+    tex(OK_ROOM_COTTON, 0, RGB(24, 22, 19), OK_R3D_EDGE);
+    blob(-1130, 245, -640, 150, 52, 140);
+    tex(OK_ROOM_KNIT, 6, RGB(5, 8, 16), OK_R3D_EDGE);
+    box(-560, 205, -880, -340, 265, -400);
+    /* Cardboard boxes, a little radio on top. */
+    tex(OK_ROOM_CARDBOARD, 7, RGB(17, 12, 7), OK_R3D_EDGE);
     box(700, 0, -1000, 1150, 350, -600);
-    mat(RGB(25, 19, 12), OK_R3D_EDGE);
     box(760, 350, -960, 1100, 630, -660);
-    mat(RGB(26, 20, 13), OK_R3D_EDGE);
     box(1160, 0, -950, 1360, 220, -650);
-    mat(RGB(28, 25, 18), 0);
-    box(700, 345, -830, 1150, 356, -770);
-    box(760, 625, -840, 1100, 636, -780);
-    mat(RGB(17, 11, 6), OK_R3D_EDGE);
+    mat(RGB(24, 8, 7), OK_R3D_EDGE);
+    box(820, 630, -880, 1040, 760, -760);
+    mat(RGB(30, 28, 22), 0);
+    ok_r3d_push();
+    ok_r3d_translate(P(880, 695, -755));
+    ok_r3d_rotate_x(OK_TURN / 4);
+    ok_r3d_disc(P(0, 0, 0), U(42), U(42), 10);
+    ok_r3d_pop();
+    mat(RGB(6, 6, 6), 0);
+    box(960, 660, -756, 1010, 730, -750);
+    limb_house(1010, 760, -820, 1080, 880, -820, 8);
+    /* The crate table with a mug and a candle. */
+    tex(OK_ROOM_CRATE, 8, RGB(18, 12, 6), OK_R3D_EDGE);
     box(-250, 0, -1000, 150, 260, -700);
     mat(RGB(28, 28, 27), OK_R3D_EDGE);
     ok_r3d_cylinder(P(-120, 260, -850), U(50), U(90), 8);
     mat(RGB(30, 29, 25), OK_R3D_EDGE);
     ok_r3d_cylinder(P(60, 260, -800), U(26), U(70), 8);
     ok_r3d_project(P(60, 360, -800), &kept.candle_x, &kept.candle_y, NULL);
-    mat(RGB(20, 22, 24), OK_R3D_EDGE);
-    ok_r3d_cylinder(P(-1150, 0, 600), U(90), U(160), 8);
-    mat(RGB(7, 18, 8), OK_R3D_EDGE);
+    /* Plants: one in an old tin, one in a clay pot. */
+    tex(OK_ROOM_TIN, 6, RGB(14, 15, 16), OK_R3D_EDGE);
+    ok_r3d_cylinder(P(-1150, 0, 600), U(90), U(160), 10);
+    tex(OK_ROOM_LEAVES, 0, RGB(4, 12, 5), OK_R3D_EDGE);
     blob(-1150, 280, 600, 140, 150, 140);
     blob(-1230, 390, 580, 80, 100, 80);
     blob(-1060, 360, 640, 70, 80, 70);
+    tex(OK_ROOM_CLAY, 8, RGB(18, 8, 4), OK_R3D_EDGE);
+    ok_r3d_cylinder(P(1180, 0, 300), U(110), U(150), 10);
+    tex(OK_ROOM_LEAVES, 0, RGB(4, 12, 5), OK_R3D_EDGE);
+    blob(1180, 260, 300, 120, 110, 120);
+    blob(1120, 390, 280, 70, 110, 70);
+    blob(1250, 360, 320, 70, 90, 70);
+    /* A pile of books by the plant, a floor cushion by the rug. */
+    mat(RGB(9, 14, 22), OK_R3D_EDGE);
+    box(-1300, 0, 150, -1020, 50, 330);
+    mat(RGB(26, 20, 8), OK_R3D_EDGE);
+    box(-1280, 50, 160, -1050, 95, 320);
+    mat(RGB(22, 9, 8), OK_R3D_EDGE);
+    box(-1290, 95, 170, -1060, 130, 315);
+    tex(OK_ROOM_KNIT, 0, RGB(5, 8, 16), OK_R3D_EDGE);
+    blob(900, 70, 760, 220, 75, 180);
+    ok_r3d_tile(0);
     ok_r3d_finish();
     /* Light that is not geometry: the bulbs' glow, the candle, the sunbeam. */
     for (i = 0; i < lights; i++) glow(frame, lit[i][0], lit[i][1], 9, 4, 3, 1);
