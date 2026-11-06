@@ -2,12 +2,17 @@
  * same core and game code as the host; this file only owns the hardware. */
 #include "okupa_checks.h"
 #include "okupa_font.h"
+#include "okupa_save.h"
 #include "okupa_ui.h"
+#include <fat.h>
 #include <nds.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <time.h>
 
 static uint16_t back[2][OK_UI_W * OK_UI_H];
+static char save_path[40], temp_path[40];
+static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
 static uint32_t now_us(void)
@@ -22,10 +27,56 @@ static void present(int top, int bottom)
     dmaCopyWords(3, back[1], bgGetGfxPtr(bottom), sizeof back[1]);
 }
 
+/* The DSi's own SD slot first, then a flashcart; never the internal memory. */
+static int open_storage(void)
+{
+    static const char *roots[] = {"sd:/", "fat:/"};
+    struct stat st;
+    unsigned i;
+    if (!fatInitDefault()) return 0;
+    for (i = 0; i < sizeof roots / sizeof roots[0]; i++) {
+        if (stat(roots[i], &st) || !S_ISDIR(st.st_mode)) continue;
+        snprintf(save_path, sizeof save_path, "%sokupa", roots[i]);
+        mkdir(save_path, 0700);
+        snprintf(save_path, sizeof save_path, "%sokupa/save.bin", roots[i]);
+        snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
+        return 1;
+    }
+    return 0;
+}
+
+static int load_file(const char *path, ok_pet *p, uint8_t drawing[512])
+{
+    uint8_t buf[OK_SAVE_SIZE + 1];
+    size_t n;
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    return ok_save_read(buf, n, p, drawing) == OK_OK;
+}
+
+/* Write a new file, then swap it in. If the power goes in between, the
+ * temporary copy is complete and loading falls back to it. */
+static int save(const ok_pet *p, const uint8_t drawing[512])
+{
+    uint8_t buf[OK_SAVE_SIZE];
+    FILE *f;
+    int ok;
+    ok_save_write(p, drawing, buf);
+    if (!(f = fopen(temp_path, "wb"))) return 0;
+    ok = fwrite(buf, 1, sizeof buf, f) == sizeof buf;
+    ok = fclose(f) == 0 && ok;
+    if (!ok) return 0;
+    remove(save_path);
+    return rename(temp_path, save_path) == 0;
+}
+
 int main(void)
 {
-    int top, bottom, held = 0, redraw = 1, fails;
-    time_t now = time(NULL), last = now;
+    int top, bottom, held = 0, redraw = 1, storage, fails;
+    time_t now = time(NULL), last = now, saved_at = now;
+    uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
     ok_pet pet;
@@ -39,8 +90,19 @@ int main(void)
     bottom = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     if (isDSiMode()) setCpuClock(true);
 
-    ok_pet_init(&pet, (int64_t)now);
     ok_ui_init(&ui);
+    ok_pet_init(&pet, (int64_t)now);
+    storage = open_storage();
+    if (storage) {
+        if (load_file(save_path, &pet, ui.drawing) || load_file(temp_path, &pet, ui.drawing)) {
+            save_status = "Save: loaded from SD";
+            ok_pet_update(&pet, (int64_t)now); /* live the time it was off */
+        } else {
+            save_status = "Save: new okupa on SD";
+        }
+    }
+    ok_save_write(&pet, ui.drawing, saved);
+
     for (;;) {
         swiWaitForVBlank();
         scanKeys();
@@ -67,12 +129,28 @@ int main(void)
                 snprintf(ui.dev[OK_UI_DEV_LINES - 3], sizeof ui.dev[0], "CPU: %s",
                          isDSiMode() ? "DSi mode, 133 MHz" : "DS mode, 67 MHz");
                 snprintf(ui.dev[OK_UI_DEV_LINES - 2], sizeof ui.dev[0], "Build: %.20s", OKUPA_BUILD_ID);
+                snprintf(ui.dev[OK_UI_DEV_LINES - 1], sizeof ui.dev[0], "%.32s", save_status);
                 (void)fails;
             }
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
             ok_ui_release(&ui);
             held = 0;
+        }
+        /* Save what the player changed once the stylus is up, and the passing
+         * time every five minutes; never more than once every two seconds. */
+        if (storage && !held && now - saved_at >= 2) {
+            ok_save_write(&pet, ui.drawing, current);
+            if (memcmp(current, saved, 5 + OK_NEEDS + 1) || memcmp(current + OK_SAVE_SIZE - 516, saved + OK_SAVE_SIZE - 516, 512) ||
+                now - saved_at >= 300) {
+                if (save(&pet, ui.drawing)) {
+                    memcpy(saved, current, sizeof saved);
+                    save_status = "Save: saved to SD";
+                } else {
+                    save_status = "Save: FAILED to write SD";
+                }
+                saved_at = now;
+            }
         }
         if (redraw) {
             tm = localtime(&now);
