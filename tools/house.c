@@ -90,6 +90,15 @@ int main(int argc, char **argv)
     still(dir, "golden", 18, 50, OK_POSE_HAPPY, 60);
     still(dir, "night", 22, 15, OK_POSE_IDLE, 60);
     still(dir, "asleep", 23, 30, OK_POSE_ASLEEP, 60);
+    { /* the terrace, with pictures on the easels and in the temple */
+        int i;
+        for (i = 6; i < 12; i++) ok_house_frame(i, drawing);
+        ok_house_place(OK_PLACE_GARDEN);
+        still(dir, "terrace-day", 11, 0, OK_POSE_IDLE, 60);
+        still(dir, "terrace-night", 22, 0, OK_POSE_IDLE, 60);
+        ok_house_place(OK_PLACE_ATTIC);
+        for (i = 6; i < 12; i++) ok_house_frame(i, NULL);
+    }
     if (argc > 2) film(argv[2]);
     return 0;
 }
