@@ -15,7 +15,9 @@ static const char SYSTEM[] =
 const char *ok_mind_activity_name(int a) { return a >= 0 && a < OK_ACTIVITIES ? activities[a] : "?"; }
 const char *ok_mind_mood_name(int m) { return m >= 0 && m < OK_FEELINGS ? moods[m] : "?"; }
 
-/* A JSON string literal; 0 if it does not fit. */
+/* A JSON string literal escaped exactly as Go's encoding/json does it (the 0G
+ * broker re-encodes the request with it before the TEE hashes it); 0 if it
+ * does not fit or holds a control byte Go would spell differently. */
 static int quote(char *out, size_t cap, size_t *o, const char *s)
 {
     if (*o + 1 >= cap) return 0;
@@ -26,8 +28,13 @@ static int quote(char *out, size_t cap, size_t *o, const char *s)
         if (c == '"' || c == '\\') {
             out[(*o)++] = '\\';
             out[(*o)++] = (char)c;
-        } else if (c < 0x20) {
+        } else if (c == '\n' || c == '\r' || c == '\t') {
+            out[(*o)++] = '\\';
+            out[(*o)++] = c == '\n' ? 'n' : c == '\r' ? 'r' : 't';
+        } else if (c == '<' || c == '>' || c == '&') {
             *o += (size_t)snprintf(out + *o, cap - *o, "\\u%04x", c);
+        } else if (c < 0x20 || c >= 0x7f) {
+            return 0; /* ASCII only: Go's spelling of the rest is not worth matching */
         } else {
             out[(*o)++] = (char)c;
         }
@@ -58,10 +65,14 @@ ok_result ok_mind_request(const char *model, const ok_pet *p, int hour, int minu
              hour % 24, minute % 60, p->need[OK_NEED_HUNGER], p->need[OK_NEED_ENERGY], p->need[OK_NEED_FUN],
              p->need[OK_NEED_LOVE], p->asleep ? "true" : "false", last_action ? last_action : "none",
              (unsigned long)minutes_away);
-    if (!raw(out, cap, &o, "{\"model\":") || !quote(out, cap, &o, model) ||
-        !raw(out, cap, &o, ",\"messages\":[{\"role\":\"system\",\"content\":") || !quote(out, cap, &o, SYSTEM) ||
-        !raw(out, cap, &o, "},{\"role\":\"user\",\"content\":") || !quote(out, cap, &o, user) ||
-        !raw(out, cap, &o, "}],\"temperature\":0.7,\"max_tokens\":200}"))
+    /* Keys sorted and no spaces, as Go re-encodes it: the bytes the TEE hashes
+     * are then ours, with only the model renamed to the upstream id. Thinking
+     * off: a reasoning model would otherwise spend the tokens before answering. */
+    if (!raw(out, cap, &o, "{\"chat_template_kwargs\":{\"enable_thinking\":false},\"max_tokens\":400,"
+                           "\"messages\":[{\"content\":") ||
+        !quote(out, cap, &o, SYSTEM) || !raw(out, cap, &o, ",\"role\":\"system\"},{\"content\":") ||
+        !quote(out, cap, &o, user) || !raw(out, cap, &o, ",\"role\":\"user\"}],\"model\":") ||
+        !quote(out, cap, &o, model) || !raw(out, cap, &o, ",\"temperature\":0.7}"))
         return OK_RANGE;
     out[o] = 0;
     *len = o;

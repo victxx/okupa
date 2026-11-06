@@ -62,6 +62,11 @@ typedef struct {
     size_t request_len;
     char *response; /* inside wire, decoded in place */
     size_t response_len;
+    /* What the broker forwards to the TEE: our request with only the model
+     * renamed to the upstream id that the signed response names. */
+    char upstream_model[64];
+    char forwarded[OK_THINK_REQUEST + 64];
+    size_t forwarded_len;
     char text[OK_ZEROG_TEXT + 1];
     char signature[133]; /* "0x" + 130 hex */
     /* Scratch: the wire buffer for both round trips. */

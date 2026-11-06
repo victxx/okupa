@@ -27,6 +27,32 @@ static int url_safe(const char *s, int allow_slash)
     return 1;
 }
 
+/* The request as the broker forwards it: the one "model" member of ours,
+ * renamed to the upstream id from the response (unchanged if none). Our
+ * request is already in Go's canonical form, so nothing else moves. */
+static int forward(ok_think *t, const char *model)
+{
+    char from[96], to[96];
+    const char *at;
+    size_t a, b;
+    if (!t->upstream_model[0] || !strcmp(t->upstream_model, model)) {
+        memcpy(t->forwarded, t->request, t->request_len);
+        t->forwarded_len = t->request_len;
+        return 1;
+    }
+    snprintf(from, sizeof from, ",\"model\":\"%s\"", model);
+    snprintf(to, sizeof to, ",\"model\":\"%s\"", t->upstream_model);
+    a = strlen(from);
+    b = strlen(to);
+    if (!(at = strstr(t->request, from)) || strstr(at + 1, from)) return 0; /* exactly one */
+    if (t->request_len - a + b > sizeof t->forwarded) return 0;
+    memcpy(t->forwarded, t->request, (size_t)(at - t->request));
+    memcpy(t->forwarded + (at - t->request), to, b);
+    memcpy(t->forwarded + (at - t->request) + b, at + a, t->request_len - (size_t)(at - t->request) - a);
+    t->forwarded_len = t->request_len - a + b;
+    return 1;
+}
+
 static ok_think_stage stop(ok_think *t, ok_think_stage s)
 {
     t->stage = s;
@@ -101,6 +127,12 @@ ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t de
         }
     }
 
+    /* The upstream model the response names (it is inside the signed bytes). */
+    if (ok_json_parse(t->response, body, &root) == OK_OK && ok_json_member(&root, "model", &v) == OK_OK &&
+        (ok_json_string(&v, t->upstream_model, sizeof t->upstream_model, &n) != OK_OK ||
+         !url_safe(t->upstream_model, 1)))
+        t->upstream_model[0] = 0;
+
     /* 2. The TEE's signature for this chat id. */
     snprintf(path, sizeof path, "/v1/proxy/signature/%s?model=%s", t->chat_id, p->model);
     if (ok_http_request("GET", p->host, path, NULL, NULL, 0, req, sizeof req, &n) != OK_OK) return OK_RANGE;
@@ -119,8 +151,9 @@ ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t de
     }
 
     /* 3. Our bytes, their signature, the signer we trust. */
-    if (ok_zerog_verify((const uint8_t *)t->request, t->request_len, (const uint8_t *)t->response, t->response_len,
-                        t->text, strlen(t->text), t->signature, p->signer) != OK_OK) {
+    if (!forward(t, p->model) ||
+        ok_zerog_verify((const uint8_t *)t->forwarded, t->forwarded_len, (const uint8_t *)t->response,
+                        t->response_len, t->text, strlen(t->text), t->signature, p->signer) != OK_OK) {
         stop(t, OK_THINK_UNVERIFIED);
         return OK_OK;
     }
@@ -179,7 +212,8 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
     if (!put(out, cap, &o, head) || !put(out, cap, &o, "\"provider\":") ||
         !put_str(out, cap, &o, p->provider, strlen(p->provider)) || !put(out, cap, &o, ",\"model\":") ||
         !put_str(out, cap, &o, p->model, strlen(p->model)) || !put(out, cap, &o, ",\"tee_signer\":") ||
-        !put_str(out, cap, &o, t->signer, strlen(t->signer)) || !put(out, cap, &o, ",\"chat_id\":") ||
+        !put_str(out, cap, &o, t->signer, strlen(t->signer)) || !put(out, cap, &o, ",\"upstream_model\":") ||
+        !put_str(out, cap, &o, t->upstream_model, strlen(t->upstream_model)) || !put(out, cap, &o, ",\"chat_id\":") ||
         !put_str(out, cap, &o, t->chat_id, strlen(t->chat_id)) || !put(out, cap, &o, ",\"decision\":"))
         return OK_RANGE;
     if (decided) {
