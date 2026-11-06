@@ -223,9 +223,10 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
     int decided;
     if (!t || !p || !prev || !out || !len) return OK_ARGUMENT;
     decided = t->stage == OK_THINK_DECIDED;
-    snprintf(head, sizeof head, "{\"okupa_episode\":1,\"time_ms\":%llu,\"stage\":\"%s\",\"verified\":%s,\"http\":%d,",
+    snprintf(head, sizeof head,
+             "{\"okupa_episode\":1,\"time_ms\":%llu,\"stage\":\"%s\",\"verified\":%s,\"http\":%d,\"net_error\":%d,",
              (unsigned long long)now_ms, ok_think_stage_name(t->stage),
-             decided || t->stage == OK_THINK_ANSWER ? "true" : "false", t->http_status);
+             decided || t->stage == OK_THINK_ANSWER ? "true" : "false", t->http_status, t->net_error);
     if (!put(out, cap, &o, head) || !put(out, cap, &o, "\"provider\":") ||
         !put_str(out, cap, &o, p->provider, strlen(p->provider)) || !put(out, cap, &o, ",\"model\":") ||
         !put_str(out, cap, &o, p->model, strlen(p->model)) || !put(out, cap, &o, ",\"tee_signer\":") ||
