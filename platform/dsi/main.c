@@ -514,6 +514,22 @@ int main(void)
             if (ok_ui_tick(&ui, &pet)) redraw = 1;
         }
         if (ticks == 8) late = 0;
+        { /* A safety net: each pass waits for a VBlank, so twenty passes
+           * without one 1/60 s on the bus clock mean that clock has stopped
+           * or jumped back. The okupa goes on a tick a pass, and it is logged. */
+            static int still, said;
+            if (ticks) {
+                still = 0;
+            } else if (++still > 20) {
+                still = 0;
+                late = 0;
+                frame_at = cpuGetTiming();
+                if (ok_ui_tick(&ui, &pet)) redraw = 1;
+                redraw = 1;
+                if (!said) ok_facts_log(ok_dsi_uptime(), 'D', "frame clock stuck at %08x, ticking anyway", (unsigned)frame_at);
+                said = 1;
+            }
+        }
         if (ui.sound) {
             ok_dsi_audio_sfx(ui.sound - 1);
             ui.sound = 0;
