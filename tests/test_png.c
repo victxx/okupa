@@ -61,7 +61,7 @@ int main(void)
         for (x = 28; x < 36; x++) ok_drawing_set(doodle, (unsigned)x, 44, 1);
         assert(ok_png_drawing(doodle, 2, pic, sizeof pic, &n) == OK_OK && n == ok_png_size(128, 128));
         assert(pic[48] == 0 && pic[49] == 255 && pic[52 + 3 * (16 * 2) + 1 + 3 * 128 * 0] == 255); /* white paper */
-        assert(ok_png_drawing(doodle, 5, pic, sizeof pic, &n) == OK_ARGUMENT);
+        assert(ok_png_drawing(doodle, 3, pic, sizeof pic, &n) == OK_ARGUMENT);
         if ((f = fopen("build/test-png-doodle.png", "wb"))) {
             fwrite(pic, 1, n, f);
             fclose(f);

@@ -12,7 +12,7 @@ size_t ok_png_size(int w, int h); /* bytes the PNG of a w x h picture takes */
 ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *out, size_t cap, size_t *len);
 
 /* The 64x64 sketchbook (okupa_act.h pixels, 1 = ink) as a black-on-white
- * PNG, each pixel scale x scale (1..4). */
+ * PNG, each pixel scale x scale (1 or 2). */
 ok_result ok_png_drawing(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len);
 
 /* Reads a PNG back (8-bit grey, RGB or RGBA, not interlaced): any deflate

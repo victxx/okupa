@@ -12,7 +12,7 @@
 #define MAX_SAMPLES (OK_EAR_RATE * OK_EAR_SECONDS)
 
 static uint8_t ring[2 * HALF] __attribute__((aligned(32)));
-static uint8_t clip[OK_WAV_HEADER + MAX_SAMPLES];
+TWL_BSS static uint8_t clip[OK_WAV_HEADER + MAX_SAMPLES]; /* in the DSi's own RAM */
 static volatile uint32_t samples;
 static volatile int recording;
 
@@ -28,7 +28,7 @@ static void heard(void *completed, int length)
 
 void ok_dsi_ear_start(void)
 {
-    if (recording) return;
+    if (recording || !isDSiMode()) return; /* clip[] is in the DSi's own RAM */
     samples = 0;
     recording = 1;
     soundMicRecord(ring, sizeof ring, MicFormat_8Bit, OK_EAR_RATE, heard);
@@ -56,7 +56,7 @@ const uint8_t *ok_dsi_ear_stop(size_t *len)
 #define CAMERA_NDMA 1
 #define WARMUP_FRAMES 12
 
-static uint16_t frame[256 * 192] __attribute__((aligned(32)));
+TWL_BSS static uint16_t frame[256 * 192] __attribute__((aligned(32)));
 
 static int grab(void)
 {

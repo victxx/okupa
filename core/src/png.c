@@ -131,9 +131,9 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
 
 ok_result ok_png_drawing(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len)
 {
-    static uint16_t frame[256 * 256];
+    static uint16_t frame[128 * 128];
     int x, y, w;
-    if (!pixels || scale < 1 || scale > 4) return OK_ARGUMENT;
+    if (!pixels || scale < 1 || scale > 2) return OK_ARGUMENT;
     w = 64 * scale;
     for (y = 0; y < w; y++)
         for (x = 0; x < w; x++)

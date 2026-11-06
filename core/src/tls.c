@@ -8,7 +8,7 @@ void ok_tls_open(ok_tls *t, const char *host, int64_t now, const uint8_t *seed, 
     br_ssl_client_init_full(&t->client, &t->x509, ok_tls_anchors, ok_tls_anchor_count);
     /* BearSSL counts days from 1 January of year 0; 719528 of them reach 1970. */
     br_x509_minimal_set_time(&t->x509, (uint32_t)(now / 86400 + 719528), (uint32_t)(now % 86400));
-    br_ssl_engine_set_buffer(&t->client.eng, t->buffer, sizeof t->buffer, 1);
+    br_ssl_engine_set_buffer(&t->client.eng, t->buffer, sizeof t->buffer, 0);
     br_ssl_engine_inject_entropy(&t->client.eng, seed, seed_len);
     br_ssl_client_reset(&t->client, host, 0);
     br_sslio_init(&t->io, &t->client.eng, rd, io_ctx, wr, io_ctx);

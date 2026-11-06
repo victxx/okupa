@@ -14,7 +14,7 @@ typedef struct {
     br_ssl_client_context client;
     br_x509_minimal_context x509;
     br_sslio_context io;
-    unsigned char buffer[BR_SSL_BUFSIZE_BIDI];
+    unsigned char buffer[BR_SSL_BUFSIZE_MONO]; /* one record at a time: a request, then its answer */
     char host[128]; /* the server of the session kept for resumption ("" none) */
     unsigned char offered[32]; /* the session id offered for resumption */
     unsigned char offered_len;
