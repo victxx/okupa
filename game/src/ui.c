@@ -297,6 +297,16 @@ static void hang_pictures(const ok_ui *u)
         ok_house_frame(k, waiting && k == newest ? NULL : pic);
         ok_house_frame(6 + k, pic);
     }
+    if (u->own_set) { /* its own drawing: the next free frame, else the terrace's last easel */
+        int slot = u->wall_count < 6 ? u->wall_count + (waiting ? 0 : 0) : 11;
+        if (slot < 6 && waiting && slot == newest) slot++;
+        if (slot >= 6 && slot < 11) slot = 11;
+        ok_house_frame(slot, u->own);
+        if (slot < 6) ok_house_frame(6 + slot, u->own);
+        ok_house_own_frame(slot);
+    } else {
+        ok_house_own_frame(-1);
+    }
     ok_house_hanging(u->hang_t ? u->hang_slot : -1, u->hang_t);
 }
 
@@ -319,6 +329,19 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
     else if (u->say) bubble(f, font, line, face.top_x, face.top_y);
     else if (u->thought_ticks) bubble_as(f, font, u->thought, face.top_x, face.top_y, THINK, u->ticks);
     else if (line && !(p->asleep && line == ok_pet_line(p, hour))) bubble(f, font, line, face.top_x, face.top_y);
+    if (u->dream_ticks && u->dream_w > 0 && u->dream_h > 0) { /* last night's dream, in a cloud at the top left */
+        int big = u->dream_w > u->dream_h ? u->dream_w : u->dream_h, w = u->dream_w * 72 / big, h = u->dream_h * 72 / big;
+        int x0 = 10, y0 = 34, x, y;
+        round_box(f, x0 - 5, y0 - 15, w + 10, h + 20, 8, INK);
+        round_box(f, x0 - 4, y0 - 14, w + 8, h + 18, 7, RGB(27, 26, 31));
+        text(f, font, x0, y0 - 11, "I dreamt...", INK, 1);
+        for (y = 0; y < h; y++)
+            for (x = 0; x < w; x++) f[(y0 + y) * OK_UI_W + x0 + x] = u->dream[(y * u->dream_h / h) * u->dream_w + x * u->dream_w / w] | 0x8000;
+        disc(f, x0 + w + 6, y0 + h + 4, 4, INK);
+        disc(f, x0 + w + 6, y0 + h + 4, 3, RGB(27, 26, 31));
+        disc(f, x0 + w + 14, y0 + h + 12, 3, INK);
+        disc(f, x0 + w + 14, y0 + h + 12, 2, RGB(27, 26, 31));
+    }
 }
 
 /* --------------------------------------------------------- bottom screen */
@@ -716,6 +739,88 @@ void ok_ui_listening(ok_ui *u, int state)
     u->listening = state;
 }
 
+/* The floor of where it is, from its places, a little inside the walls. */
+static void floor_box(ok_monkey_room *r, int32_t *x0, int32_t *x1, int32_t *z0, int32_t *z1)
+{
+    int i;
+    if (ok_house_where() == OK_PLACE_GARDEN) ok_house_garden(r);
+    else ok_house_room(r);
+    *x0 = *x1 = r->home_x, *z0 = *z1 = r->home_z;
+    for (i = 0; i < 4; i++) {
+        int32_t px = i < 3 ? r->spot_x[i] : r->door_x, pz = i < 3 ? r->spot_z[i] : r->door_z;
+        if (px < *x0) *x0 = px;
+        if (px > *x1) *x1 = px;
+        if (pz < *z0) *z0 = pz;
+        if (pz > *z1) *z1 = pz;
+    }
+}
+
+void ok_ui_body(ok_ui *u, int x, int z, int gaze, int energy)
+{
+    ok_monkey_room r;
+    int32_t x0, x1, z0, z1, at[3] = {0, 0, 0}, tx = u->anim.x, tz = u->anim.z;
+    int go = x >= 0 && z >= 0, flip;
+    floor_box(&r, &x0, &x1, &z0, &z1);
+    flip = r.face_yaw == 180; /* the terrace is seen from the other side */
+    if (go) {
+        int fx = x > 100 ? 100 : x, fz = z > 100 ? 100 : z;
+        if (flip) fx = 100 - fx, fz = 100 - fz;
+        tx = x0 + (x1 - x0) * fx / 100;
+        tz = z0 + (z1 - z0) * fz / 100;
+    }
+    if (gaze == OK_GAZE_FLOOR) at[0] = tx, at[1] = 0, at[2] = tz + (flip ? -350 : 350);
+    else if (gaze >= 0 && gaze < OK_GAZES) ok_house_gaze_point(gaze, at);
+    ok_monkey_body(&u->anim, go, tx, tz, gaze, at, energy < 0 ? 50 : energy);
+}
+
+void ok_ui_drop_object(ok_ui *u, const uint8_t boxes[][7], int n, const char *name)
+{
+    ok_monkey_room r;
+    int32_t x0, x1, z0, z1, x, z, at[3];
+    if (n <= 0 || !boxes) {
+        ok_house_object(NULL, 0, -1, 0, 0);
+        u->thing_name[0] = 0;
+        return;
+    }
+    floor_box(&r, &x0, &x1, &z0, &z1);
+    x = u->anim.x + (u->anim.x > (x0 + x1) / 2 ? -260 : 260); /* beside it, towards the middle */
+    z = u->anim.z + (r.face_yaw == 180 ? -120 : 120);
+    x = x < x0 ? x0 : x > x1 ? x1 : x;
+    ok_house_object(boxes, n, ok_house_where(), x, z);
+    copy_ascii(u->thing_name, name ? name : "");
+    if (u->thing_name[0] && strlen(u->thing_name) > 20) u->thing_name[20] = 0;
+    snprintf(u->thing_line, sizeof u->thing_line, "I made %s!", u->thing_name[0] ? u->thing_name : "something");
+    say(u, u->thing_line);
+    at[0] = x, at[1] = 0, at[2] = z;
+    ok_monkey_body(&u->anim, 0, 0, 0, OK_GAZE_FLOOR, at, u->anim.energy);
+    ok_monkey_direct(&u->anim, OK_MOVE_HOP);
+}
+
+void ok_ui_okupa_drawing(ok_ui *u, const uint8_t pixels[512])
+{
+    if (!pixels) {
+        u->own_set = 0;
+        return;
+    }
+    memcpy(u->own, pixels, sizeof u->own);
+    u->own_set = 1;
+}
+
+void ok_ui_dream(ok_ui *u, const uint16_t *rgb15, int w, int h)
+{
+    int y;
+    if (!rgb15 || w <= 0 || h <= 0) {
+        u->dream_ticks = 0;
+        return;
+    }
+    if (w > 128) w = 128;
+    if (h > 128) h = 128;
+    for (y = 0; y < h; y++) memcpy(u->dream + y * w, rgb15 + y * w, (size_t)w * 2);
+    u->dream_w = w;
+    u->dream_h = h;
+    u->dream_ticks = 1200;
+}
+
 /* Out to the terrace or back in: the okupa is placed in the new spot. */
 static void go(ok_ui *u, const ok_pet *p, int where)
 {
@@ -780,6 +885,7 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
     u->ticks++;
     if (u->say_ticks && --u->say_ticks == 0) u->say = NULL;
     if (u->thought_ticks) u->thought_ticks--;
+    if (u->dream_ticks) u->dream_ticks--;
     if (u->ask_ticks) u->ask_ticks--;
     if (u->happy_ticks) u->happy_ticks--;
     if (u->pressed_ticks) u->pressed_ticks--;
@@ -839,6 +945,10 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         if (held) return OK_UI_NOTHING;
         u->scene = u->scene == OK_UI_SPLASH ? OK_UI_FILM : OK_UI_HOME;
         u->intro_t = 0;
+        return OK_UI_CHANGED;
+    }
+    if (u->dream_ticks && u->scene == OK_UI_HOME && !held) { /* a tap puts the dream away */
+        u->dream_ticks = 0;
         return OK_UI_CHANGED;
     }
     if (u->scene == OK_UI_SKETCH) {

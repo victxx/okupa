@@ -180,6 +180,23 @@ int main(int argc, char **argv)
         shot(dir, "home-thinking", &w, &p, 11);
         ok_ui_listening(&w, 0);
         ok_ui_ask(&w, NULL);
+        /* What its mind makes: a thing on the floor, its own drawing, a dream. */
+        {
+            static const uint8_t chair[5][7] = {{0, 0, 0, 2, 6, 2, 11}, {8, 0, 0, 2, 6, 2, 11}, {0, 0, 8, 2, 6, 2, 11},
+                                                {8, 0, 8, 2, 6, 2, 11}, {0, 6, 0, 10, 2, 10, 3}};
+            static uint16_t dream[64 * 64];
+            uint8_t own[512];
+            int x, y;
+            for (y = 0; y < 64; y++)
+                for (x = 0; x < 64; x++) dream[y * 64 + x] = (uint16_t)(0x8000 | (x / 3) | (y / 3) << 5 | 20 << 10);
+            doodle(own, 3);
+            ok_ui_drop_object(&w, chair, 5, "a little stool");
+            ok_ui_okupa_drawing(&w, own);
+            ok_ui_dream(&w, dream, 64, 64);
+            ok_ui_body(&w, 70, 60, OK_GAZE_WINDOW, 80);
+            shot(dir, "home-mind", &w, &p, 11);
+            ok_ui_dream(&w, NULL, 0, 0);
+        }
     }
     u.scene = OK_UI_DEV;
     snprintf(u.dev[0], sizeof u.dev[0], "keccak256(abc)      ok  0 ms");

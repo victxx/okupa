@@ -25,7 +25,9 @@ enum { OK_EVENT_FEED, OK_EVENT_PLAY, OK_EVENT_PET, OK_EVENT_REFUSE, OK_EVENT_HEL
 /* What it is doing. */
 enum { OK_MOVE_IDLE, OK_MOVE_LOOK, OK_MOVE_SCRATCH, OK_MOVE_STRETCH, OK_MOVE_HOP, OK_MOVE_PEEK, OK_MOVE_WANDER,
        OK_MOVE_SIGH, OK_MOVE_WAVE, OK_MOVE_EAT, OK_MOVE_PLAY, OK_MOVE_PETTED, OK_MOVE_REFUSE, OK_MOVE_TO_BED,
-       OK_MOVE_SLEEP, OK_MOVE_WAKE, OK_MOVE_TO_DOOR, OK_MOVES };
+       OK_MOVE_SLEEP, OK_MOVE_WAKE, OK_MOVE_TO_DOOR, OK_MOVE_GO, OK_MOVES }; /* GO: walks to room.home */
+/* What it looks at while it does what it does (ok_monkey_body). */
+enum { OK_GAZE_PLAYER, OK_GAZE_WINDOW, OK_GAZE_DOOR, OK_GAZE_FRAMES, OK_GAZE_FLOOR, OK_GAZE_SKY, OK_GAZES };
 
 typedef struct {
     uint8_t wear, top, colour;
@@ -77,6 +79,10 @@ typedef struct {
     int tail_ready;
     int directed;     /* a move asked for (OK_MOVE_* + 1), started at the next natural break */
     int at_door;      /* 1 once a TO_DOOR walk has arrived: the caller changes place */
+    int go_pending;   /* walk to room.home at the next break, before any move asked for */
+    int gaze_mode;    /* OK_GAZE_* + 1, or 0 for its own glances */
+    int32_t gaze_at[3]; /* the point it looks at for that gaze (room, hundredths) */
+    int energy;       /* 0 sluggish .. 100 bouncy; 50 as it always was */
     uint32_t ticks, seed;
 } ok_monkey_anim;
 
@@ -104,6 +110,11 @@ void ok_monkey_event(ok_monkey_anim *a, int event);
  * (eating, playing) play as gestures; sleep follows the pet, not this.
  * OK_MOVE_TO_DOOR walks to room.door_x/z and sets at_door. */
 void ok_monkey_direct(ok_monkey_anim *a, int move);
+/* Someone (the okupa's mind) steers its body: walk to (x, z) on the floor
+ * at the next break (it becomes its home; the room's spots stay as they
+ * are), look at a point (gaze >= 0, with its OK_GAZE_* kind) or glance on its
+ * own (gaze -1), and move with an energy 0..100 (50 as ever). */
+void ok_monkey_body(ok_monkey_anim *a, int go, int32_t x, int32_t z, int gaze, const int32_t at[3], int energy);
 /* One tick of 1/60 s. mood is OK_POSE_*; wear lets it play with what it wears. */
 void ok_monkey_step(ok_monkey_anim *a, int mood, int wear);
 /* Draws it where the animation has it (world space, hundredths -> units).

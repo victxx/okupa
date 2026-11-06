@@ -65,6 +65,7 @@ static void prof(int k)
 }
 
 static int next_id;
+static int place; /* OK_PLACE_* */
 
 static void mat(uint16_t c, int flags)
 {
@@ -186,6 +187,57 @@ void ok_house_frame(int slot, const uint8_t *pixels)
     if (pixels) memcpy(gallery[slot], pixels, OK_DRAWING_BYTES);
 }
 
+/* The frame that holds the okupa's own drawing (-1: none). */
+static int own_slot = -1;
+void ok_house_own_frame(int slot)
+{
+    own_slot = slot >= 0 && slot < OK_HOUSE_FRAMES ? slot : -1;
+}
+
+/* Something the okupa's mind made, on the floor of one place: boxes on a
+ * 16-cube grid, coloured from a palette of sixteen. */
+static uint8_t thing[16][7];
+static int thing_n, thing_place = -1;
+static int32_t thing_x, thing_z;
+void ok_house_object(const uint8_t (*boxes)[7], int n, int where, int32_t x, int32_t z)
+{
+    int i;
+    thing_n = n < 0 ? 0 : n > 16 ? 16 : n;
+    for (i = 0; i < thing_n; i++) memcpy(thing[i], boxes[i], 7);
+    thing_place = where;
+    thing_x = x;
+    thing_z = z;
+}
+
+static void draw_thing(int where)
+{
+    static const uint16_t palette[16] = {
+        RGB(3, 3, 4),    RGB(28, 28, 27), RGB(26, 6, 6),  RGB(31, 18, 4), RGB(31, 28, 6), RGB(8, 22, 8),
+        RGB(4, 12, 6),   RGB(6, 14, 28),  RGB(4, 6, 16),  RGB(20, 8, 24), RGB(30, 16, 20), RGB(19, 12, 7),
+        RGB(12, 7, 4),   RGB(16, 16, 17), RGB(10, 10, 11), RGB(24, 20, 14),
+    };
+    int i;
+    if (thing_place != where || !thing_n) return;
+    for (i = 0; i < thing_n; i++) {
+        const uint8_t *b = thing[i];
+        int x0 = (b[0] & 15) * 20 - 160, y0 = (b[1] & 15) * 20, z0 = (b[2] & 15) * 20 - 160;
+        int w = (b[3] ? b[3] : 1) * 20, h = (b[4] ? b[4] : 1) * 20, d = (b[5] ? b[5] : 1) * 20;
+        mat(palette[b[6] & 15], OK_R3D_EDGE);
+        box(thing_x + x0, y0, thing_z + z0, thing_x + x0 + w, y0 + h, thing_z + z0 + d);
+    }
+}
+
+/* Where each thing it may look at is, in the place it is in. */
+void ok_house_gaze_point(int gaze, int32_t out[3])
+{
+    static const int32_t attic[OK_GAZES][3] = {{0, 2100, 4600}, {0, 1250, -1095}, {1384, 420, -20}, {-500, 560, -1096},
+                                               {0, 0, 0},       {0, 1900, -1000}};
+    static const int32_t garden[OK_GAZES][3] = {{0, 1150, -5600}, {0, 900, 300},     {1150, 420, 700},
+                                                {0, 560, -1500},  {0, 0, 0},         {0, 3200, -3000}};
+    const int32_t *p = (place == OK_PLACE_GARDEN ? garden : attic)[gaze < 0 || gaze >= OK_GAZES ? 0 : gaze];
+    out[0] = p[0], out[1] = p[1], out[2] = p[2];
+}
+
 /* The frame being hung right now, and how far into it (ticks). */
 static int hang_slot = -1, hang_t;
 void ok_house_hanging(int slot, int t)
@@ -200,7 +252,8 @@ static uint32_t sum(const uint8_t *d);
 
 static void framed_at(int slot, const uint8_t *pixels, int fx, int fy, int fz, int h, int tilt, int wood, int yaw, int lean)
 {
-    static const uint16_t woods[3] = {RGB(14, 9, 5), RGB(21, 14, 7), RGB(28, 26, 22)};
+    static const uint16_t woods[4] = {RGB(14, 9, 5), RGB(21, 14, 7), RGB(28, 26, 22), RGB(29, 22, 4)};
+    if (slot == own_slot) wood = 3; /* the okupa's own picture: a gilt frame */
     static uint32_t made[OK_HOUSE_FRAMES];
     int x, y, m = h * 82 / 100, d = h * 70 / 100;
     if (pixels && made[slot] != sum(pixels)) { /* the picture as texels, once per picture */
@@ -528,7 +581,6 @@ static void dot(uint16_t *f, int x, int y, uint16_t c)
     if (x >= 0 && y >= 0 && x < W && y < H) f[y * W + x] = c;
 }
 
-static int place;
 static void outside_scene(const light *l, int on);
 static void sky(uint16_t *f, ok_v3 eye, ok_v3 target, int focal, int minute);
 static void fireflies(uint16_t *f, uint32_t t, int night);
@@ -562,6 +614,7 @@ static void garden_draw(uint16_t *frame, int m, const ok_look *look, const uint1
     ok_r3d_restore(frame);
     ok_r3d_camera(P(cam[0], cam[1], cam[2]), P(cam[3], cam[4], cam[5]), 330);
     apply(&l);
+    draw_thing(OK_PLACE_GARDEN);
     ok_monkey_draw(look, skin, a, face);
     ok_r3d_finish();
     ok_monkey_face_draw(frame, face);
@@ -648,6 +701,7 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
         ok_r3d_camera(ok_v3_make(0, U(2100), U(4600)), ok_v3_make(0, U(650), 0), 340);
         apply(&l);
         if (hang_slot >= 0) hang_frame();
+        draw_thing(OK_PLACE_ATTIC);
         ok_monkey_draw(look, skin, a, face);
         prof(6);
         /* In bed, the knitted blanket over it, up to the shoulders. */

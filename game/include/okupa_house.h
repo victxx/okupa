@@ -42,6 +42,14 @@ void ok_house_room(ok_monkey_room *room);
  * on easels. Empty frames stay up, waiting. */
 #define OK_HOUSE_FRAMES 12
 void ok_house_frame(int slot, const uint8_t *pixels);
+/* The okupa's own drawing hangs in this slot, in a gilt frame (-1: none). */
+void ok_house_own_frame(int slot);
+/* Something the okupa's mind made: up to 16 boxes {x, y, z, w, h, d,
+ * colour} on a 16-cube grid (y up, from the floor; colour 0..15), standing
+ * on the floor of a place (OK_PLACE_*) at x, z (hundredths). n 0 clears it. */
+void ok_house_object(const uint8_t (*boxes)[7], int n, int where, int32_t x, int32_t z);
+/* Where a thing to look at (OK_GAZE_*) is in the current place (hundredths). */
+void ok_house_gaze_point(int gaze, int32_t out[3]);
 /* A new picture arriving in an attic slot (0-5): t ticks into its hanging
  * (drop, bump, swing, settle, about 2.5 s; slot -1 when none). */
 #define OK_HOUSE_HANG_TICKS 170
