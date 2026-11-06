@@ -135,14 +135,14 @@ in Arkiv, checked it, opened it and put it in the cave. Evidence:
 | Web → DSi inline gift (kind 03, 1 bpp) | **Real** (local, to the DSi stand-in's address) | tx `0xb5a28169…cd8a` |
 | Visit on Sepolia/mainnet | Works through Blockscout (finds) + RPC (verifies). No real DSi act on a public chain was available to show at the time of writing | |
 | anon-rpc reads for visits | **Real**: passthrough (mainnet specifier) and Nox mixnet (Sepolia specifier) work. Tor failed tonight (demo gateway timeout) | `run/web-anonrpc-20261106/evidence.json` |
-| Same flow in public (Ethereum mainnet + Swarm mainnet + Arkiv Rabdi) | **Next.** Code ready. Waiting for funds: mainnet ETH for each monkey, tGLM from the Rabdi faucet (sign-in + CAPTCHA, by a person), xDAI + xBZZ for the Bee node | |
+| Same flow in public: Ethereum mainnet + Swarm mainnet + Arkiv Rabdi | **Real.** A gave B three gifts: inline (kind 03), small via Swarm and big via Swarm (kind 05). B checked each and hung two on the attic wall; the third went to the cave. Each send showed its cost and was approved first. A command-line read of B's mailbox passes all three chain checks | `run/web-public-20261107/`. Inline: tx `0x5c20ad2c…d98a`, block 26358502. Small via Swarm: tx `0x2bed6768…7f4c`, block 26358504, Arkiv `0xcf06a477…3984`. Big via Swarm: tx `0xaa04cef6…5477`, block 26358505, Arkiv `0x220b9dd6…4301` |
 | Big gift → the cave (web ↔ web) | **Real** (local) | `run/web-cave-20261107/` |
-| Mainnet sends with cost shown and approval asked first; gas from the EIP-7623 floor | **Real** (tested with a refusal; nothing sent) | |
-| Bee light node on Swarm mainnet | Running, waiting for xDAI + xBZZ | node `0x5AC1Fd51…16FE` |
+| Mainnet sends with cost shown and approval asked first; gas from the EIP-7623 floor | **Real**: three approved sends at 0.066–0.069 gwei base fee, about 0.000003–0.000004 ETH each | `run/web-public-20261107/evidence.json` |
+| Bee light node on Swarm mainnet | **Real**: Bee 2.8.3 light node. Postage batch `b7c6193f…5134`, depth 17, about 29 days, tx `0x51ba5b20…58b7` on Gnosis. Bee's default fee (125 wei tip) was dropped by the public RPC; `Gas-Price: 2000000000` worked | node `0x5AC1Fd51…16FE` |
 | DSi reads gifts sent to it | **Design only**, see below | |
 | Kind 05 in `core/` | **Next.** Proposed here; `core/` not touched | |
 
-Nothing was sent to any public network, and no real funds were spent.
+Public sends: only the three approved mainnet gifts above, plus the Bee node's Gnosis transactions (chequebook, approve, postage batch).
 
 ## How the DSi takes part (design; not built tonight)
 
@@ -170,7 +170,7 @@ Notes:
 Two laptops (or two browser windows), monkey A and monkey B, and the DSi on the table.
 
 1. **Friends (10 s).** B shows its friend code; A pastes it.
-2. **Small gift (20 s).** A draws a 64×64 picture and sends it. The transaction carries the picture itself. B presses **Check mailbox** and it hangs on the wall.
+2. **Small gift (20 s).** A draws a 64×64 picture and sends it. The transaction carries the picture itself. B presses **Check** and it hangs on the wall.
 3. **Big gift (40 s).** A drops in a photo from the laptop. It becomes 256×192 in four tones and is uploaded to Swarm, encrypted. Show the log:
    - the Swarm chunk address (the key half stays secret);
    - the 215 B sealed transaction;
