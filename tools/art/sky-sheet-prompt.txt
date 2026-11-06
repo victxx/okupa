@@ -1,0 +1,5 @@
+ChatGPT image generation, 2026-11-06, asked by the project's author. The result is
+the source of game/src/sky_art.c (via tools/sky.py); the 1254x1254 PNG itself is kept
+outside Git (local/art/sky-sheet-1.png).
+
+Generate an image: one square sheet split into a 2x2 grid of four separate sky backgrounds for a cozy, mystical game about a little cottage on a floating island in the sky. Painted in a soft, dreamy hand-painted anime-background style with gentle pixel-art texture, no characters, no islands, no buildings, no ground, no text, no borders or gaps between the four panels. Each panel is sky only: a wide view with layered fluffy clouds at different heights and a sea of clouds near the bottom edge, a little depth haze. Top left: early dawn, soft pink and lilac with a pale peach glow low on the horizon. Top right: bright clear day, turquoise sky with big white cumulus clouds. Bottom left: golden sunset, warm orange, coral and violet clouds with a low sun glow. Bottom right: deep starry night, navy and indigo with many small stars, a faint milky way and a big glowing moon, clouds lit silver by the moon.

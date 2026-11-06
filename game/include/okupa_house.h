@@ -21,6 +21,8 @@ enum { OK_OUT_TILES, OK_OUT_MOSS_TILES, OK_OUT_GRASS, OK_OUT_FLOWERS, OK_OUT_EAR
        OK_OUT_SIDING, OK_OUT_DOOR, OK_OUT_BARK, OK_OUT_LEAVES, OK_OUT_DECK, OK_OUT_STONE, OK_OUT_BRICK, OK_OUT_IVY,
        OK_OUT_CLOUD };
 extern const uint16_t ok_outside_skin[128 * 128];
+/* Four painted skies, 160x96 (game/src/sky_art.c): dawn, day, sunset, night. */
+extern const uint16_t ok_sky_art[4][96 * 160];
 
 /* Where the okupa lives, wanders and sleeps. */
 void ok_house_room(ok_monkey_room *room);
