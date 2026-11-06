@@ -1,6 +1,7 @@
 #include "okupa_ui.h"
 #include "okupa_act.h"
 #include "okupa_text.h"
+#include "okupa_icons.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -133,24 +134,34 @@ static void pixels(frame f, int x, int y, const char *const *rows, int n, int sc
 
 /* ------------------------------------------------------------ top screen */
 
-static const char *const i_food[] = {"......kk", ".....yk.", "....yy..", "...yyY..", "..yyYY..", "yyyYY...", ".YYY....", "........"};
-static const char *const i_sleep[] = {"..MMM...", ".MM.....", "MM......", "MM......", "MM......", "MMM...M.", ".MMMMMM.", "..MMMM.."};
-static const char *const i_fun[] = {"..rrww..", ".rrrwbb.", "rrrwwbbb", "rrwwwwbb", "yywwwwbb", "yyywwbbb", ".yyywbb.", "..yyyb.."};
-static const char *const i_love[] = {".rr..rr.", "rwrrrrrr", "rrrrrrrr", "rrrrrrrR", ".rrrrrR.", "..rrrR..", "...rR...", "........"};
+static ok_icons icons;
+static int icons_ready;
+
+/* The icons are drawn by the renderer the first time they are needed, before
+ * any frame of the attic. */
+static const ok_icons *icon_set(void)
+{
+    if (!icons_ready) {
+        ok_icons_build(&icons);
+        icons_ready = 1;
+    }
+    return &icons;
+}
 
 /* The four needs along the bottom: an icon and a bar each, on glass. */
 static void needs(frame f, const ok_pet *p)
 {
-    static const char *const *icons[OK_NEEDS] = {i_food, i_sleep, i_fun, i_love};
+    static const int icon[OK_NEEDS] = {OK_ICON_FEED, OK_ICON_SLEEP, OK_ICON_PLAY, OK_ICON_PET};
     int i;
     for (i = 0; i < OK_NEEDS; i++) {
-        int x = 6 + i * 62, y = 176, v = p->need[i] * 36 / OK_NEED_MAX;
+        int x = 5 + i * 62, y = 173, v = p->need[i] * 34 / OK_NEED_MAX;
         uint16_t c = p->need[i] < 35 ? RGB(30, 9, 7) : p->need[i] < 65 ? RGB(30, 23, 6) : RGB(10, 25, 12);
-        glass(f, x, y, 58, 13);
-        pixels(f, x + 4, y + 3, icons[i], 8, 1);
-        rect(f, x + 16, y + 5, 38, 4, RGB(3, 3, 4));
-        rect(f, x + 17, y + 6, v, 2, c);
-        if (p->need[i] < 35 && i == 0) rect(f, x + 17, y + 6, v, 1, RGB(31, 18, 14));
+        glass(f, x, y, 60, 16);
+        ok_icons_draw(icon_set(), icon[i], f, x + 10, y + 8, 16);
+        rect(f, x + 21, y + 6, 36, 5, RGB(3, 3, 4));
+        rect(f, x + 22, y + 7, v, 3, c);
+        rect(f, x + 22, y + 7, v, 1, RGB(31, 31, 28)); /* a glint along the top */
+        rect(f, x + 22, y + 7, v, 1, c | RGB(8, 8, 8));
     }
 }
 
@@ -238,62 +249,50 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 #define CLOSET_W 62
 #define CLOSET_H 20
 
-static const char *const b_feed[] = {"..........kn", ".........kn.", "........yyk.", ".......yyy..",
-                                     "......yyyY..", ".....yyyYY..", "...yyyyYY...", ".yyyyyYY....",
-                                     "yyyyYYY.....", ".YYYYY......", "..YYY.......", "............"};
-static const char *const b_play[] = {"....rrww....", "..rrrrwwbb..", ".rrrrwwwbbb.", ".rrrwwwwbbb.",
-                                     "rrrwwwwwwbbb", "rrwwwwwwwbbb", "yyywwwwwwbbb", "yyyywwwwbbbb",
-                                     ".yyyywwwbbb.", ".yyyyywwbbb.", "..yyyyybb...", "....yyyy...."};
-static const char *const b_pet[] = {"............", "..rrr..rrr..", ".rwwrrrrrrr.", ".rwrrrrrrrr.",
-                                    ".rrrrrrrrrr.", ".rrrrrrrrrR.", "..rrrrrrrR..", "...rrrrrR...",
-                                    "....rrrR....", ".....rR.....", "............", "............"};
-static const char *const b_sleep[] = {"....MMMM....", "..MMM.......", ".MMM........", ".MM.......k.",
-                                      "MMM......kkk", "MMM.......k.", "MMM.........", "MMMM......M.",
-                                      ".MMMM....MM.", ".MMMMMMMMM..", "...MMMMMM...", "............"};
-static const char *const b_wake[] = {".....y......", ".y...y...y..", "..y.....y...", "....yyy.....",
-                                     "...yyyyy....", "yy.yyyyy.yy.", "...yyyyy....", "....yyy.....",
-                                     "..y.....y...", ".y...y...y..", ".....y......", "............"};
-static const char *const b_draw[] = {"..........pp", ".........ppp", "........yyp.", ".......yyy..",
-                                     "......yyy...", ".....yyy....", "....yyy.....", "...yyy......",
-                                     "..ttt.......", "..tt........", ".kt.........", "k..........."};
-static const char *const b_photo[] = {"............", "..kkkk......", "kkkkkkkkkkkk", "kGGGGkkkGGGk",
-                                      "kGGGkwwkkGGk", "kGGkwbbwkGGk", "kGGkwbbwkGGk", "kGGGkwwkGGGk",
-                                      "kGGGGkkGGGGk", "kkkkkkkkkkkk", "............", "............"};
-static const char *const b_mail[] = {"............", "kkkkkkkkkkkk", "kwkwwwwwwkwk", "kwwkwwwwkwwk",
-                                     "kwwwkwwkwwwk", "kwwwwkkwwwwk", "kwwwwwwwwwwk", "kwwwwwwwwwwk",
-                                     "kkkkkkkkkkkk", "............", "............", "............"};
-static const char *const b_dev[] = {".....kk.....", "..k.kggk.k..", ".kgkggggkgk.", "..kggkkggk..",
-                                    ".kggk..kggk.", "kggk....kggk", "kggk....kggk", ".kggk..kggk.",
-                                    "..kggkkggk..", ".kgkggggkgk.", "..k.kggk.k..", ".....kk....."};
-static const char *const b_closet[] = {"...kk...", "..k..k..", ".....k..", "....k...", "...kk...",
-                                       ".kkkkkk.", "k......k", "kkkkkkkk"};
-
 static void button(frame f, const uint8_t (*font)[8], int i, const char *label, int pressed, const ok_pet *p)
 {
-    static const char *const *art[BUTTONS] = {b_feed, b_play, b_pet, b_sleep, b_draw, b_photo, b_mail, b_dev};
+    static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY, OK_ICON_PET, OK_ICON_SLEEP,
+                                      OK_ICON_DRAW, OK_ICON_PHOTO, OK_ICON_MAIL, OK_ICON_DEV};
     int x = BX(i), y = BY(i) + (pressed ? 2 : 0);
-    uint16_t card = soon[i] ? RGB(20, 19, 18) : PAPER;
-    if (!pressed) round_box(f, x, BY(i) + 3, BW, BH, 5, RGB(4, 4, 4)); /* shadow */
-    round_box(f, x, y, BW, BH, 5, pressed ? half(card) + (uint16_t)RGB(6, 6, 6) - 0x8000u : card);
-    disc(f, x + BW / 2, y + 20, 15, soon[i] ? RGB(17, 16, 16) : accent[i]);
-    pixels(f, x + BW / 2 - 12, y + 8, i == B_SLEEP && p->asleep ? b_wake : art[i], 12, 2);
-    centred(f, font, x + BW / 2, y + 44, label, soon[i] ? RGB(12, 11, 11) : INK, 1);
+    uint16_t card = soon[i] ? RGB(19, 18, 17) : PAPER;
+    if (!pressed) round_box(f, x, BY(i) + 3, BW, BH, 6, RGB(3, 3, 3)); /* shadow */
+    round_box(f, x, y, BW, BH, 6, pressed ? half(card) + (uint16_t)RGB(6, 6, 6) - 0x8000u : card);
+    round_box(f, x + 3, y + 3, BW - 6, 34, 5, soon[i] ? RGB(16, 15, 15) : accent[i]);
+    ok_icons_draw(icon_set(), i == B_SLEEP && p->asleep ? OK_ICON_WAKE : icon[i], f, x + BW / 2, y + 20 - (pressed ? 0 : 1), 32);
+    centred(f, font, x + BW / 2, y + 44, label, soon[i] ? RGB(11, 10, 10) : INK, 2);
     if (soon[i]) {
-        round_box(f, x + BW - 30, y - 4, 32, 10, 3, RGB(29, 11, 8));
-        centred(f, font, x + BW - 14, y - 3, "soon", PAPER, 1);
+        round_box(f, x + BW - 30, y - 4, 32, 11, 4, RGB(29, 11, 8));
+        centred(f, font, x + BW - 14, y - 2, "soon", PAPER, 1);
     }
+}
+
+/* A chip saying how it feels, with a coloured dot. */
+static void mood_chip(frame f, const uint8_t (*font)[8], const ok_pet *p, int x, int y)
+{
+    static const char *word[] = {"Happy", "Hungry", "Sleepy", "Bored", "Missed you", "Asleep"};
+    static const uint16_t dot[] = {RGB(10, 25, 12), RGB(30, 12, 6), RGB(16, 16, 30), RGB(24, 22, 18), RGB(30, 16, 22),
+                                   RGB(12, 14, 26)};
+    int m = ok_pet_mood(p), w;
+    m = m < 0 || m > 5 ? 0 : m;
+    w = width(word[m], 1) + 20;
+    round_box(f, x, y, w, 16, 7, RGB(14, 13, 12));
+    disc(f, x + 8, y + 8, 3, dot[m]);
+    text(f, font, x + 14, y + 5, word[m], RGB(29, 28, 26), 1);
 }
 
 static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p)
 {
     int i;
-    text(f, font, 10, 10, "OKUPA", RGB(31, 26, 3), 2);
+    text(f, font, 11, 12, "OKUPA", RGB(4, 3, 2), 2); /* a shadow under the name */
+    text(f, font, 10, 11, "OKUPA", RGB(31, 26, 3), 2);
+    mood_chip(f, font, p, 62, 9);
     for (i = 0; i < BUTTONS; i++)
         button(f, font, i, i == B_SLEEP && p->asleep ? "Wake" : labels[i], u->pressed == i + 1 && u->pressed_ticks > 0, p);
-    round_box(f, CLOSET_X, CLOSET_Y, CLOSET_W, CLOSET_H, 5, u->pressed == 100 && u->pressed_ticks ? RGB(22, 20, 12) : RGB(31, 26, 3));
-    pixels(f, CLOSET_X + 6, CLOSET_Y + 6, b_closet, 8, 1);
-    text(f, font, CLOSET_X + 17, CLOSET_Y + 6, "Wear", INK, 1);
-    centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(20, 18, 15), 1);
+    round_box(f, CLOSET_X, CLOSET_Y + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), CLOSET_W, CLOSET_H, 7,
+              u->pressed == 100 && u->pressed_ticks ? RGB(22, 20, 12) : RGB(31, 26, 3));
+    ok_icons_draw(icon_set(), OK_ICON_WEAR, f, CLOSET_X + 13, CLOSET_Y + 10, 16);
+    text(f, font, CLOSET_X + 25, CLOSET_Y + 7, "Wear", INK, 2);
+    centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(19, 17, 15), 1);
 }
 
 /* The closet: tops, colours, things to wear. */
