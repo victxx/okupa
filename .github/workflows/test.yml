@@ -21,6 +21,6 @@ jobs:
           # bearssl.org refuses shallow fetches of a single commit.
           fetch-depth: 0
       - name: Test
-        run: make test CC=${{ matrix.cc }}
+        run: make -j4 test CC=${{ matrix.cc }}
       - name: Test with sanitizers
         run: make sanitize CC=${{ matrix.cc }}
