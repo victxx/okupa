@@ -163,8 +163,9 @@ static void glow(uint16_t *f, int cx, int cy, int r, int rr, int gg, int bb)
         }
 }
 
-/* Brightens a convex quad on screen: the sunbeam. */
-static void beam(uint16_t *f, const int px[4], const int py[4], int add)
+/* Brightens a convex quad on screen: the sunbeam. With okupa set, only the
+ * okupa's pixels (objects 100 and up), so the beam falls on it too. */
+static void beam(uint16_t *f, const int px[4], const int py[4], int add, int okupa)
 {
     int y, i, y0 = H, y1 = -1;
     for (i = 0; i < 4; i++) {
@@ -186,6 +187,7 @@ static void beam(uint16_t *f, const int px[4], const int py[4], int add)
         if (hi > W - 1) hi = W - 1;
         for (x = lo; x <= hi; x++) {
             int c = f[y * W + x], R = (c & 31) + add, G = (c >> 5 & 31) + add, B = (c >> 10 & 31) + add / 2;
+            if (okupa && ok_r3d_id_at(x, y) < 100) continue;
             f[y * W + x] = RGB(R > 31 ? 31 : R, G > 31 ? 31 : G, B > 31 ? 31 : B);
         }
     }
@@ -194,7 +196,7 @@ static void beam(uint16_t *f, const int px[4], const int py[4], int add)
 static struct {
     int valid, key;
     uint32_t art_sum;
-    int beam_x[4], beam_y[4], candle_x, candle_y, stars[6][2], night, day, lights_off;
+    int beam_x[4], beam_y[4], beam_add, candle_x, candle_y, stars[6][2], night, day, sun, lights_off;
 } kept;
 
 static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t *drawing)
@@ -338,13 +340,15 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
             int sx = corner[k][0] + (k >= 2 ? (500 - l->sun) * 3 / 2 : 0);
             ok_r3d_project(P(sx, corner[k][1], corner[k][2]), &kept.beam_x[k], &kept.beam_y[k], NULL);
         }
-        beam(frame, kept.beam_x, kept.beam_y, l->day ? 2 : 1);
+        beam(frame, kept.beam_x, kept.beam_y, l->day ? 2 : 1, 0);
+        kept.beam_add = l->day ? 2 : 1;
     }
     for (i = 0; i < 6; i++) {
         ok_r3d_project(P(-150 + i * 61 % 300, 1100 + (i * 137) % 300, -1080), &kept.stars[i][0], &kept.stars[i][1], NULL);
     }
     kept.night = l->night;
     kept.day = l->day && l->sun >= 0;
+    kept.sun = l->sun >= 0;
     kept.lights_off = lights_off;
     ok_r3d_keep();
 }
@@ -381,12 +385,16 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
     apply(&l);
     ok_monkey_draw(look, skin, a, face);
     ok_r3d_finish();
+    if (kept.sun) beam(frame, kept.beam_x, kept.beam_y, kept.beam_add, 1); /* standing in the sun, it is lit too */
     ok_monkey_face_draw(frame, face);
     /* Small living things. */
     if (kept.night)
         for (i = 0; i < 6; i++)
-            if ((t / 20 + (uint32_t)i * 7) % 11) dot(frame, kept.stars[i][0], kept.stars[i][1], RGB(28, 28, 22));
-    if (kept.night && !kept.lights_off && ok_r3d_id_at(kept.candle_x, kept.candle_y + 2) != 0) {
+            if ((t / 20 + (uint32_t)i * 7) % 11 && ok_r3d_id_at(kept.stars[i][0], kept.stars[i][1]) < 100)
+                dot(frame, kept.stars[i][0], kept.stars[i][1], RGB(28, 28, 22));
+    /* The flame only where nothing stands in front of the candle. */
+    if (kept.night && !kept.lights_off && ok_r3d_id_at(kept.candle_x, kept.candle_y + 2) != 0 &&
+        ok_r3d_id_at(kept.candle_x, kept.candle_y + 2) < 100 && ok_r3d_id_at(kept.candle_x, kept.candle_y - 3) < 100) {
         int fl = (int)((t / 5 + t / 13) % 3) - 1;
         dot(frame, kept.candle_x + fl / 2, kept.candle_y - 2, RGB(31, 30, 20));
         dot(frame, kept.candle_x, kept.candle_y - 1, RGB(31, 26, 8));
