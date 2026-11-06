@@ -17,6 +17,11 @@ Qué está hecho y con qué evidencia. Los registros completos quedan en `run/` 
 | 0G en el núcleo | Verificar una respuesta TEE (texto sha256(petición):sha256(respuesta) rehecho con nuestros bytes + firma EIP-191), token de 0G Direct firmado por la propia clave (idéntico al del SDK oficial 0.9.0 con ethers), lector JSON, el "cerebro" (pregunta y lectura de conjunto cerrado) y HTTP/1.1 |
 | 0G testnet (laboratorio en el Mac) | Cuenta de laboratorio con 5,05 0G; ledger abierto (3 0G), firmante TEE de `glm-5.3` reconocido y 1 0G en su subcuenta. Ninguna inferencia todavía: los ocho servicios de testnet cortan el TLS y el SDK marca `glm-5.3` como "critical" |
 
+| TLS en el núcleo | BearSSL con 8 raíces fijadas; `okupa-https` lee el saldo 0G por HTTPS solo con el núcleo. BearSSL llega a TLS 1.2: un servidor solo TLS 1.3 (el indexador de 0G Storage) lo rechaza |
+| Sesión y descubrimiento como núcleo | La sesión devp2p y el recorrido del árbol DNS viven en `core/` con callbacks de E/S; el Mac (`okupa-peer`, `okupa-dnswalk`) y la ROM usan el mismo código; loopback y Geth vuelven a pasar |
+| Red en la DSi | Dev → Network: Wi-Fi guardado en la consola, lista de Sepolia por DNS verificada y sesiones hasta que un nodo tenga hueco. Compilada (ROM 5973ac6), sin probar en la consola. Claves de saludo con entropía débil (temporizadores, reloj, MAC): solo para claves desechables |
+| 0G proveedor qwen | Volvió el TLS; nuestro token pasa el proxy 0G, pero el servicio de Alibaba detrás responde 401 "API-key is blocked" (la clave del proveedor) |
+
 No se ha enviado ninguna transacción a Ethereum. En 0G testnet, solo las cuatro de preparación del ledger con la cuenta de laboratorio.
 
 ## Siguiente
