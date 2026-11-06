@@ -3,21 +3,16 @@
 
 #include <stdint.h>
 
-/* The buttons' icons, small 3D objects drawn once by the renderer at twice
- * their size and shrunk, so their edges are smooth: a colour and a coverage
- * (0..4) per pixel. */
+/* The buttons' icons: 32x32 pictures with soft edges, a colour and a
+ * coverage (0..4) per pixel (game/src/icons_art.c). */
 enum { OK_ICON_FEED, OK_ICON_PLAY, OK_ICON_PET, OK_ICON_SLEEP, OK_ICON_WAKE, OK_ICON_DRAW, OK_ICON_PHOTO, OK_ICON_MAIL,
-       OK_ICON_DEV, OK_ICON_WEAR, OK_ICONS };
+       OK_ICON_DEV, OK_ICON_WEAR, OK_ICON_HOME, OK_ICON_MUSIC, OK_ICONS };
 #define OK_ICON_SIZE 32
 
-typedef struct {
-    uint16_t colour[OK_ICONS][OK_ICON_SIZE * OK_ICON_SIZE];
-    uint8_t cover[OK_ICONS][OK_ICON_SIZE * OK_ICON_SIZE];
-} ok_icons;
+extern const uint16_t ok_icon_colour[OK_ICONS][OK_ICON_SIZE * OK_ICON_SIZE];
+extern const uint8_t ok_icon_cover[OK_ICONS][OK_ICON_SIZE * OK_ICON_SIZE];
 
-/* Uses the renderer's buffers: call it before drawing a frame, not during. */
-void ok_icons_build(ok_icons *icons);
-/* Draws icon centred at cx, cy over what is there, at size/32 (16 or 32). */
-void ok_icons_draw(const ok_icons *icons, int icon, uint16_t *frame, int cx, int cy, int size);
+/* Draws an icon centred at cx, cy over a 256x192 frame, 32 or 16 pixels wide. */
+void ok_icons_draw(int icon, uint16_t *frame, int cx, int cy, int size);
 
 #endif

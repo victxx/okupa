@@ -134,20 +134,6 @@ static void pixels(frame f, int x, int y, const char *const *rows, int n, int sc
 
 /* ------------------------------------------------------------ top screen */
 
-static ok_icons icons;
-static int icons_ready;
-
-/* The icons are drawn by the renderer the first time they are needed, before
- * any frame of the attic. */
-static const ok_icons *icon_set(void)
-{
-    if (!icons_ready) {
-        ok_icons_build(&icons);
-        icons_ready = 1;
-    }
-    return &icons;
-}
-
 /* The four needs along the bottom: an icon and a bar each, on glass. */
 static void needs(frame f, const ok_pet *p)
 {
@@ -157,7 +143,7 @@ static void needs(frame f, const ok_pet *p)
         int x = 5 + i * 62, y = 173, v = p->need[i] * 34 / OK_NEED_MAX;
         uint16_t c = p->need[i] < 35 ? RGB(30, 9, 7) : p->need[i] < 65 ? RGB(30, 23, 6) : RGB(10, 25, 12);
         glass(f, x, y, 60, 16);
-        ok_icons_draw(icon_set(), icon[i], f, x + 10, y + 8, 16);
+        ok_icons_draw(icon[i], f, x + 10, y + 8, 16);
         rect(f, x + 21, y + 6, 36, 5, RGB(3, 3, 4));
         rect(f, x + 22, y + 7, v, 3, c);
         rect(f, x + 22, y + 7, v, 1, RGB(31, 31, 28)); /* a glint along the top */
@@ -258,7 +244,7 @@ static void button(frame f, const uint8_t (*font)[8], int i, const char *label, 
     if (!pressed) round_box(f, x, BY(i) + 3, BW, BH, 6, RGB(3, 3, 3)); /* shadow */
     round_box(f, x, y, BW, BH, 6, pressed ? half(card) + (uint16_t)RGB(6, 6, 6) - 0x8000u : card);
     round_box(f, x + 3, y + 3, BW - 6, 34, 5, soon[i] ? RGB(16, 15, 15) : accent[i]);
-    ok_icons_draw(icon_set(), i == B_SLEEP && p->asleep ? OK_ICON_WAKE : icon[i], f, x + BW / 2, y + 20 - (pressed ? 0 : 1), 32);
+    ok_icons_draw(i == B_SLEEP && p->asleep ? OK_ICON_WAKE : icon[i], f, x + BW / 2, y + 20 - (pressed ? 0 : 1), 32);
     centred(f, font, x + BW / 2, y + 44, label, soon[i] ? RGB(11, 10, 10) : INK, 2);
     if (soon[i]) {
         round_box(f, x + BW - 30, y - 4, 32, 11, 4, RGB(29, 11, 8));
@@ -290,7 +276,7 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, cons
         button(f, font, i, i == B_SLEEP && p->asleep ? "Wake" : labels[i], u->pressed == i + 1 && u->pressed_ticks > 0, p);
     round_box(f, CLOSET_X, CLOSET_Y + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), CLOSET_W, CLOSET_H, 7,
               u->pressed == 100 && u->pressed_ticks ? RGB(22, 20, 12) : RGB(31, 26, 3));
-    ok_icons_draw(icon_set(), OK_ICON_WEAR, f, CLOSET_X + 13, CLOSET_Y + 10, 16);
+    ok_icons_draw(OK_ICON_WEAR, f, CLOSET_X + 13, CLOSET_Y + 10, 16);
     text(f, font, CLOSET_X + 25, CLOSET_Y + 7, "Wear", INK, 2);
     centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(19, 17, 15), 1);
 }
