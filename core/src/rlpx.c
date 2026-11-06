@@ -215,3 +215,96 @@ ok_result ok_rlpx_session_init(ok_rlpx_session *s, int initiator, const uint8_t 
     if (r != OK_OK) ok_wipe(s, sizeof *s);
     return r;
 }
+
+static size_t padded(size_t n) { return (n + 15) & ~(size_t)15; }
+
+size_t ok_rlpx_frame_len(size_t n) { return OK_RLPX_HEADER + padded(n) + 16; }
+
+static void digest16(const ok_keccak *k, uint8_t out[16])
+{
+    ok_keccak copy = *k;
+    uint8_t d[32];
+    ok_keccak_final(&copy, d);
+    memcpy(out, d, 16);
+}
+
+/* Header MAC: seed = aes(mac, digest) ^ header ciphertext. */
+static void header_mac(ok_rlpx_session *s, ok_keccak *k, const uint8_t ct[16], uint8_t out[16])
+{
+    uint8_t seed[16];
+    int i;
+    digest16(k, seed);
+    ok_aes_block(&s->mac, seed, seed);
+    for (i = 0; i < 16; i++) seed[i] ^= ct[i];
+    ok_keccak_update(k, seed, 16);
+    digest16(k, out);
+}
+
+/* Frame MAC: absorb the ciphertext, then seed = aes(mac, digest) ^ digest. */
+static void frame_mac(ok_rlpx_session *s, ok_keccak *k, const uint8_t *ct, size_t n, uint8_t out[16])
+{
+    uint8_t d[16], seed[16];
+    int i;
+    ok_keccak_update(k, ct, n);
+    digest16(k, d);
+    ok_aes_block(&s->mac, d, seed);
+    for (i = 0; i < 16; i++) seed[i] ^= d[i];
+    ok_keccak_update(k, seed, 16);
+    digest16(k, out);
+}
+
+static int differ(const uint8_t *a, const uint8_t *b, size_t n)
+{
+    uint8_t d = 0;
+    size_t i;
+    for (i = 0; i < n; i++) d |= (uint8_t)(a[i] ^ b[i]);
+    return d != 0;
+}
+
+ok_result ok_rlpx_frame_write(ok_rlpx_session *s, const uint8_t *data, size_t n, uint8_t *out, size_t cap, size_t *len)
+{
+    size_t p;
+    if (!s || (!data && n) || !out || !len) return OK_ARGUMENT;
+    if (n > OK_RLPX_MAX_FRAME) return OK_RANGE;
+    p = padded(n);
+    if (cap < ok_rlpx_frame_len(n)) return OK_RANGE;
+    if (n) memmove(out + OK_RLPX_HEADER, data, n);
+    memset(out + OK_RLPX_HEADER + n, 0, p - n);
+    memset(out, 0, 16);
+    out[0] = (uint8_t)(n >> 16);
+    out[1] = (uint8_t)(n >> 8);
+    out[2] = (uint8_t)n;
+    out[3] = 0xc2; /* [capability-id 0, context-id 0] */
+    out[4] = 0x80;
+    out[5] = 0x80;
+    ok_aes_ctr_run(&s->enc, out, 16);
+    header_mac(s, &s->egress, out, out + 16);
+    ok_aes_ctr_run(&s->enc, out + OK_RLPX_HEADER, p);
+    frame_mac(s, &s->egress, out + OK_RLPX_HEADER, p, out + OK_RLPX_HEADER + p);
+    *len = ok_rlpx_frame_len(n);
+    return OK_OK;
+}
+
+ok_result ok_rlpx_header_read(ok_rlpx_session *s, uint8_t header[OK_RLPX_HEADER], size_t *size)
+{
+    uint8_t want[16];
+    if (!s || !header || !size) return OK_ARGUMENT;
+    header_mac(s, &s->ingress, header, want);
+    if (differ(want, header + 16, 16)) return OK_CRYPTO;
+    ok_aes_ctr_run(&s->dec, header, 16);
+    *size = (size_t)header[0] << 16 | (size_t)header[1] << 8 | header[2];
+    return OK_OK;
+}
+
+ok_result ok_rlpx_body_read(ok_rlpx_session *s, uint8_t *body, size_t size)
+{
+    uint8_t want[16];
+    size_t p;
+    if (!s || !body) return OK_ARGUMENT;
+    if (size > OK_RLPX_MAX_FRAME) return OK_RANGE;
+    p = padded(size);
+    frame_mac(s, &s->ingress, body, p, want);
+    if (differ(want, body + p, 16)) return OK_CRYPTO;
+    ok_aes_ctr_run(&s->dec, body, p);
+    return OK_OK;
+}

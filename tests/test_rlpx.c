@@ -199,7 +199,65 @@ int main(void)
         ok_keccak_final(&k1, d1);
         ok_keccak_final(&k2, d2);
         assert(memcmp(d1, d2, 32));
+
+        /* A's first frames match an independent Python writer; B reads them. */
+        {
+            static uint8_t wire[2048], data[1100];
+            static const char *want1 =
+                "f25930f27a7e8fa7ba4cbb3756ff0ca1d02fda543a92c08b9990a3fb6096bc02"
+                "bfdcb9a89c8fc2ae90c56c4557e4731321964a8b9eb3d9131dbe753662c49425";
+            static const char *want2 =
+                "c6b2bb6bb5cb17b2f98088cc80674b69ca88caf544f5999a68e7f71f335e5260"
+                "bd6d57b739fd14cc2c4c250a255c4a24033424fa76949089c424ce963c67e6f1"
+                "e826c02bff8d2b1fe0c99b0908f50f0aff96aac1d480897264beb0d9f8bf107a";
+            static const size_t sizes[] = {0, 1, 15, 16, 17, 1000};
+            size_t i, j, size, len, n;
+
+            assert(ok_rlpx_frame_write(&sa, (const uint8_t *)"\x80okupa frame one", 16, wire, sizeof wire, &len) == OK_OK);
+            n = hex(want1, data, sizeof data);
+            assert(len == n && len == ok_rlpx_frame_len(16) && !memcmp(wire, data, n));
+            assert(ok_rlpx_header_read(&sb, wire, &size) == OK_OK && size == 16);
+            assert(ok_rlpx_body_read(&sb, wire + OK_RLPX_HEADER, size) == OK_OK);
+            assert(!memcmp(wire + OK_RLPX_HEADER, "\x80okupa frame one", 16));
+
+            for (i = 0; i < 40; i++) data[i] = (uint8_t)i;
+            assert(ok_rlpx_frame_write(&sa, data, 40, wire, sizeof wire, &len) == OK_OK);
+            n = hex(want2, data + 100, sizeof data - 100);
+            assert(len == n && !memcmp(wire, data + 100, n));
+            assert(ok_rlpx_header_read(&sb, wire, &size) == OK_OK && size == 40);
+            assert(ok_rlpx_body_read(&sb, wire + OK_RLPX_HEADER, size) == OK_OK);
+            assert(!memcmp(wire + OK_RLPX_HEADER, data, 40));
+
+            /* B answers with frames of awkward sizes, written in place. */
+            for (i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+                for (j = 0; j < sizes[i]; j++) wire[OK_RLPX_HEADER + j] = data[j] = (uint8_t)(j * 7 + i);
+                assert(ok_rlpx_frame_write(&sb, wire + OK_RLPX_HEADER, sizes[i], wire, sizeof wire, &len) == OK_OK);
+                assert(len == ok_rlpx_frame_len(sizes[i]) && len % 16 == 0);
+                assert(ok_rlpx_header_read(&sa, wire, &size) == OK_OK && size == sizes[i]);
+                assert(ok_rlpx_body_read(&sa, wire + OK_RLPX_HEADER, size) == OK_OK);
+                assert(!memcmp(wire + OK_RLPX_HEADER, data, size));
+            }
+
+            /* Tampering is caught: header, body, or a frame replayed. */
+            assert(ok_rlpx_frame_write(&sb, data, 20, wire, sizeof wire, &len) == OK_OK);
+            memcpy(data + 200, wire, len); /* reads decrypt in place */
+            {
+                ok_rlpx_session copy = sa;
+                wire[3] ^= 1;
+                assert(ok_rlpx_header_read(&copy, wire, &size) == OK_CRYPTO);
+                wire[3] ^= 1;
+                copy = sa;
+                wire[40] ^= 1;
+                assert(ok_rlpx_header_read(&copy, wire, &size) == OK_OK);
+                assert(ok_rlpx_body_read(&copy, wire + OK_RLPX_HEADER, size) == OK_CRYPTO);
+            }
+            memcpy(wire, data + 200, len);
+            assert(ok_rlpx_header_read(&sa, wire, &size) == OK_OK);
+            assert(ok_rlpx_body_read(&sa, wire + OK_RLPX_HEADER, size) == OK_OK);
+            assert(ok_rlpx_header_read(&sa, data + 200, &size) == OK_CRYPTO);
+            assert(ok_rlpx_frame_write(&sa, data, 20, wire, ok_rlpx_frame_len(20) - 1, &len) == OK_RANGE);
+        }
     }
-    puts("rlpx: EIP-8 auth/ack vectors (v4 and future versions) read; our packets round-trip; session secrets match");
+    puts("rlpx: EIP-8 auth/ack vectors (v4 and future versions) read; our packets round-trip; session secrets match; frames match an independent writer");
     return 0;
 }

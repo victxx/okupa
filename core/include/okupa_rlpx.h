@@ -64,4 +64,21 @@ ok_result ok_rlpx_session_init(ok_rlpx_session *s, int initiator, const uint8_t 
                                const uint8_t own_nonce[32], const ok_rlpx_remote *remote,
                                const uint8_t *auth, size_t auth_len, const uint8_t *ack, size_t ack_len);
 
+/* Frames: header (16, encrypted) || header MAC (16) || data padded to 16
+ * (encrypted) || frame MAC (16). Header = 3-byte size || RLP [0, 0] || zeros.
+ * MACs are checked before anything is decrypted. Any error leaves the session
+ * out of step: drop the connection. */
+#define OK_RLPX_HEADER 32
+#define OK_RLPX_MAX_FRAME 0xffffff
+
+/* Bytes a frame of n data bytes takes on the wire. */
+size_t ok_rlpx_frame_len(size_t n);
+/* data may overlap out. */
+ok_result ok_rlpx_frame_write(ok_rlpx_session *s, const uint8_t *data, size_t n, uint8_t *out, size_t cap, size_t *len);
+/* Checks and decrypts the first 32 bytes of a frame in place; *size is the data length. */
+ok_result ok_rlpx_header_read(ok_rlpx_session *s, uint8_t header[OK_RLPX_HEADER], size_t *size);
+/* The rest of the frame, ok_rlpx_frame_len(size) - 32 bytes, decrypted in place:
+ * the data is then in body[0..size). */
+ok_result ok_rlpx_body_read(ok_rlpx_session *s, uint8_t *body, size_t size);
+
 #endif
