@@ -148,6 +148,20 @@ static void room(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet
     for (i = 130; i < OK_UI_H; i += 14) rect(f, 0, i, OK_UI_W, 1, FLOOR_LINE);
     rect(f, 0, 116, OK_UI_W, 3, WOOD);
     window_view(f, hour);
+    /* The wall: the newest four framed drawings, each one seen in a block. */
+    {
+        int k, first = u->wall_count > 4 ? u->wall_count - 4 : 0;
+        for (k = first; k < u->wall_count; k++) {
+            int fx = 8 + (k - first) * 36, fy = 60, x, y;
+            frame_box(f, fx, fy, 36, 36, WOOD, WOOD);
+            rect(f, fx + 2, fy + 2, 32, 32, PAPER);
+            for (y = 0; y < 32; y++)
+                for (x = 0; x < 32; x++)
+                    if (ok_drawing_get(u->wall[k], 2 * x, 2 * y) || ok_drawing_get(u->wall[k], 2 * x + 1, 2 * y) ||
+                        ok_drawing_get(u->wall[k], 2 * x, 2 * y + 1) || ok_drawing_get(u->wall[k], 2 * x + 1, 2 * y + 1))
+                        f[(fy + 2 + y) * OK_UI_W + fx + 2 + x] = INK;
+        }
+    }
     /* Bed, plant. */
     rect(f, 14, 104, 84, 30, WOOD);
     rect(f, 18, 98, 22, 12, PAPER);
@@ -220,12 +234,12 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, cons
 /* Sketchbook: the 64x64 drawing at twice the size, tools on the right. */
 #define CX 8
 #define CY 40
-enum { T_PEN, T_ERASER, T_CLEAR, T_DONE, TOOLS };
-static const char *tools[TOOLS] = {"Pen", "Eraser", "Clear", "Done"};
+enum { T_PEN, T_ERASER, T_CLEAR, T_SEND, T_DONE, TOOLS };
+static const char *tools[TOOLS] = {"Pen", "Eraser", "Clear", "Send", "Done"};
 #define TX 148
-#define TY(i) (40 + (i) * 34)
+#define TY(i) (40 + (i) * 29)
 #define TW 100
-#define TH 28
+#define TH 25
 
 static void sketch(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
@@ -237,7 +251,7 @@ static void sketch(frame f, const uint8_t (*font)[8], const ok_ui *u)
     for (i = 0; i < TOOLS; i++) {
         int on = (i == T_PEN && !u->eraser) || (i == T_ERASER && u->eraser);
         frame_box(f, TX, TY(i), TW, TH, on ? RGB(29, 22, 6) : PAPER, INK);
-        centred(f, font, TX + TW / 2, TY(i) + 10, tools[i], INK, 1);
+        centred(f, font, TX + TW / 2, TY(i) + 9, i == T_SEND && u->drawing_sent ? "On its way" : tools[i], INK, 1);
     }
 }
 
@@ -285,15 +299,17 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         snprintf(link, sizeof link, "ethereum:%.42s", u->wallet_address);
         if (qrcodegen_encodeText(link, tmp, qr, qrcodegen_Ecc_MEDIUM, 1, 6, qrcodegen_Mask_AUTO, true)) {
             size = qrcodegen_getSize(qr);
-            scale = 120 / (size + 4);
+            scale = 112 / (size + 4);
             left = 128 - (size + 4) * scale / 2;
-            topq = 40;
+            topq = 38;
             rect(f, left, topq, (size + 4) * scale, (size + 4) * scale, RGB(31, 31, 31));
             for (y = 0; y < size; y++)
                 for (x = 0; x < size; x++)
                     if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
         }
-        centred(f, font, 100, 172, "Scan to send ETH", PAPER, 1);
+        centred(f, font, 128, 152, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
+        frame_box(f, 4, 166, 120, 22, PAPER, INK);
+        centred(f, font, 64, 173, "Send hello", INK, 1);
     }
     frame_box(f, 190, 166, 62, 22, PAPER, INK);
     centred(f, font, 221, 173, "Back", INK, 1);
@@ -441,6 +457,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     int i;
     if (u->scene == OK_UI_SKETCH) {
         if (inside(x, y, CX, CY, 128, 128)) {
+            if (u->drawing_sent) return OK_UI_NOTHING; /* the signed pixels must stay as sent */
             if (!held) u->last_x = u->last_y = -1;
             stroke(u, (x - CX) / 2, (y - CY) / 2);
             return OK_UI_CHANGED;
@@ -450,7 +467,13 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             if (!inside(x, y, TX, TY(i), TW, TH)) continue;
             if (i == T_PEN) u->eraser = 0;
             if (i == T_ERASER) u->eraser = 1;
-            if (i == T_CLEAR) memset(u->drawing, 0, sizeof u->drawing);
+            if (i == T_CLEAR && !u->drawing_sent) memset(u->drawing, 0, sizeof u->drawing);
+            if (i == T_SEND) {
+                if (u->drawing_sent) return OK_UI_NOTHING;
+                say(u, "Off to Ethereum. It goes on the wall once a block has it.");
+                u->scene = OK_UI_HOME;
+                return OK_UI_SEND_DRAWING;
+            }
             if (i == T_DONE) {
                 u->scene = OK_UI_HOME;
                 say(u, "I'll keep it safe. One day it goes on the wall.");
@@ -461,6 +484,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (u->scene == OK_UI_WALLET) {
         if (!u->wallet_ready && inside(x, y, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H)) return OK_UI_WALLET_SCRIBBLE;
+        if (u->wallet_ready && !held && inside(x, y, 4, 166, 120, 22)) return OK_UI_WALLET_HELLO;
         if (held || !inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;
         u->scene = OK_UI_DEV;
         return OK_UI_CHANGED;

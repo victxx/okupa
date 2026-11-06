@@ -8,6 +8,8 @@
  *   build/okupa-peer --hold <seconds> enode://...     stay connected after admission
  *   build/okupa-peer --mainnet enode://...            Ethereum mainnet instead of Sepolia
  *   build/okupa-peer --tx <hex> enode://...           hand over a signed transaction after Status
+ *   build/okupa-peer --hold 120 --watch <hash> [--from N] enode://...
+ *                                                    follow blocks, check each body, look for a transaction
  *                                                     (only to nodes you run: it broadcasts it)
  */
 #include "okupa_keys.h"
@@ -104,6 +106,26 @@ static uint8_t tx[4096];
 static size_t tx_len;
 static const uint8_t *tx_list[1] = {tx};
 static const ok_eth_network *net = &ok_sepolia;
+static uint8_t watch[32];
+static int watching;
+static uint64_t watch_from;
+
+static uint32_t seconds(void *ctx)
+{
+    (void)ctx;
+    return (uint32_t)time(NULL);
+}
+
+/* Every block checked while watching: its hash, how many transactions, and
+ * whether the transactions root recomputed from the body matches its header. */
+static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
+{
+    (void)ctx;
+    say("block %llu %02x%02x%02x%02x..: %u txs, root %s%s", (unsigned long long)h->number, h->hash[0], h->hash[1],
+        h->hash[2], h->hash[3], (unsigned)c->count, c->root_ok ? "ok" : "MISMATCH",
+        c->found >= 0 ? ", watched transaction FOUND" : "");
+}
+
 static int hold_on(void *ctx)
 {
     (void)ctx;
@@ -154,6 +176,12 @@ static int dial(const char *enode, const uint8_t priv[32])
         io.txs = tx_list;
         io.tx_lens = &tx_len;
         io.tx_count = 1;
+    }
+    if (watching) {
+        io.watch = watch;
+        io.watch_from = watch_from;
+        io.seconds = seconds;
+        io.block = block_seen;
     }
     io.ctx = &fd;
     fresh(&e);
@@ -219,6 +247,11 @@ int main(int argc, char **argv)
             if (n > sizeof tx || !unhex(h, tx, n)) die("--tx: hex of a signed transaction");
             tx_len = n;
         }
+        else if (!strcmp(argv[i], "--watch") && i + 1 < argc) {
+            /* Follow new blocks while held and look for this transaction hash. */
+            if (strlen(argv[++i]) != 64 || !unhex(argv[i], watch, 32)) die("--watch: 64 hex digits");
+            watching = 1;
+        } else if (!strcmp(argv[i], "--from") && i + 1 < argc) watch_from = strtoull(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--hold") && i + 1 < argc) hold_until = time(NULL) + atoi(argv[++i]);
         else enode = argv[i];
     }

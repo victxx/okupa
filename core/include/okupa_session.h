@@ -2,6 +2,7 @@
 #define OKUPA_SESSION_H
 
 #include "okupa.h"
+#include "okupa_block.h"
 #include "okupa_eth.h"
 #include "okupa_rlpx.h"
 
@@ -23,8 +24,22 @@ typedef struct {
     const uint8_t *const *txs;
     const size_t *tx_lens;
     size_t tx_count;
+    /* Optional: once admitted, follow the chain from block watch_from (0 =
+     * the peer's head) and look for the transaction whose hash is watch in
+     * each new block: headers, then bodies, each checked by hashing. seconds
+     * paces the requests; block hears about every block checked. */
+    const uint8_t *watch;
+    uint64_t watch_from;
+    uint32_t (*seconds)(void *ctx);
+    void (*block)(void *ctx, const ok_header *h, const ok_body_check *c);
+    /* Optional: each step reached (OK_STAGE_*), for timings and the screens. */
+    void (*stage)(void *ctx, int stage);
     void *ctx;
 } ok_io;
+
+/* How far a dial got, in order. */
+enum { OK_STAGE_NONE, OK_STAGE_TCP, OK_STAGE_AUTH, OK_STAGE_ACK, OK_STAGE_HELLO, OK_STAGE_STATUS, OK_STAGE_TX,
+       OK_STAGE_HELD };
 
 #define OK_IO_IDLE (-2)
 
@@ -35,6 +50,8 @@ typedef struct {
     int handshake, hello, status, pong; /* how far it got */
     unsigned held;                      /* messages handled while holding */
     int tx_written;                     /* the Transactions message went out */
+    uint64_t blocks;                    /* blocks checked for the watched transaction */
+    int found;                          /* it is in one whose transactions root matched */
     char client[48];
     uint64_t disconnect; /* reason, when outcome is OK_SESSION_DISCONNECTED */
     ok_eth_status remote;

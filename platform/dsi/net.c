@@ -1,4 +1,5 @@
 #include "net.h"
+#include "okupa_facts.h"
 #include "okupa_discv4.h"
 #include "okupa_dns.h"
 #include "okupa_dnsdisc.h"
@@ -44,7 +45,16 @@ static const profile *net = &mainnet;
 #define LINES 14
 
 static char lines[LINES][33], summary[33] = "Network: starting";
-static char log_path[48], peers_path[48], wifi_path[48];
+static char log_path[48], peers_path[48], wifi_path[48], pending_path[48], nonce_path[48], from_path[48],
+    included_path[48];
+static uint8_t pending[1200], pending_hash[32];
+static size_t pending_len;
+static int handed;
+static uint64_t watch_from; /* next block to look at for the pending transaction */
+static int included_event; /* one-shot for the game: the pending transaction was seen in a block */
+static uint8_t included_hash[32];
+static uint64_t included_block;
+static const uint8_t *pending_list[1] = {pending};
 static volatile int ui_wifi; /* the player is scanning or connecting: stand back */
 static struct in_addr dns_server;
 static uint16_t dns_id = 0x4f4b;
@@ -108,7 +118,94 @@ void ok_dsi_net_files(const char *dir)
     snprintf(log_path, sizeof log_path, "%snet-log.txt", dir);
     snprintf(peers_path, sizeof peers_path, "%speers-%s.txt", dir, net->name);
     snprintf(wifi_path, sizeof wifi_path, "%swifi.txt", dir);
+    snprintf(pending_path, sizeof pending_path, "%spending-%s.hex", dir, net->name);
+    snprintf(nonce_path, sizeof nonce_path, "%snonce-%s.txt", dir, net->name);
+    snprintf(from_path, sizeof from_path, "%swatch-%s.txt", dir, net->name);
+    snprintf(included_path, sizeof included_path, "%sincluded-%s.txt", dir, net->name);
+    snprintf(ok_facts_now.network, sizeof ok_facts_now.network, "%s", net->name);
+    ok_facts_now.chain_id = net->net->network_id;
+    memcpy(ok_facts_now.genesis, net->net->genesis, 32);
+    snprintf(ok_facts_now.dns_tree, sizeof ok_facts_now.dns_tree, "%s", strchr(net->tree, '@') + 1);
     load_known_networks();
+    /* A transaction still waiting from last time: same bytes, same hash. */
+    if ((f = fopen(pending_path, "r"))) {
+        char hex[2 * sizeof pending + 4];
+        size_t n = 0;
+        unsigned v;
+        if (fgets(hex, sizeof hex, f))
+            while (n < sizeof pending && sscanf(hex + 2 * n, "%2x", &v) == 1) pending[n++] = (uint8_t)v;
+        fclose(f);
+        if (n > 1) {
+            pending_len = n;
+            ok_keccak256(pending, n, pending_hash);
+        }
+    }
+    if (pending_len && (f = fopen(from_path, "r"))) {
+        unsigned long long v;
+        if (fscanf(f, "%llu", &v) == 1) watch_from = v;
+        fclose(f);
+    }
+}
+
+static void save_watch_from(void)
+{
+    FILE *f = fopen(from_path, "w");
+    if (!f) return;
+    fprintf(f, "%llu\n", (unsigned long long)watch_from);
+    fclose(f);
+}
+
+int ok_dsi_net_take_included(uint8_t hash[32], uint64_t *block)
+{
+    if (!included_event) return 0;
+    included_event = 0;
+    memcpy(hash, included_hash, 32);
+    *block = included_block;
+    return 1;
+}
+
+uint64_t ok_dsi_net_chain_id(void) { return net->net->network_id; }
+int ok_dsi_net_handed(void) { return handed; }
+
+int ok_dsi_net_pending(uint8_t hash[32])
+{
+    if (pending_len && hash) memcpy(hash, pending_hash, 32);
+    return pending_len != 0;
+}
+
+uint64_t ok_dsi_net_take_nonce(void)
+{
+    unsigned long long nonce = 0;
+    FILE *f = fopen(nonce_path, "r");
+    if (f) {
+        if (fscanf(f, "%llu", &nonce) != 1) nonce = 0;
+        fclose(f);
+    }
+    if ((f = fopen(nonce_path, "w"))) {
+        fprintf(f, "%llu\n", nonce + 1);
+        fclose(f);
+    }
+    return nonce;
+}
+
+void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32])
+{
+    FILE *f;
+    size_t i;
+    if (n > sizeof pending) return;
+    memcpy(pending, tx, n);
+    memcpy(pending_hash, hash, 32);
+    pending_len = n;
+    handed = 0;
+    watch_from = 0;
+    remove(from_path);
+    ok_facts_now.incl_state = 0;
+    ok_facts_now.blocks_checked = 0;
+    if ((f = fopen(pending_path, "w"))) {
+        for (i = 0; i < n; i++) fprintf(f, "%02x", pending[i]);
+        fprintf(f, "\n");
+        fclose(f);
+    }
 }
 
 const char *ok_dsi_net_name(void) { return net->name; }
@@ -545,6 +642,9 @@ static void crawl(int seconds, uint8_t fork[4], int seeds_from, int seeds_to)
         next_frame();
     }
     line(3, "v4: %d seen %u rx %u bond %u ok", c.count, c.received, c.bonded, c.found_count);
+    ok_facts_now.v4_sent = (int)c.sent;
+    ok_facts_now.v4_received = (int)c.received;
+    ok_facts_now.v4_nodes = c.count;
     ok_wipe(c.priv, sizeof c.priv);
     close(udp_fd);
     udp_fd = -1;
@@ -561,6 +661,7 @@ static int sock_read(void *ctx, uint8_t *buf, size_t n)
     int fd = *(int *)ctx, k;
     if (!wait_for(fd, POLLIN, read_ms)) return OK_IO_IDLE;
     k = recv(fd, buf, n, 0);
+    if (k > 0) ok_facts_now.bytes_in += (uint32_t)k;
     return k > 0 ? k : 0;
 }
 
@@ -569,6 +670,7 @@ static int sock_write(void *ctx, const uint8_t *buf, size_t n)
     int fd = *(int *)ctx, k;
     if (!wait_for(fd, POLLOUT, 15000)) return 0;
     k = send(fd, buf, n, 0);
+    if (k > 0) ok_facts_now.bytes_out += (uint32_t)k;
     return k > 0 ? k : 0;
 }
 
@@ -598,6 +700,118 @@ static int hold(void *ctx)
     return !ui_wifi && online();
 }
 
+/* ---- What the technical screens show ------------------------------------------ */
+
+static uint32_t dial_start;
+
+static uint32_t ms_now(void)
+{
+    return (uint32_t)((uint64_t)cpuGetTiming() / 33514u);
+}
+
+static void stage_reached(void *ctx, int st)
+{
+    ok_fact_peer *p = &ok_facts_now.peers[0];
+    uint32_t ms = ms_now() - dial_start;
+    (void)ctx;
+    p->stage = st;
+    if (st == OK_STAGE_ACK) p->ms_rlpx = ms;
+    if (st == OK_STAGE_HELLO) p->ms_hello = ms;
+    if (st == OK_STAGE_STATUS) {
+        p->ms_status = ms;
+        ok_facts_now.reached_status++;
+    }
+}
+
+static uint32_t seconds_now(void *ctx)
+{
+    (void)ctx;
+    return (uint32_t)time(NULL);
+}
+
+/* Every block a node gives us while we wait: recomputed hash and root, and
+ * whether our transaction is inside. */
+static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
+{
+    ok_facts *f = &ok_facts_now;
+    (void)ctx;
+    f->blocks_checked++;
+    f->incl_state = 1;
+    if (h->number > f->best_head) {
+        f->best_head = h->number;
+        memcpy(f->best_head_hash, h->hash, 32);
+    }
+    watch_from = h->number + 1;
+    save_watch_from();
+    line(LINES - 2, "Block %llu: %u txs, root %s", (unsigned long long)h->number, (unsigned)c->count,
+         c->root_ok ? "ok" : "BAD");
+    if (c->found < 0) return;
+    f->incl_block = h->number;
+    memcpy(f->incl_block_hash, h->hash, 32);
+    memcpy(f->incl_tx_root, c->root, 32);
+    f->incl_index = (uint32_t)c->found;
+    f->incl_block_txs = c->count;
+    f->incl_root_ok = c->root_ok;
+    f->incl_hash_ok = 1; /* the body was asked for by the hash recomputed from this header */
+    f->incl_state = c->root_ok ? 2 : 3;
+    if (!c->root_ok) return;
+    {
+        FILE *fp = fopen(included_path, "a");
+        int k;
+        if (fp) {
+            for (k = 0; k < 32; k++) fprintf(fp, "%02x", pending_hash[k]);
+            fprintf(fp, " block %llu index %u of %u\n", (unsigned long long)h->number, (unsigned)c->found,
+                    (unsigned)c->count);
+            fclose(fp);
+        }
+    }
+    memcpy(included_hash, pending_hash, 32);
+    included_block = h->number;
+    included_event = 1;
+    pending_len = 0;
+    remove(pending_path);
+    remove(from_path);
+    {
+        char text[48];
+        snprintf(text, sizeof text, "In block %llu!", (unsigned long long)h->number);
+        say(text);
+        line(LINES - 1, "%s", text);
+    }
+}
+
+static void begin_peer_fact(int i)
+{
+    ok_facts *f = &ok_facts_now;
+    memmove(&f->peers[1], &f->peers[0], sizeof f->peers[0] * (OK_FACTS_PEERS - 1));
+    memset(&f->peers[0], 0, sizeof f->peers[0]);
+    memcpy(f->peers[0].ip, nodes[i].ip, 4);
+    f->peers[0].port = nodes[i].tcp;
+    memcpy(f->peers[0].pub, nodes[i].pub, 8);
+    f->peers[0].disconnect = -1;
+    if (f->peer_count < OK_FACTS_PEERS) f->peer_count++;
+    f->tried++;
+    dial_start = ms_now();
+}
+
+static void end_peer_fact(const ok_session_report *rep)
+{
+    ok_fact_peer *p = &ok_facts_now.peers[0];
+    snprintf(p->client, sizeof p->client, "%s", rep->client);
+    if (rep->outcome == OK_SESSION_DISCONNECTED) p->disconnect = (int)rep->disconnect;
+    if (rep->disconnect == 4) ok_facts_now.full++;
+    if (rep->status) {
+        p->latest = rep->remote.latest;
+        memcpy(p->latest_hash, rep->remote.latest_hash, 32);
+        memcpy(p->fork_hash, rep->remote.fork_hash, 4);
+        p->fork_next = rep->remote.fork_next;
+        if (rep->remote.latest > ok_facts_now.best_head) {
+            ok_facts_now.best_head = rep->remote.latest;
+            memcpy(ok_facts_now.best_head_hash, rep->remote.latest_hash, 32);
+        }
+    }
+    if (rep->tx_written) ok_facts_now.tx_handed = handed;
+}
+
 static int dial(int i, int row)
 {
     static ok_rlpx_entropy e;
@@ -609,6 +823,7 @@ static int dial(int i, int row)
     socklen_t elen = sizeof error;
 
     line(row, "%u.%u.%u.%u: connecting", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
+    begin_peer_fact(i);
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return 0;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     memset(&addr, 0, sizeof addr);
@@ -619,9 +834,12 @@ static int dial(int i, int row)
     if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 4000) ||
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &elen) || error) {
         close(fd);
+        ok_facts_now.peers[0].stage = OK_STAGE_NONE;
         line(row, "%u.%u.%u.%u: no TCP", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
         return 0;
     }
+    ok_facts_now.peers[0].stage = OK_STAGE_TCP;
+    ok_facts_now.peers[0].ms_tcp = ms_now() - dial_start;
     draw_key(priv);
     draw_key(e.eph);
     draw(e.nonce, 32);
@@ -632,6 +850,17 @@ static int dial(int i, int row)
     io.write = sock_write;
     io.log = sock_log;
     io.hold = hold;
+    if (pending_len) {
+        io.txs = pending_list;
+        io.tx_lens = &pending_len;
+        io.tx_count = 1;
+        /* And look for it in every new block while a node keeps us. */
+        io.watch = pending_hash;
+        io.watch_from = watch_from;
+    }
+    io.seconds = seconds_now;
+    io.block = block_seen;
+    io.stage = stage_reached;
     io.ctx = &fd;
     current_row = row;
     current_node = i;
@@ -646,6 +875,19 @@ static int dial(int i, int row)
     /* A node that reached Status can take a transaction even if it is full
      * (it is handed over before it hangs up): worth remembering. */
     if (rep.status) remember_peer(i);
+    /* Where to start looking: the head when it was first handed over. */
+    if (pending_len && rep.tx_written && !watch_from && rep.remote.latest) {
+        watch_from = rep.remote.latest;
+        save_watch_from();
+    }
+    if (rep.tx_written) {
+        char text[48];
+        handed++;
+        snprintf(text, sizeof text, "Hello handed to %d nodes", handed);
+        say(text);
+        line(LINES - 1, "%s", text);
+    }
+    end_peer_fact(&rep);
     if (rep.outcome == OK_SESSION_PASS) {
         line(row, "%u.%u.%u.%u: was online", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
         return 1;
@@ -721,6 +963,12 @@ static int postman(void *arg)
         }
         pick_dns();
         ok_forkid(net->net, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
+        memcpy(ok_facts_now.fork_hash, fork, 4);
+        ok_facts_now.fork_next = next;
+        ok_facts_now.ip[0] = (uint8_t)Wifi_GetIP();
+        ok_facts_now.ip[1] = (uint8_t)(Wifi_GetIP() >> 8);
+        ok_facts_now.ip[2] = (uint8_t)(Wifi_GetIP() >> 16);
+        ok_facts_now.ip[3] = (uint8_t)(Wifi_GetIP() >> 24);
 
         /* 1. Peers that let us in before: usually instant. */
         node_count = 0;
@@ -741,12 +989,17 @@ static int postman(void *arg)
             ok_dnsdisc_walk_tree(&w, net->tree, fork, 24);
         }
         dns_to = node_count;
+        ok_facts_now.dns_seq = w.seq;
+        ok_facts_now.dns_verified = w.seq != 0;
+        ok_facts_now.dns_records = (int)w.records;
+        ok_facts_now.dns_nodes = dns_to - dns_from;
         line(2, w.seq ? "DNS list: %d nodes" : "DNS list: no answer (%d)", dns_to - dns_from);
 
         /* 3. Lesser-known nodes through discovery v4: these have room more often. */
         from = node_count;
         say("Searching for nodes");
         crawl(30, fork, dns_from, dns_to);
+        ok_facts_now.candidates = node_count;
         if (try_nodes(from, node_count)) continue;
         if (try_nodes(dns_from, dns_to)) continue;
 

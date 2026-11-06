@@ -7,8 +7,12 @@
 #include "okupa.h"
 #include "okupa_font.h"
 #include "okupa_save.h"
+#include "okupa_facts.h"
+#include "okupa_tech.h"
+#include "okupa_keccak.h"
 #include "okupa_ui.h"
 #include <fat.h>
+#include <malloc.h>
 #include <nds.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -18,7 +22,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40], net_dir[40], key_path[40];
+static char save_path[40], temp_path[40], net_dir[40], key_path[40], wall_path[40], sent_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -58,6 +62,8 @@ static int open_storage(void)
         snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
         snprintf(net_dir, sizeof net_dir, "%sokupa/", roots[i]);
         snprintf(key_path, sizeof key_path, "%sokupa/account.key", roots[i]);
+        snprintf(wall_path, sizeof wall_path, "%sokupa/wall.bin", roots[i]);
+        snprintf(sent_path, sizeof sent_path, "%sokupa/drawing-sent.bin", roots[i]);
         return 1;
     }
     return 0;
@@ -90,9 +96,72 @@ static int save(const ok_pet *p, const uint8_t drawing[512])
     return rename(temp_path, save_path) == 0;
 }
 
+/* ---- The wall: drawings hung once the console saw them in a block ------------- */
+
+/* The drawing on its way: its pixels and its transaction hash, kept on the SD
+ * card so it still gets hung after a restart. */
+static uint8_t sent_pixels[512], sent_hash[32];
+static int sent_waiting;
+
+static void load_wall(ok_ui *u)
+{
+    FILE *f;
+    if ((f = fopen(wall_path, "rb"))) {
+        uint8_t n = 0;
+        if (fread(&n, 1, 1, f) == 1 && n <= OK_UI_WALL && fread(u->wall, 512, n, f) == n) u->wall_count = n;
+        fclose(f);
+    }
+    if ((f = fopen(sent_path, "rb"))) {
+        sent_waiting = fread(sent_hash, 1, 32, f) == 32 && fread(sent_pixels, 1, 512, f) == 512;
+        fclose(f);
+        u->drawing_sent = sent_waiting;
+        if (sent_waiting) memcpy(u->drawing, sent_pixels, 512);
+    }
+}
+
+static void save_wall(const ok_ui *u)
+{
+    FILE *f = fopen(wall_path, "wb");
+    uint8_t n = (uint8_t)u->wall_count;
+    if (!f) return;
+    fwrite(&n, 1, 1, f);
+    fwrite(u->wall, 512, n, f);
+    fclose(f);
+}
+
+static void hang(ok_ui *u)
+{
+    if (u->wall_count == OK_UI_WALL) { /* full: the oldest comes down */
+        memmove(u->wall[0], u->wall[1], 512 * (OK_UI_WALL - 1));
+        u->wall_count--;
+    }
+    memcpy(u->wall[u->wall_count++], sent_pixels, 512);
+    save_wall(u);
+    sent_waiting = 0;
+    remove(sent_path);
+    u->drawing_sent = 0;
+    memset(u->drawing, 0, sizeof u->drawing); /* a fresh page */
+}
+
+/* The machine's own facts, and the core's timed checks for the DSi page. */
+static void machine_facts(int checks)
+{
+    struct mallinfo mi = mallinfo();
+    ok_facts_now.dsi_mode = isDSiMode();
+    ok_facts_now.heap_used = (uint32_t)mi.uordblks;
+    snprintf(ok_facts_now.build, sizeof ok_facts_now.build, "%.20s", OKUPA_BUILD_ID);
+    if (checks && !ok_facts_now.checks_n) {
+        int k;
+        ok_checks_run(ok_facts_now.checks, 10, now_us);
+        for (k = 0; k < 10 && ok_facts_now.checks[k][0]; k++) {}
+        ok_facts_now.checks_n = k;
+    }
+}
+
 int main(void)
 {
-    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, show_mind = 0;
+    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0;
+    ok_tech tech;
     time_t now = time(NULL), last = now, saved_at = now, last_input = now;
     static ok_mind thought; /* the mind's latest decision; ui.say points into it */
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
@@ -111,6 +180,7 @@ int main(void)
     if (isDSiMode()) setCpuClock(true);
 
     ok_ui_init(&ui);
+    ok_tech_init(&tech);
     ok_pet_init(&pet, (int64_t)now);
     shown_ui = &ui;
     shown_pet = &pet;
@@ -123,7 +193,9 @@ int main(void)
             save_status = "Save: new okupa on SD";
         }
         ok_dsi_net_files(net_dir);
+        load_wall(&ui);
     }
+    machine_facts(0);
     cpuStartTiming(0); /* runs for good: the checks and the network's entropy read it */
     ok_dsi_net_start();
     ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
@@ -134,6 +206,40 @@ int main(void)
         cothread_yield_irq(IRQ_VBLANK); /* not swiWaitForVBlank: Wi-Fi runs in another thread */
         scanKeys();
         now = time(NULL);
+        /* SELECT: the technical side, over the same running game. */
+        if (keysDown() & KEY_SELECT) {
+            tech_on = !tech_on;
+            if (tech_on) {
+                show_now();
+                machine_facts(1);
+            }
+            redraw = 1;
+        }
+        if (tech_on) {
+            int k = keysDown();
+            if (k & KEY_R) ok_tech_page(&tech, 1);
+            if (k & KEY_L) ok_tech_page(&tech, -1);
+            if (k & (KEY_RIGHT | KEY_A)) ok_tech_step(&tech, 1);
+            if (k & (KEY_LEFT | KEY_B)) ok_tech_step(&tech, -1);
+            if (k) redraw = 1;
+        }
+        {
+            uint8_t inc_hash[32];
+            uint64_t inc_block;
+            if (ok_dsi_net_take_included(inc_hash, &inc_block)) {
+                static char said[48];
+                if (sent_waiting && !memcmp(inc_hash, sent_hash, 32)) {
+                    hang(&ui);
+                    snprintf(said, sizeof said, "Block %lu has my drawing. On the wall!", (unsigned long)inc_block);
+                } else {
+                    snprintf(said, sizeof said, "My hello is in block %lu!", (unsigned long)inc_block);
+                }
+                ui.say = said;
+                ui.say_ticks = 600;
+                snprintf(ui.wallet_status, sizeof ui.wallet_status, "In block %lu", (unsigned long)inc_block);
+                redraw = 1;
+            }
+        }
         if (now != last) {
             ok_pet_update(&pet, (int64_t)now);
             last = now;
@@ -143,6 +249,12 @@ int main(void)
             snprintf(ui.net_status, sizeof ui.net_status, "%s", ok_dsi_net_summary());
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
             if (show_mind && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_mind_lines(), sizeof ui.dev);
+            {
+                uint8_t hash[32];
+                if (ok_dsi_net_pending(hash))
+                    snprintf(ui.wallet_status, sizeof ui.wallet_status, "Hello %02x%02x%02x%02x: %d nodes", hash[0], hash[1],
+                             hash[2], hash[3], ok_dsi_net_handed());
+            }
         }
         /* The okupa's mind on 0G lives in its own thread: tell it what the
          * okupa notices, take what it decided. Y on the Dev screen shows it
@@ -158,6 +270,21 @@ int main(void)
         if (ok_dsi_mind_take(&thought) && thought.line[0]) {
             ui.say = thought.line;
             ui.say_ticks = 60 * 5;
+        }
+        if (tech_on) {
+            if ((keysDown() & KEY_TOUCH)) {
+                touchRead(&touch);
+                if (ok_tech_touch(&tech, touch.px, touch.py)) redraw = 1;
+            }
+            if (ui.ticks % 4 == 0) redraw = 1; /* the diagrams move */
+            if (redraw) {
+                tech.ticks = ui.ticks;
+                machine_facts(0);
+                ok_tech_render(&tech, &ok_facts_now, ok_font(), back[0], back[1]);
+                present(top, bottom);
+                redraw = 0;
+            }
+            continue;
         }
         if (keysHeld() & KEY_TOUCH) {
             int r;
@@ -193,6 +320,41 @@ int main(void)
                 ok_dsi_account_open(storage ? key_path : NULL, &ui);
             }
             if (r == OK_UI_WALLET_SCRIBBLE) ok_dsi_account_scribble(touch.px, touch.py, &ui);
+            if (r == OK_UI_WALLET_HELLO && storage) {
+                /* One hello at a time: while one is waiting, pressing again
+                 * just keeps handing out the same bytes. */
+                uint8_t tx[512], hash[32];
+                size_t len;
+                if (!ok_dsi_net_pending(hash)) {
+                    uint64_t nonce = ok_dsi_net_take_nonce();
+                    if (ok_dsi_account_hello(ok_dsi_net_chain_id(), nonce, tx, sizeof tx, &len, hash))
+                        ok_dsi_net_send(tx, len, hash);
+                }
+            }
+            if (r == OK_UI_SEND_DRAWING && storage) {
+                uint8_t tx[700], hash[32];
+                size_t len;
+                FILE *f;
+                if (!ui.wallet_ready) {
+                    ui.say = "I need my key first: Dev > Wallet.";
+                    ui.say_ticks = 300;
+                } else if (ok_dsi_net_pending(hash)) {
+                    ui.say = "One letter at a time: the last one is still on its way.";
+                    ui.say_ticks = 300;
+                } else if (ok_dsi_account_act(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), ui.drawing, tx, sizeof tx,
+                                              &len, hash)) {
+                    ok_dsi_net_send(tx, len, hash);
+                    memcpy(sent_pixels, ui.drawing, 512);
+                    memcpy(sent_hash, hash, 32);
+                    sent_waiting = 1;
+                    ui.drawing_sent = 1;
+                    if ((f = fopen(sent_path, "wb"))) {
+                        fwrite(sent_hash, 1, 32, f);
+                        fwrite(sent_pixels, 1, 512, f);
+                        fclose(f);
+                    }
+                }
+            }
             if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
