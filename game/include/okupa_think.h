@@ -59,6 +59,8 @@ typedef struct {
     ok_mind decision; /* a decision: valid only when stage == OK_THINK_DECIDED */
     char heard[OK_MIND_TEXT + 1]; /* ok_think_hear: the transcript */
     char saw[OK_MIND_TEXT + 1];   /* ok_think_see: what the camera shows */
+    ok_mind_plan plan;            /* ok_think_plan: its goal for the next while */
+    char diary[OK_MIND_DIARY + 1]; /* ok_think_diary: today's entry */
     char signer[43];  /* checksummed expected signer, for the episode */
     const char *kind; /* "decision", "hearing", "sight" */
     /* The exact bytes, kept for the episode and for anyone re-checking it:
@@ -107,6 +109,13 @@ ok_result ok_think_hear(ok_think *t, const ok_think_provider *p, const uint8_t d
 ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
                        const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
                        ok_think_fetch_fn fetch, void *fetch_ctx);
+
+/* The slow mind (a goal and a plan) and the diary at the end of the day,
+ * from the same observation (okupa_mind.h). */
+ok_result ok_think_plan(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                        const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx);
+ok_result ok_think_diary(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                         const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx);
 
 /* Pictionary: the player's drawing as a PNG; t->saw is the vision model's
  * guess, one to three lower-case words (anything else is OK_THINK_ANSWER). */

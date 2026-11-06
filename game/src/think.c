@@ -238,6 +238,36 @@ ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t de
     return OK_OK;
 }
 
+ok_result ok_think_plan(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                        const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    ok_result r;
+    if (!t) return OK_ARGUMENT;
+    begin(t, "plan");
+    if (!p || !p->model || !obs) return OK_ARGUMENT;
+    if (ok_mind_plan_request(p->model, obs, t->request, sizeof t->request, &t->request_len) != OK_OK) return OK_RANGE;
+    r = call(t, p, device_key, now_ms, nonce, "/v1/proxy/chat/completions", "application/json", t->request,
+             t->request_len, fetch, fetch_ctx);
+    if (r == OK_OK && t->stage == OK_THINK_DECIDED && ok_mind_plan_parse(t->response, t->response_len, &t->plan) != OK_OK)
+        stop(t, OK_THINK_ANSWER);
+    return r;
+}
+
+ok_result ok_think_diary(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                         const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    ok_result r;
+    if (!t) return OK_ARGUMENT;
+    begin(t, "diary");
+    if (!p || !p->model || !obs) return OK_ARGUMENT;
+    if (ok_mind_diary_request(p->model, obs, t->request, sizeof t->request, &t->request_len) != OK_OK) return OK_RANGE;
+    r = call(t, p, device_key, now_ms, nonce, "/v1/proxy/chat/completions", "application/json", t->request,
+             t->request_len, fetch, fetch_ctx);
+    if (r == OK_OK && t->stage == OK_THINK_DECIDED && ok_mind_diary_parse(t->response, t->response_len, t->diary) != OK_OK)
+        stop(t, OK_THINK_ANSWER);
+    return r;
+}
+
 /* Keeps printable ASCII only: what the okupa heard or saw goes back into its
  * next request, and onto a small screen. */
 static void plain(const char *in, size_t n, char *out, size_t cap)
@@ -476,6 +506,13 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
         }
     } else if (!strcmp(kind, "hearing")) {
         if (!put(out, cap, &o, ",\"heard\":") || !put_str(out, cap, &o, t->heard, strlen(t->heard))) return OK_RANGE;
+    } else if (!strcmp(kind, "plan")) {
+        if (!put(out, cap, &o, ",\"goal\":") || !put_str(out, cap, &o, t->plan.goal, strlen(t->plan.goal)) ||
+            !put(out, cap, &o, ",\"plan\":") || !put_str(out, cap, &o, t->plan.plan, strlen(t->plan.plan)) ||
+            !put(out, cap, &o, ",\"feeling\":") || !put_str(out, cap, &o, t->plan.feeling, strlen(t->plan.feeling)))
+            return OK_RANGE;
+    } else if (!strcmp(kind, "diary")) {
+        if (!put(out, cap, &o, ",\"entry\":") || !put_str(out, cap, &o, t->diary, strlen(t->diary))) return OK_RANGE;
     } else if (!strcmp(kind, "sight") || !strcmp(kind, "guess")) {
         if (!put(out, cap, &o, !strcmp(kind, "guess") ? ",\"guess\":" : ",\"saw\":") ||
             !put_str(out, cap, &o, t->saw, strlen(t->saw)))

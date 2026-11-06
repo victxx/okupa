@@ -244,6 +244,36 @@ int main(void)
         assert(t.stage == OK_THINK_ANSWER); /* not a guess: a sentence */
     }
 
+    /* The slow mind and the diary: verified like any call, read from JSON. */
+    p.model = "0GM-1.0";
+    fake.content = "{\\\"goal\\\":\\\"Learn the player's name\\\",\\\"plan\\\":\\\"Wave, then ask\\\",\\\"feeling\\\":\\\"Hopeful\\\"}";
+    {
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {6};
+        ok_mind_obs obs;
+        ok_pet pet;
+        ok_pet_init(&pet, 1800000000);
+        memset(&obs, 0, sizeof obs);
+        obs.pet = &pet;
+        obs.goal = "Explore the garden";
+        assert(ok_think_plan(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.plan.goal, "Learn the player's name"));
+        assert(!strcmp(t.plan.plan, "Wave, then ask") && strstr(fake.req_body, "slow mind"));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"plan\""));
+        fake.content = "{\\\"entry\\\":\\\"Today a giant eye said hello. I waved. I think it likes me.\\\"}";
+        obs.today[0] = "said: Hi!";
+        obs.today[1] = "heard: hello okupa";
+        obs.today_count = 2;
+        obs.date = "2026-11-07";
+        assert(ok_think_diary(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strncmp(t.diary, "Today a giant eye", 17));
+        assert(strstr(fake.req_body, "\\\"today\\\":[\\\"said: Hi!\\\",\\\"heard: hello okupa\\\"]"));
+        assert(strstr(fake.req_body, "\\\"date\\\":\\\"2026-11-07\\\""));
+        fake.content = "no json here";
+        assert(ok_think_plan(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK && t.stage == OK_THINK_ANSWER);
+    }
+
     /* Keep-alive: the connection stays unless the server says it closes. */
     assert(ok_think_keeps_open("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", 38));
     assert(!ok_think_keeps_open("HTTP/1.1 200 OK\r\nconnection: Close\r\n\r\n", 39));

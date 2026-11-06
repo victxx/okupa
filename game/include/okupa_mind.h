@@ -54,12 +54,31 @@ typedef struct {
     const char *asked;                  /* the question it is waiting to have answered */
     const char *city;                   /* where the console is, if the player said */
     const char *wifi;                   /* the Wi-Fi network it is on: a "place" it knows */
+    const char *goal, *plan;            /* its slow mind's current goal and plan */
+    const char *diary;                  /* its last diary entry: yesterday, as it remembers it */
+    const char *today[24];              /* for the diary: what happened today, oldest first */
+    int today_count;
+    const char *date;                   /* for the diary: "2026-11-07" */
 } ok_mind_obs;
+
+/* The slow mind, every few minutes: what it wants and how it will go about it. */
+#define OK_MIND_DIARY 240
+typedef struct {
+    char goal[OK_MIND_NOTE + 1], plan[OK_MIND_NOTE + 1], feeling[OK_MIND_NOTE + 1];
+} ok_mind_plan;
 
 const char *ok_mind_activity_name(int activity);
 const char *ok_mind_mood_name(int mood);
 const char *ok_mind_gaze_name(int gaze);
 ok_result ok_mind_request(const char *model, const ok_mind_obs *obs, char *out, size_t cap, size_t *len);
+/* The slow mind: a goal and a plan for the next minutes, from the same
+ * observation. */
+ok_result ok_mind_plan_request(const char *model, const ok_mind_obs *obs, char *out, size_t cap, size_t *len);
+ok_result ok_mind_plan_parse(const char *body, size_t n, ok_mind_plan *plan);
+/* The diary at the end of the day: obs->today and obs->date in, one entry out
+ * (up to OK_MIND_DIARY characters). */
+ok_result ok_mind_diary_request(const char *model, const ok_mind_obs *obs, char *out, size_t cap, size_t *len);
+ok_result ok_mind_diary_parse(const char *body, size_t n, char entry[OK_MIND_DIARY + 1]);
 /* The provider's whole response body. */
 ok_result ok_mind_parse(const char *body, size_t n, ok_mind *decision);
 /* One memory line for the next request: "activity" or "activity: line". */

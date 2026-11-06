@@ -150,7 +150,7 @@ int main(int argc, char **argv)
                             : NULL;
     double t0;
 
-    if (sense) count = 1;
+    if (sense || (argc > 7 && (!strcmp(argv[7], "plan") || !strcmp(argv[7], "diary")))) count = 1;
     if (argc < 6 || count < 1 || count > 500) {
         fprintf(stderr, "usage: okupa-mind <host> <provider> <model> <tee signer> <key file> [out dir] [decisions]\n");
         return 2;
@@ -196,6 +196,40 @@ int main(int argc, char **argv)
         if (t.stage == OK_THINK_DECIDED)
             printf("VERIFIED %s: \"%s\"\n", hear ? "heard" : guess ? "guessed" : "saw", hear ? t.heard : t.saw);
         else if (t.response_len) printf("    %.*s\n", (int)(t.response_len > 300 ? 300 : t.response_len), t.response);
+        if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
+            save(argv[6], "episode.json", episode, n);
+        return t.stage == OK_THINK_DECIDED ? 0 : 1;
+    }
+
+    if (argc > 7 && (!strcmp(argv[7], "plan") || !strcmp(argv[7], "diary"))) { /* the slow mind, or the diary */
+        static const char *day[] = {"said: Hi! You're back!", "heard: hi okupa my name is victor and I live in mumbai",
+                                    "kept: The player is called Victor", "saw: a person with glasses smiling",
+                                    "game: Okupa guessed the drawing (house) right; Okupa 1, player 0", "went out to the garden at night"};
+        int plan = argv[7][0] == 'p', k;
+        sec = time(NULL);
+        localtime_r(&sec, &local);
+        ok_pet_init(&pet, (int64_t)sec - 3600);
+        memset(&obs, 0, sizeof obs);
+        obs.pet = &pet;
+        obs.hour = local.tm_hour;
+        obs.minute = local.tm_min;
+        obs.city = getenv("OKUPA_CITY");
+        obs.known[0] = "The player is called Victor";
+        obs.known_count = 1;
+        for (k = 0; k < 6; k++) obs.today[k] = day[k];
+        obs.today_count = 6;
+        obs.date = "2026-11-07";
+        if (!entropy(nonce, sizeof nonce)) return 2;
+        r = plan ? ok_think_plan(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, &obs, fetch, NULL)
+                 : ok_think_diary(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, &obs, fetch, NULL);
+        ok_wipe(key, sizeof key);
+        hang_up();
+        if (r != OK_OK) return 1;
+        printf("%s %s %s signer %s\n", t.kind, ok_think_stage_name(t.stage), t.chat_id, t.recovered);
+        if (t.stage == OK_THINK_DECIDED && plan)
+            printf("VERIFIED goal: %s | plan: %s | feeling: %s\n", t.plan.goal, t.plan.plan, t.plan.feeling);
+        else if (t.stage == OK_THINK_DECIDED)
+            printf("VERIFIED diary: %s\n", t.diary);
         if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
             save(argv[6], "episode.json", episode, n);
         return t.stage == OK_THINK_DECIDED ? 0 : 1;
