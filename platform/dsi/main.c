@@ -2,6 +2,7 @@
  * same core and game code as the host; this file only owns the hardware. */
 #include "net.h"
 #include "okupa_checks.h"
+#include "okupa.h"
 #include "okupa_font.h"
 #include "okupa_save.h"
 #include "okupa_ui.h"
@@ -15,7 +16,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40];
+static char save_path[40], temp_path[40], wifi_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -53,6 +54,7 @@ static int open_storage(void)
         mkdir(save_path, 0700);
         snprintf(save_path, sizeof save_path, "%sokupa/save.bin", roots[i]);
         snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
+        snprintf(wifi_path, sizeof wifi_path, "%sokupa/wifi.txt", roots[i]);
         return 1;
     }
     return 0;
@@ -67,6 +69,31 @@ static int load_file(const char *path, ok_pet *p, uint8_t drawing[512])
     n = fread(buf, 1, sizeof buf, f);
     fclose(f);
     return ok_save_read(buf, n, p, drawing) == OK_OK;
+}
+
+/* The Wi-Fi picked in the app: two lines, name and password, in plain text
+ * on the SD card (like the console's own settings, it is not secret from
+ * whoever holds the card). */
+static void load_wifi(void)
+{
+    char ssid[40] = {0}, password[72] = {0};
+    FILE *f = fopen(wifi_path, "r");
+    if (!f) return;
+    if (fgets(ssid, sizeof ssid, f)) {
+        if (!fgets(password, sizeof password, f)) password[0] = 0;
+        ssid[strcspn(ssid, "\r\n")] = 0;
+        password[strcspn(password, "\r\n")] = 0;
+        if (ssid[0]) ok_dsi_wifi_use(ssid, password);
+    }
+    fclose(f);
+}
+
+static void save_wifi(const char *ssid, const char *password)
+{
+    FILE *f = fopen(wifi_path, "w");
+    if (!f) return;
+    fprintf(f, "%s\n%s\n", ssid, password);
+    fclose(f);
 }
 
 /* Write a new file, then swap it in. If the power goes in between, the
@@ -115,6 +142,7 @@ int main(void)
         } else {
             save_status = "Save: new okupa on SD";
         }
+        load_wifi();
     }
     ok_save_write(&pet, ui.drawing, saved);
 
@@ -146,6 +174,16 @@ int main(void)
                 snprintf(ui.dev[OK_UI_DEV_LINES - 2], sizeof ui.dev[0], "Build: %.20s", OKUPA_BUILD_ID);
                 snprintf(ui.dev[OK_UI_DEV_LINES - 1], sizeof ui.dev[0], "%.32s", save_status);
                 (void)fails;
+            }
+            if (r == OK_UI_WIFI_SCAN) {
+                ui.ap_count = ok_dsi_wifi_scan(ui.aps, OK_UI_APS, ui.wifi_status, show_now);
+            }
+            if (r == OK_UI_WIFI_CONNECT && ui.ap_selected >= 0 && ui.ap_selected < ui.ap_count) {
+                const char *ssid = ui.aps[ui.ap_selected].ssid;
+                if (ok_dsi_wifi_connect(ssid, ui.password, ui.wifi_status, show_now) && storage)
+                    save_wifi(ssid, ui.password);
+                ok_wipe(ui.password, sizeof ui.password);
+                ui.password_len = 0;
             }
             if (r == OK_UI_RUN_NETWORK) {
                 cpuStartTiming(0);

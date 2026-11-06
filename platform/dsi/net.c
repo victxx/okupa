@@ -79,22 +79,146 @@ static void draw_key(uint8_t key[32])
     while (ok_keys_public(key, pub) != OK_OK);
 }
 
-static int wifi_up(void)
+static char chosen_ssid[33], chosen_password[64];
+static int chosen;
+
+static int wifi_init(void)
 {
     static int initialised;
+    if (!initialised) initialised = Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE);
+    return initialised;
+}
+
+static int online(void)
+{
+    return Wifi_AssocStatus() == ASSOCSTATUS_ASSOCIATED && Wifi_GetIP() != 0 && Wifi_GetIP() != 0xffffffffu;
+}
+
+/* Waits up to 30 s for an address; report(seconds) is called twice a second. */
+static int wait_online(void (*report)(int seconds))
+{
     int frames;
-    if (!initialised && !(initialised = Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE))) return 0;
-    Wifi_EnableWifi();
-    Wifi_AutoConnect();
     for (frames = 0; frames < 60 * 30; frames++) {
         int status = Wifi_AssocStatus();
         swiWaitForVBlank();
         stir();
         if (status == ASSOCSTATUS_CANNOTCONNECT) return 0;
-        if (status == ASSOCSTATUS_ASSOCIATED && Wifi_GetIP() != 0 && Wifi_GetIP() != 0xffffffffu) return 1;
-        if (frames % 30 == 0) line(0, "Wi-Fi: connecting... %ds", frames / 60);
+        if (online()) return 1;
+        if (frames % 30 == 0 && report) report(frames / 60);
     }
     return 0;
+}
+
+static void start_connect(const char *ssid, const char *password)
+{
+    Wifi_AccessPoint ap;
+    memset(&ap, 0, sizeof ap);
+    snprintf(ap.ssid, sizeof ap.ssid, "%s", ssid);
+    ap.ssid_len = (u8)strlen(ap.ssid);
+    if (password && password[0]) Wifi_ConnectSecureAP(&ap, password, strlen(password));
+    else Wifi_ConnectOpenAP(&ap);
+}
+
+static void report_test(int seconds)
+{
+    line(0, "Wi-Fi: connecting... %ds", seconds);
+}
+
+static int wifi_up(void)
+{
+    if (!wifi_init()) return 0;
+    if (online()) return 1;
+    Wifi_EnableWifi();
+    if (chosen) start_connect(chosen_ssid, chosen_password);
+    else Wifi_AutoConnect();
+    return wait_online(report_test);
+}
+
+void ok_dsi_wifi_use(const char *ssid, const char *password)
+{
+    snprintf(chosen_ssid, sizeof chosen_ssid, "%s", ssid);
+    snprintf(chosen_password, sizeof chosen_password, "%s", password ? password : "");
+    chosen = ssid[0] != 0;
+}
+
+static int bars(int rssi)
+{
+    if (rssi > 0) return rssi > 192 ? 3 : rssi > 128 ? 2 : rssi > 64 ? 1 : 0; /* DS mode: 0..255 */
+    return rssi >= -55 ? 3 : rssi >= -67 ? 2 : rssi >= -80 ? 1 : 0;              /* DSi mode: dBm */
+}
+
+int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void))
+{
+    static Wifi_AccessPoint found_ap[24];
+    int frames, n, i, j, count = 0;
+    if (!wifi_init()) {
+        snprintf(status, 33, "Wi-Fi did not start");
+        show();
+        return 0;
+    }
+    Wifi_EnableWifi();
+    Wifi_ScanMode();
+    for (frames = 0; frames < 60 * 4; frames++) {
+        swiWaitForVBlank();
+        if (frames % 30 == 0) {
+            snprintf(status, 33, "Searching... %d found", Wifi_GetNumAP());
+            show();
+        }
+    }
+    n = Wifi_GetNumAP();
+    if (n > 24) n = 24;
+    for (i = 0; i < n; i++) Wifi_GetAPData(i, &found_ap[i]);
+    /* Strongest first; skip hidden names and repeats. */
+    for (i = 0; i < n; i++)
+        for (j = i + 1; j < n; j++)
+            if (bars(found_ap[j].rssi) * 1000 + found_ap[j].rssi > bars(found_ap[i].rssi) * 1000 + found_ap[i].rssi) {
+                Wifi_AccessPoint t = found_ap[i];
+                found_ap[i] = found_ap[j];
+                found_ap[j] = t;
+            }
+    for (i = 0; i < n && count < max; i++) {
+        int dup = 0;
+        if (!found_ap[i].ssid_len) continue;
+        for (j = 0; j < count; j++) dup |= !strcmp(aps[j].ssid, found_ap[i].ssid);
+        if (dup) continue;
+        memcpy(aps[count].ssid, found_ap[i].ssid, 32);
+        aps[count].ssid[32] = 0;
+        aps[count].secure = found_ap[i].security_type != AP_SECURITY_OPEN;
+        aps[count].strength = bars(found_ap[i].rssi);
+        count++;
+    }
+    snprintf(status, 33, count ? "Tap a network" : "No networks found");
+    show();
+    return count;
+}
+
+static char *connect_status;
+static void (*connect_show)(void);
+static void report_connect(int seconds)
+{
+    snprintf(connect_status, 33, "Connecting... %ds", seconds);
+    connect_show();
+}
+
+int ok_dsi_wifi_connect(const char *ssid, const char *password, char status[33], void (*show)(void))
+{
+    struct in_addr ip;
+    if (!wifi_init()) return 0;
+    connect_status = status;
+    connect_show = show;
+    Wifi_DisconnectAP();
+    Wifi_EnableWifi();
+    start_connect(ssid, password);
+    if (!wait_online(report_connect)) {
+        snprintf(status, 33, "Could not connect");
+        show();
+        return 0;
+    }
+    ip.s_addr = Wifi_GetIP();
+    snprintf(status, 33, "Connected: %s", inet_ntoa(ip));
+    show();
+    ok_dsi_wifi_use(ssid, password);
+    return 1;
 }
 
 static int wait_for(int fd, short events, int ms)
@@ -243,16 +367,17 @@ void ok_dsi_network_test(char lines[][33], int count, void (*show)(void))
     node_count = 0;
     memset(lines, 0, (size_t)count * 33);
     ok_keccak_init(&pool);
-    Wifi_GetData(WIFIGETDATA_MACADDRESS, sizeof mac, mac);
-    ok_keccak_update(&pool, mac, sizeof mac);
     stir();
 
     line(0, "Wi-Fi: connecting...");
     if (!wifi_up()) {
         line(0, "Wi-Fi: no connection");
-        line(1, "Set it up in the DSi settings");
+        line(1, chosen ? "Check the password in Wi-Fi" : "Dev > Wi-Fi to pick a network");
         return;
     }
+    /* Only once dswifi is up: asking it anything before init is a data abort. */
+    Wifi_GetData(WIFIGETDATA_MACADDRESS, sizeof mac, mac);
+    ok_keccak_update(&pool, mac, sizeof mac);
     ip = Wifi_GetIPInfo(&gw, &mask, &dns_server, &dns2);
     line(0, "Wi-Fi: %s", inet_ntoa(ip));
     line(1, "DNS: %s", inet_ntoa(dns_server));

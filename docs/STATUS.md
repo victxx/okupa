@@ -19,7 +19,8 @@ Qué está hecho y con qué evidencia. Los registros completos quedan en `run/` 
 
 | TLS en el núcleo | BearSSL con 8 raíces fijadas; `okupa-https` lee el saldo 0G por HTTPS solo con el núcleo. BearSSL llega a TLS 1.2: un servidor solo TLS 1.3 (el indexador de 0G Storage) lo rechaza |
 | Sesión y descubrimiento como núcleo | La sesión devp2p y el recorrido del árbol DNS viven en `core/` con callbacks de E/S; el Mac (`okupa-peer`, `okupa-dnswalk`) y la ROM usan el mismo código; loopback y Geth vuelven a pasar |
-| Red en la DSi | Dev → Network: Wi-Fi guardado en la consola, lista de Sepolia por DNS verificada y sesiones hasta que un nodo tenga hueco. Compilada (ROM 5973ac6), sin probar en la consola. Claves de saludo con entropía débil (temporizadores, reloj, MAC): solo para claves desechables |
+| Núcleo en la DSi real (foto IMG_5985, ROM 5973ac6) | Todas las comprobaciones pasan en la consola a 133 MHz: clave pública 23 ms, firmar una tx 30 ms, ECDH 43 ms, escribir un auth RLPx 161 ms, leerlo 140 ms. Guardado en SD funciona |
+| Red en la DSi | Dev → Network: Wi-Fi guardado en la consola, lista de Sepolia por DNS verificada y sesiones hasta que un nodo tenga hueco. La ROM 5973ac6 daba data abort al pulsar Network (pedía la MAC antes de iniciar el Wi-Fi); corregido. Dev → Wi-Fi busca redes, pide la contraseña con teclado en pantalla y la recuerda en `sd:/okupa/wifi.txt` (texto plano en la SD). Claves de saludo con entropía débil (temporizadores, reloj, MAC): solo para claves desechables |
 | 0G proveedor qwen | Volvió el TLS; nuestro token pasa el proxy 0G, pero el servicio de Alibaba detrás responde 401 "API-key is blocked" (la clave del proveedor) |
 
 No se ha enviado ninguna transacción a Ethereum. En 0G testnet, solo las cuatro de preparación del ledger con la cuenta de laboratorio.
