@@ -73,12 +73,27 @@ Borrador de la sección CROPS (ajustar a lo que sea verdad al entregar):
   apagar. Si 0G cae, el okupa duerme; enviar sigue funcionando.
 - **O** — MIT; se compila desde el repo (`make`, BlocksDS para la ROM); dependencias
   fijadas por commit/hash en `THIRD_PARTY.md`.
-- **P** — Los peers ven la IP de la consola y la transacción (pública de todos modos);
-  el resolvedor DNS ve la consulta del árbol de nodos; el proveedor de 0G ve el estado
-  del okupa que se le pregunta (sin datos personales). Nadie ve una cuenta de usuario.
+- **P** — La DSi tiene la privacidad de un nodo propio, no la de una wallet en un
+  proveedor: no hay cuenta, API key ni proveedor que junte todas tus lecturas. Como
+  con Geth en casa, el primer peer ve la IP junto a la transacción (pública de todos
+  modos); el resolvedor DNS ve la consulta del árbol de nodos; el proveedor de 0G ve
+  el estado del okupa que se le pregunta (sin datos personales).
 - **S** — La clave nace en la DSi (≈480 muestras del stylus con un temporizador de
   33 MHz, Keccak) y nunca sale. Compromiso declarado: se guarda en texto plano en la
   SD; las claves efímeras del saludo usan entropía débil (solo protegen el canal).
+  **Solo si la mejora 9 funciona en la DSi:** "No te pueden mentir: la consola
+  comprueba su inclusión con pruebas de Merkle (`transactionsRoot`, `receiptsRoot`)
+  sobre cabeceras en las que coinciden varios peers independientes; no verifica el
+  consenso (BLS, siguiente paso)". Si no funciona, esa frase va a "Next".
+
+### Anon-RPC: por qué no
+
+Es un sistema de workers JS/Wasm ejecutados por un harness de navegador, con
+transporte KPS (QUIC/TLS 1.3 o WebRTC) y workers de hasta ~18 MB; "Browser-only"
+según su propia guía. En la DSi acabaría siendo una pasarela = un relé, que rompe la
+C. Además su criterio mide "how much of the app's traffic goes through Anon-RPC" (en
+la DSi, 0 %) y solo se gana un premio EF. De su propuesta tomamos la otra mitad:
+verificar pruebas, hecho por P2P sin RPC (mejora 9).
 
 ## Riesgos que un juez va a sacar
 
@@ -114,8 +129,9 @@ Borrador de la sección CROPS (ajustar a lo que sea verdad al entregar):
 | 6 | Formulario: descripción, pitch por pista, feedback a cada partner | 0,5 | Entrega |
 | 7 | Contrato mínimo en 0G (índice episodio → root + request id) solo si 0G confirma que la dirección es obligatoria | 0,75 | Requisito formal 0G |
 | 8 | Memoria real: meter las 3 últimas decisiones en la siguiente petición | 1 | Carril "personal devices" |
+| 9 | Solo si 1–5 están hechos antes de las ~03:00 IST, en rama aparte: inclusión verificada por P2P (eth/69 GetBlockHeaders/Bodies/Receipts a varios peers, trie ordenado, `transactionsRoot` + `receiptsRoot`, estado 1). Primero en el Mac contra la tx del paso 2, luego en la DSi. Si no pasa en la consola, no se junta | 4–6 | S de CROPS, "can't be lied to" |
 
-Recortar sin pena: comprobación de inclusión en la DSi, regalos, amigos/QR, fotos y
+Recortar sin pena: regalos, amigos/QR, fotos y
 cámara, objetos 3D, cliente ligero, visitas, Sepolia (elegir **una** red: mainnet).
 Aparecen en "Next", nunca como hechos.
 
