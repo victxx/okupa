@@ -22,9 +22,12 @@ static void png(const char *path)
     png_write(path, canvas, W, H, 1);
 }
 
-static void shot(const char *dir, const char *name, const ok_ui *u, const ok_pet *p, int hour)
+/* Lets the okupa live a little (the pet stays as it is), then takes the picture. */
+static void shot(const char *dir, const char *name, ok_ui *u, const ok_pet *p, int hour)
 {
     char path[512];
+    int i;
+    for (i = 0; i < 90; i++) ok_ui_tick(u, p);
     ok_ui_render(u, p, hour, 42, ok_font(), top, bottom);
     snprintf(path, sizeof path, "%s/%s.png", dir, name);
     png(path);
@@ -41,11 +44,21 @@ int main(int argc, char **argv)
     ok_pet_init(&p, t);
     ok_ui_init(&u);
     shot(dir, "home-morning", &u, &p, 10);
+    ok_ui_touch(&u, &p, 159, 60, 0, t); /* Pet */
+    shot(dir, "home-petted", &u, &p, 10);
     p.need[OK_NEED_HUNGER] = 20;
+    u.say = NULL;
     shot(dir, "home-hungry-evening", &u, &p, 19);
     p.asleep = 1;
+    u.ready = 0;
     shot(dir, "home-asleep-night", &u, &p, 23);
     p.asleep = 0;
+    u.ready = 0;
+    p.need[OK_NEED_HUNGER] = 70;
+    u.scene = OK_UI_CLOSET;
+    u.look.top = OK_TOP_STRIPES;
+    u.look.colour = 3;
+    shot(dir, "closet", &u, &p, 12);
     u.scene = OK_UI_SKETCH;
     for (i = 0; i < 64; i++) {
         ok_drawing_set(u.drawing, (unsigned)i, (unsigned)(32 + (i % 16 < 8 ? i % 8 : 8 - i % 8)), 1);

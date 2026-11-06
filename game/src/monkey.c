@@ -35,7 +35,7 @@ const ok_part *ok_monkey_part(int part)
 
 const char *ok_wear_name(int wear)
 {
-    static const char *n[OK_WEARS] = {"Nothing", "Headphones", "Bandana", "Glasses", "Scarf", "Flower", "Leaf", "Cap", "Smiley mask"};
+    static const char *n[OK_WEARS] = {"None", "Headset", "Bandana", "Glasses", "Scarf", "Flower", "Leaf", "Cap", "Smiley"};
     return wear >= 0 && wear < OK_WEARS ? n[wear] : "";
 }
 

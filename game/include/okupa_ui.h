@@ -1,6 +1,7 @@
 #ifndef OKUPA_UI_H
 #define OKUPA_UI_H
 
+#include "okupa_house.h"
 #include "okupa_pet.h"
 #include <stdint.h>
 
@@ -8,7 +9,7 @@
  * set) by plain C, so the DSi, the host preview and later a phone share it. */
 #define OK_UI_W 256
 #define OK_UI_H 192
-enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD };
+enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_CLOSET };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT };
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
@@ -37,11 +38,19 @@ typedef struct {
     int password_len, keys; /* keys: 0 lower case, 1 upper case, 2 symbols */
     char wifi_status[33];
     char net_status[33]; /* the platform's one-line network state, shown at home */
+    /* The okupa on the top screen: how it moves, what it wears, the drawing
+     * hung on the wall (the sketch as it was at Done). */
+    ok_monkey_anim anim;
+    ok_look look;
+    uint8_t wall[64 * 64 / 8];
+    int wall_set, ready, happy_ticks;
+    int pressed, pressed_ticks; /* the button just tapped (1..8, 100 = Wear), for its pressed look */
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);
-/* One frame passed; returns OK_UI_CHANGED when the screens need redrawing. */
-int ok_ui_tick(ok_ui *u);
+/* One frame (1/60 s) passed; returns OK_UI_CHANGED when the screens need
+ * redrawing (30 times a second: the okupa is always moving a little). */
+int ok_ui_tick(ok_ui *u, const ok_pet *p);
 /* Stylus at x, y on the bottom screen; held = it was already down last frame. */
 int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now);
 void ok_ui_release(ok_ui *u);

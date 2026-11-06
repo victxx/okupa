@@ -33,7 +33,7 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 
     /* The line goes back to the mood line after three seconds. */
-    for (i = 0; i < 180; i++) ok_ui_tick(&u);
+    for (i = 0; i < 180; i++) ok_ui_tick(&u, &p);
     assert(u.say == NULL);
 
     /* Sketchbook: a stroke leaves no gaps, the eraser removes it, Done goes home. */
