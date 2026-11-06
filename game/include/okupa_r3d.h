@@ -127,6 +127,8 @@ int ok_r3d_on_hardware(void);
 int ok_r3d_kept_triangles(void);
 /* The 3D layer's background is see-through this frame (a sky behind it). */
 void ok_r3d_see_through(void);
+/* On the hardware: the 2D layer over the 3D at k/16 this frame (a fade). */
+void ok_r3d_layer_alpha(int k16);
 /* On the hardware: keep what was drawn since the camera was set, and draw
  * it again under the current camera (0 if nothing is kept); forget it. */
 void ok_r3d_world_keep(void);

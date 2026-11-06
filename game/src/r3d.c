@@ -117,7 +117,6 @@ static void gx_matrix(const int32_t m[12])
     GFX_FIFO = 0x17;
     for (i = 0; i < 12; i++) GFX_FIFO = (uint32_t)m[i];
 }
-static uint32_t gx_world[GX_WORDS + 1];
 static int gx_world_n, gx_after_camera;
 static void gx_play(uint32_t *list, int n)
 {
@@ -721,7 +720,9 @@ void ok_r3d_world_keep(void)
     gl_dirty = 1;
     gx_world_n = gx_n - gx_after_camera;
     if (gx_world_n < 0) gx_world_n = 0;
-    memcpy(gx_world + 1, gx_rec + 1 + gx_after_camera, (size_t)gx_world_n * 4);
+    /* in the kept frame's buffer: the film and a kept room never share a frame */
+    memcpy(gx_kept + 1, gx_rec + 1 + gx_after_camera, (size_t)gx_world_n * 4);
+    gx_kept_ok = 0;
 }
 
 int ok_r3d_world_again(void)
@@ -730,7 +731,7 @@ int ok_r3d_world_again(void)
     if (gl_open) gx(FIFO_END, 0, 0, 0);
     gl_open = 0;
     gl_dirty = 1;
-    memcpy(gx_rec + 1 + gx_n, gx_world + 1, (size_t)gx_world_n * 4);
+    memcpy(gx_rec + 1 + gx_n, gx_kept + 1, (size_t)gx_world_n * 4);
     gx_n += gx_world_n;
     return 1;
 }
@@ -772,9 +773,22 @@ void ok_r3d_see_through(void)
     gl_clear_alpha = 0;
 }
 
+/* The 2D layer laid over the 3D and the sky at k/16, by the hardware's
+ * blending (fades over the 3D, with no work per pixel). */
+static int gl_blend_set;
+void ok_r3d_layer_alpha(int k16)
+{
+    k16 = k16 < 0 ? 0 : k16 > 16 ? 16 : k16;
+    REG_BLDCNT = BLEND_ALPHA | BLEND_SRC_BG3 | BLEND_DST_BG0 | BLEND_DST_BG2 | BLEND_DST_BACKDROP;
+    REG_BLDALPHA = (uint16_t)(k16 | (16 - k16) << 8);
+    gl_blend_set = 1;
+}
+
 void ok_r3d_swap(void)
 {
     if (!gl_on) return;
+    if (!gl_blend_set) REG_BLDCNT = 0; /* no fade this frame: the 2D layer as it is */
+    gl_blend_set = 0;
     if (gl_open) gx(FIFO_END, 0, 0, 0);
     if (gx_recording) { /* drawn since ok_r3d_begin and not kept: show it now */
         gx_recording = 0;
@@ -787,6 +801,11 @@ void ok_r3d_swap(void)
     gl_polys = 0;
 }
 #else
+void ok_r3d_layer_alpha(int k16)
+{
+    (void)k16;
+}
+
 void ok_r3d_cpu_cull(int on)
 {
     (void)on;
@@ -1311,6 +1330,7 @@ void ok_r3d_keep(void)
         gl_dirty = 1;
         memcpy(gx_kept + 1, gx_rec + 1, (size_t)gx_n * 4);
         gx_kept_ok = gx_n;
+        gx_world_n = 0; /* the buffer is the kept frame's now */
         gx_kept_polys = triangles;
         gx_kept_clear = gl_clear;
         gx_kept_alpha = gl_clear_alpha;

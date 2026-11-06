@@ -26,6 +26,8 @@ extern const uint16_t ok_outside_skin[128 * 128];
 enum { OK_SKY_DAWN, OK_SKY_DAY, OK_SKY_DUSK, OK_SKY_NIGHT };
 extern const uint16_t ok_sky_palette[4][256];
 extern const uint8_t ok_sky_art[4][512 * 256];
+/* Two plant sprites of 32x32, side by side, 0 = see-through (game/src/plant_art.c). */
+extern const uint16_t ok_plant_art[2 * 32 * 32];
 /* Six hanging ivy sprites of 32x64, side by side, 0 = see-through (game/src/ivy_art.c). */
 extern const uint16_t ok_ivy_art[6 * 32 * 64];
 
