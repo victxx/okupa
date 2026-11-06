@@ -73,31 +73,6 @@ static int load_file(const char *path, ok_pet *p, uint8_t drawing[512])
     return ok_save_read(buf, n, p, drawing) == OK_OK;
 }
 
-/* The Wi-Fi picked in the app: two lines, name and password, in plain text
- * on the SD card (like the console's own settings, it is not secret from
- * whoever holds the card). */
-static void load_wifi(void)
-{
-    char ssid[40] = {0}, password[72] = {0};
-    FILE *f = fopen(wifi_path, "r");
-    if (!f) return;
-    if (fgets(ssid, sizeof ssid, f)) {
-        if (!fgets(password, sizeof password, f)) password[0] = 0;
-        ssid[strcspn(ssid, "\r\n")] = 0;
-        password[strcspn(password, "\r\n")] = 0;
-        if (ssid[0]) ok_dsi_wifi_use(ssid, password);
-    }
-    fclose(f);
-}
-
-static void save_wifi(const char *ssid, const char *password)
-{
-    FILE *f = fopen(wifi_path, "w");
-    if (!f) return;
-    fprintf(f, "%s\n%s\n", ssid, password);
-    fclose(f);
-}
-
 /* Write a new file, then swap it in. If the power goes in between, the
  * temporary copy is complete and loading falls back to it. */
 static int save(const ok_pet *p, const uint8_t drawing[512])
@@ -116,7 +91,7 @@ static int save(const ok_pet *p, const uint8_t drawing[512])
 
 int main(void)
 {
-    int top, bottom, held = 0, redraw = 1, storage, fails;
+    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0;
     time_t now = time(NULL), last = now, saved_at = now;
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
@@ -145,10 +120,12 @@ int main(void)
         } else {
             save_status = "Save: new okupa on SD";
         }
-        load_wifi();
+        ok_dsi_wifi_store(wifi_path);
         ok_dsi_network_log(log_path);
         ok_dsi_network_peers(peers_path);
     }
+    cpuStartTiming(0); /* runs for good: the checks and the network's entropy read it */
+    ok_dsi_net_start();
     ok_save_write(&pet, ui.drawing, saved);
 
     for (;;) {
@@ -159,7 +136,11 @@ int main(void)
             ok_pet_update(&pet, (int64_t)now);
             last = now;
         }
-        if (ok_ui_tick(&ui)) redraw = 1;
+        if (ok_ui_tick(&ui)) {
+            redraw = 1;
+            snprintf(ui.net_status, sizeof ui.net_status, "%s", ok_dsi_net_summary());
+            if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
+        }
         if (keysHeld() & KEY_TOUCH) {
             int r;
             touchRead(&touch);
@@ -168,12 +149,11 @@ int main(void)
             if (r == OK_UI_RUN_CHECKS) {
                 memset(ui.dev, 0, sizeof ui.dev);
                 snprintf(ui.dev[0], sizeof ui.dev[0], "Running the core checks...");
+                show_net = 0;
                 tm = localtime(&now);
                 ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
                 present(top, bottom);
-                cpuStartTiming(0);
                 fails = ok_checks_run(ui.dev, OK_UI_DEV_LINES - 4, now_us);
-                cpuEndTiming();
                 snprintf(ui.dev[OK_UI_DEV_LINES - 3], sizeof ui.dev[0], "CPU: %s",
                          isDSiMode() ? "DSi mode, 133 MHz" : "DS mode, 67 MHz");
                 snprintf(ui.dev[OK_UI_DEV_LINES - 2], sizeof ui.dev[0], "Build: %.20s", OKUPA_BUILD_ID);
@@ -185,16 +165,11 @@ int main(void)
             }
             if (r == OK_UI_WIFI_CONNECT && ui.ap_selected >= 0 && ui.ap_selected < ui.ap_count) {
                 const char *ssid = ui.aps[ui.ap_selected].ssid;
-                if (ok_dsi_wifi_connect(ssid, ui.password, ui.wifi_status, show_now) && storage)
-                    save_wifi(ssid, ui.password);
+                ok_dsi_wifi_connect(ssid, ui.password, ui.wifi_status, show_now);
                 ok_wipe(ui.password, sizeof ui.password);
                 ui.password_len = 0;
             }
-            if (r == OK_UI_RUN_NETWORK) {
-                cpuStartTiming(0);
-                ok_dsi_network_test(ui.dev, OK_UI_DEV_LINES, show_now);
-                cpuEndTiming();
-            }
+            if (r == OK_UI_RUN_NETWORK) show_net = 1; /* the postman is always running: just show it */
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
             ok_ui_release(&ui);

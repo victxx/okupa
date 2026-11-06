@@ -201,7 +201,7 @@ static void icon(frame f, int i, int cx, int cy, uint16_t c)
     }
 }
 
-static void home_buttons(frame f, const uint8_t (*font)[8], const ok_pet *p)
+static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p)
 {
     int i;
     centred(f, font, 128, 10, "OKUPA", PAPER, 2);
@@ -213,7 +213,7 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_pet *p)
         centred(f, font, BX(i) + BW / 2, BY(i) + 40, label, c, 1);
         if (soon[i]) centred(f, font, BX(i) + BW / 2, BY(i) + 4, "soon", RGB(26, 9, 6), 1);
     }
-    centred(f, font, 128, 178, "Tap to look after your okupa", RGB(20, 18, 15), 1);
+    centred(f, font, 128, 178, u->net_status[0] ? u->net_status : "Tap to look after your okupa", RGB(20, 18, 15), 1);
 }
 
 /* Sketchbook: the 64x64 drawing at twice the size, tools on the right. */
@@ -333,7 +333,7 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         password(bottom, font, u);
         bubble(top, font, "Psst. I won't peek.");
     } else {
-        home_buttons(bottom, font, p);
+        home_buttons(bottom, font, u, p);
     }
 }
 
