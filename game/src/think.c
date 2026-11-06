@@ -28,6 +28,34 @@ static int url_safe(const char *s, int allow_slash)
     return 1;
 }
 
+/* Lets the other threads run now and then inside long loops (the DSi's are
+ * cooperative: a mind that never yields freezes the game). */
+#define BREATHE(i) \
+    do { \
+        if (ok_yield && ((i) & 8191) == 8191) ok_yield(); \
+    } while (0)
+
+/* sha256 in 8 KB pieces, breathing between them. */
+static void sha_pieces(br_sha256_context *c, const void *data, size_t n)
+{
+    const uint8_t *p = (const uint8_t *)data;
+    while (n) {
+        size_t k = n < 8192 ? n : 8192;
+        br_sha256_update(c, p, k);
+        p += k;
+        n -= k;
+        if (ok_yield) ok_yield();
+    }
+}
+
+static void sha_all(const void *data, size_t n, uint8_t out[32])
+{
+    br_sha256_context c;
+    br_sha256_init(&c);
+    sha_pieces(&c, data, n);
+    br_sha256_out(&c, out);
+}
+
 static const char *find(const char *s, size_t n, const char *needle)
 {
     size_t k = strlen(needle), i;
@@ -48,7 +76,7 @@ static int forwarded_sha(ok_think *t, const char *model)
     size_t a;
     br_sha256_init(&c);
     if (!t->body_json || !t->upstream_model[0] || !strcmp(t->upstream_model, model)) {
-        br_sha256_update(&c, t->body, t->body_len);
+        sha_pieces(&c, t->body, t->body_len);
         br_sha256_out(&c, t->req_sha);
         return 1;
     }
@@ -57,9 +85,9 @@ static int forwarded_sha(ok_think *t, const char *model)
     a = strlen(from);
     if (!(at = find(t->body, t->body_len, from)) || find(at + 1, t->body_len - (size_t)(at + 1 - t->body), from))
         return 0; /* exactly one */
-    br_sha256_update(&c, t->body, (size_t)(at - t->body));
+    sha_pieces(&c, t->body, (size_t)(at - t->body));
     br_sha256_update(&c, to, strlen(to));
-    br_sha256_update(&c, at + a, t->body_len - (size_t)(at - t->body) - a);
+    sha_pieces(&c, at + a, t->body_len - (size_t)(at - t->body) - a);
     br_sha256_out(&c, t->req_sha);
     return 1;
 }
@@ -122,6 +150,7 @@ static int image_of(ok_think *t)
         return 0;
     for (i = 1; i + 1 < b64.len; i++) {
         char c = b64.at[i];
+        BREATHE(i);
         int d = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
                 : c == '+' ? 62 : c == '/' ? 63 : -1;
         if (c == '\\' || c == '=') continue;
@@ -234,6 +263,7 @@ static ok_result call(ok_think *t, const ok_think_provider *p, const uint8_t dev
         return OK_OK;
     }
     /* Who signed it, whatever it says (for the screens and the episode). */
+    if (ok_yield) ok_yield();
     if (ok_personal_recover(t->text, OK_ZEROG_TEXT, t->sig, who) == OK_OK) ok_keys_checksum(who, t->recovered);
 
     /* 3. Our bytes, their signature, the signer we trust. An image model signs
@@ -243,9 +273,9 @@ static ok_result call(ok_think *t, const ok_think_provider *p, const uint8_t dev
             stop(t, OK_THINK_ANSWER);
             return OK_OK;
         }
-        ok_sha256(t->image, t->image_len, t->resp_sha);
+        sha_all(t->image, t->image_len, t->resp_sha);
     } else {
-        ok_sha256(t->response, t->response_len, t->resp_sha);
+        sha_all(t->response, t->response_len, t->resp_sha);
     }
     if (!forwarded_sha(t, p->model)) {
         stop(t, OK_THINK_UNVERIFIED);
@@ -430,7 +460,9 @@ static size_t base64(const uint8_t *in, size_t n, char *out)
     static const char a[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t i, o = 0;
     for (i = 0; i < n; i += 3) {
-        uint32_t v = (uint32_t)in[i] << 16 | (i + 1 < n ? (uint32_t)in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+        uint32_t v;
+        if (ok_yield && i % 6144 == 6141) ok_yield();
+        v = (uint32_t)in[i] << 16 | (i + 1 < n ? (uint32_t)in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
         out[o++] = a[v >> 18 & 63];
         out[o++] = a[v >> 12 & 63];
         out[o++] = i + 1 < n ? a[v >> 6 & 63] : '=';
@@ -533,6 +565,7 @@ static int put_str(char *out, size_t cap, size_t *o, const char *s, size_t n)
     out[(*o)++] = '"';
     for (i = 0; i < n; i++) {
         unsigned char c = (unsigned char)s[i];
+        BREATHE(i);
         if (*o + 8 > cap) return 0;
         if (c == '"' || c == '\\') {
             out[(*o)++] = '\\';
@@ -690,6 +723,7 @@ int ok_think_exchange(ok_tls *tls, const char *head, size_t head_len, const char
     while (*got < cap) {
         if (ok_tls_read(tls, resp + *got, cap - *got, &n) != OK_OK || n == 0) break; /* closed */
         *got += n;
+        if (ok_yield) ok_yield(); /* each record was decrypted and checked: breathe */
         if (complete(resp, *got)) break;
     }
     if (!*got) return ok_tls_error(tls) ? ok_tls_error(tls) : -1;

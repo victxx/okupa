@@ -72,6 +72,7 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
     left = raw;
     /* The scanlines, written straight into stored blocks of up to 65535 bytes. */
     for (y = 0; y < oh; y++) {
+        if (ok_yield && (y & 7) == 7) ok_yield(); /* breathe on cooperative threads */
         for (x = -1; x < ow; x++) {
             uint8_t px[3];
             int k, n = x < 0 ? 1 : 3;

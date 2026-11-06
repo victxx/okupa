@@ -88,6 +88,7 @@ static int codes(inflater *s, const huffman *lit, const huffman *dist)
     for (;;) {
         int sym = decode(s, lit);
         if (sym < 0) return -1;
+        if (ok_yield && (s->len & 4095) == 4095) ok_yield(); /* breathe on cooperative threads */
         if (sym < 256) {
             if (s->len >= s->cap) return -1;
             s->out[s->len++] = (uint8_t)sym;
@@ -204,6 +205,7 @@ static ok_result inflate_zlib(const uint8_t *in, size_t n, uint8_t *out, size_t 
     if (s.pos + 4 > s.n) return OK_FORMAT;
     want = (uint32_t)s.in[s.pos] << 24 | (uint32_t)s.in[s.pos + 1] << 16 | (uint32_t)s.in[s.pos + 2] << 8 | s.in[s.pos + 3];
     for (i = 0; i < s.len; i++) {
+        if (ok_yield && (i & 16383) == 16383) ok_yield();
         a = (a + out[i]) % 65521;
         b = (b + a) % 65521;
     }
@@ -266,6 +268,7 @@ ok_result ok_png_read_rgb15(const uint8_t *png, size_t n, uint16_t *out, size_t 
     for (y = 0; y < height; y++) {
         uint8_t *row = raw + y * (stride + 1) + 1, *up = y ? row - (stride + 1) : NULL;
         int f = row[-1];
+        if (ok_yield && (y & 7) == 7) ok_yield();
         if (f > 4) return OK_FORMAT;
         for (x = 0; x < stride; x++) {
             int a = x >= (size_t)bpp ? row[x - (size_t)bpp] : 0, b = up ? up[x] : 0;
