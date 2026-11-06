@@ -62,6 +62,12 @@ $(BUILD)/okupa-preview: tools/preview.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_O
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
+# The demo video: frames and sound from the game's own code (no music).
+#   build/okupa-video run/video/sfx.wav | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i - ...
+$(BUILD)/okupa-video: tools/video.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
+
 # The looks to choose from, with the same renderer.
 $(BUILD)/okupa-directions: tools/directions.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
 	@mkdir -p $(BUILD)

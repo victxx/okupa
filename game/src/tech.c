@@ -254,9 +254,11 @@ static void step_data(frame f, const uint8_t (*font)[8], const ok_tech *t, const
     case 1:
         snprintf(v, sizeof v, "%s", fa->dns_verified ? "signature ok" : "not read yet");
         kv(f, font, y, "DNS root", v, fa->dns_verified ? GOOD : DIM);
-        snprintf(v, sizeof v, "%d records, %d nodes", fa->dns_records, fa->dns_nodes);
+        if (fa->dns_records) snprintf(v, sizeof v, "%d records, %d nodes", fa->dns_records, fa->dns_nodes);
+        else snprintf(v, sizeof v, "%d nodes", fa->dns_nodes);
         kv(f, font, y + 12, "DNS", v, TEXT);
-        snprintf(v, sizeof v, "%d out, %d in", fa->v4_sent, fa->v4_received);
+        if (fa->v4_sent) snprintf(v, sizeof v, "%d out, %d in", fa->v4_sent, fa->v4_received);
+        else snprintf(v, sizeof v, "%d replies", fa->v4_received);
         kv(f, font, y + 24, "discv4", v, TEXT);
         snprintf(v, sizeof v, "%d known", fa->v4_nodes);
         kv(f, font, y + 36, "Table", v, TEXT);
@@ -268,7 +270,7 @@ static void step_data(frame f, const uint8_t (*font)[8], const ok_tech *t, const
         }
         snprintf(v, sizeof v, "%u.%u.%u.%u:%u", p->ip[0], p->ip[1], p->ip[2], p->ip[3], p->port);
         kv(f, font, y, "Node", v, TEXT);
-        snprintf(v, sizeof v, "%lu ms", (unsigned long)p->ms_tcp);
+        snprintf(v, sizeof v, p->ms_tcp ? "%lu ms" : "-", (unsigned long)p->ms_tcp);
         kv(f, font, y + 12, "TCP", v, TEXT);
         snprintf(v, sizeof v, p->ms_rlpx ? "%lu ms" : "-", (unsigned long)p->ms_rlpx);
         kv(f, font, y + 24, "auth+ack", v, TEXT);
