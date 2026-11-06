@@ -29,6 +29,8 @@ Qué está hecho y con qué evidencia. Los registros completos quedan en `run/` 
 | Coste en mainnet (2026-11-06, base 0,072 gwei + propina 0,014, ETH = 2007 €) | Saludo 21 210 gas ≈ 0,004 €; dibujo 41 720 gas ≈ 0,007 €; 1 KB ≈ 62 000 gas ≈ 0,011 € (suelo de calldata EIP-7623 incluido) |
 | DSi en mainnet | El cartero usa mainnet por defecto (`network.txt` con "sepolia" para volver): nodos conocidos (`peers-mainnet.txt`), lista DNS como semilla, 30 s de discv4 desde los bootnodes de Geth 1.17.7 y esos nodos, y la lista DNS al final. Sin transacciones. Sin probar en la consola |
 | Cuenta de la consola | Dev → Wallet: la clave se crea en la DSi a partir de ~480 muestras del stylus con su instante exacto (temporizador de 33 MHz) y el reloj, con Keccak; se guarda en `sd:/okupa/account.key` (texto plano en la SD) y se muestra la dirección EIP-55. No firma ni envía nada todavía |
+| Pista clave (nodos llenos) | No hace falta que un nodo nos "admita": muchos devuelven su Status y cuelgan después con "too many peers". La sesión del núcleo ahora entrega las transacciones en cuanto llega ese Status (probado en loopback). La DSi recuerda los nodos que llegan a Status (no solo los que admiten), uno por IP, y lo dice en inicio ("Ready: N nodes take letters") |
+| Wallet con QR | La dirección se muestra como QR EIP-681 (`ethereum:0x…`) con el generador de Nayuki fijado; leído correctamente por el detector de macOS. Probada en la DSi: la cartera se creó bien |
 | 0G proveedor qwen | Volvió el TLS; nuestro token pasa el proxy 0G, pero el servicio de Alibaba detrás responde 401 "API-key is blocked" (la clave del proveedor) |
 
 No se ha enviado ninguna transacción a Ethereum. En 0G testnet, solo las cuatro de preparación del ledger con la cuenta de laboratorio.

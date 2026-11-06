@@ -53,6 +53,7 @@ static struct {
     uint16_t tcp;
 } nodes[MAX_NODES];
 static int node_count;
+static int ready_peers; /* remembered nodes that reached Status: they can take a transaction */
 static struct {
     char ssid[33], password[64];
 } known[MAX_KNOWN];
@@ -403,11 +404,12 @@ static int lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *le
 
 /* ---- Candidate nodes ------------------------------------------------------ */
 
+/* One node per IP address: some hosts run several and would fill the list. */
 static int add_node(const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
 {
     int i;
     for (i = 0; i < node_count; i++)
-        if (!memcmp(nodes[i].pub, pub, 64)) return 0;
+        if (!memcmp(nodes[i].pub, pub, 64) || !memcmp(nodes[i].ip, ip, 4)) return 0;
     if (node_count >= MAX_NODES || !tcp) return 0;
     memcpy(nodes[node_count].pub, pub, 64);
     memcpy(nodes[node_count].ip, ip, 4);
@@ -469,6 +471,7 @@ static void remember_peer(int i)
     if ((f = fopen(peers_path, "a"))) {
         fputs(text, f);
         fclose(f);
+        ready_peers++;
     }
 }
 
@@ -634,13 +637,16 @@ static int dial(int i, int row)
     ok_wipe(&e, sizeof e);
     shutdown(fd, SHUT_WR);
     close(fd);
+    /* A node that reached Status can take a transaction even if it is full
+     * (it is handed over before it hangs up): worth remembering. */
+    if (rep.status) remember_peer(i);
     if (rep.outcome == OK_SESSION_PASS) {
         line(row, "%u.%u.%u.%u: was online", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
         return 1;
     }
     if (rep.outcome == OK_SESSION_DISCONNECTED)
-        line(row, "%u.%u.%u.%u: %s", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3],
-             rep.disconnect == 4 ? "full" : "disconnect");
+        line(row, "%u.%u.%u.%u: %s%s", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3],
+             rep.disconnect == 4 ? "full" : "disconnect", rep.status ? " after Status" : "");
     else
         line(row, "%u.%u.%u.%u: %s%s", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3],
              ok_session_outcome_name(rep.outcome), rep.handshake ? " (rlpx ok)" : "");
@@ -712,7 +718,8 @@ static int postman(void *arg)
 
         /* 1. Peers that let us in before: usually instant. */
         node_count = 0;
-        line(2, "%s, known peers: %d", net->name, load_peers());
+        ready_peers = load_peers();
+        line(2, "%s, known peers: %d", net->name, ready_peers);
         if (try_nodes(0, node_count)) continue;
 
         /* 2. The signed DNS list: its nodes are the busiest, so they seed the
@@ -737,7 +744,13 @@ static int postman(void *arg)
         if (try_nodes(from, node_count)) continue;
         if (try_nodes(dns_from, dns_to)) continue;
 
-        say("Nodes busy, retrying soon");
+        if (ready_peers) {
+            char text[48];
+            snprintf(text, sizeof text, "Ready: %d nodes take letters", ready_peers);
+            say(text);
+        } else {
+            say("Nodes busy, retrying soon");
+        }
         line(LINES - 1, "All busy, again in 20 s");
         pause_seconds(20);
     }
