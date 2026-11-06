@@ -1484,9 +1484,15 @@ static int thinker(void *arg)
 }
 
 /* Where the big buffers are: the DSi's RAM, or (DS mode) smaller ones from
- * the heap, enough for decisions, a short clip and Pictionary. */
+ * the heap, enough for decisions, a short clip and Pictionary. DS mode has
+ * only ~580 KB of heap, shared with libc, FAT, Wi-Fi and the postman (whose
+ * session takes as much as is left), so the mind takes its share only when
+ * it can leave HEADROOM behind, and gives everything back if not. */
+#define MIND_STACK (64 * 1024)
+#define HEADROOM (128 * 1024)
 static int buffers(void)
 {
+    void *room;
     if (isDSiMode()) {
         tp = &t_twl;
         episode = episode_twl, episode_cap = sizeof episode_twl;
@@ -1500,19 +1506,46 @@ static int buffers(void)
     episode_cap = 96 * 1024, episode = malloc(episode_cap);
     photo_cap = 52 * 1024, photo = malloc(photo_cap);
     sense_cap = 72 * 1024, sense_buf = malloc(sense_cap);
-    return tp && tls_by_host && episode && photo && sense_buf;
+    room = malloc(MIND_STACK + HEADROOM); /* the thread's stack and what the rest needs, still free after */
+    free(room);
+    if (tp && tls_by_host && episode && photo && sense_buf && room) return 1;
+    free(tp), free(tls_by_host), free(episode), free(photo), free(sense_buf);
+    tp = NULL, tls_by_host = tlsp = NULL, episode = NULL, photo = NULL, sense_buf = NULL;
+    return 0;
+}
+
+/* Whether mind.txt and mind.key are on the SD, before the mind takes any
+ * memory or a thread: without them it would only hold what the game needs. */
+static int has_settings(void)
+{
+    static const char *names[2] = {"mind.txt", "mind.key"};
+    char path[64];
+    FILE *f;
+    int i;
+    if (!dir_path[0]) return 0;
+    for (i = 0; i < 2; i++) {
+        snprintf(path, sizeof path, "%s%s", dir_path, names[i]);
+        if (!(f = fopen(path, "rb"))) return 0;
+        fclose(f);
+    }
+    return 1;
 }
 
 void ok_dsi_mind_start(const char *dir)
 {
     if (started) return;
-    if (!buffers()) {
-        started = 1;
-        line(0, "0G mind: not enough memory");
-        snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "not enough memory");
-        return;
-    }
     started = 1;
     snprintf(dir_path, sizeof dir_path, "%s", dir ? dir : "");
-    if (cothread_create(thinker, NULL, 64 * 1024, COTHREAD_DETACHED) < 0) line(0, "0G mind: no thread");
+    if (!has_settings()) {
+        line(0, "0G mind: off");
+        line(1, "No mind.txt / mind.key on SD");
+        stopped("no mind.txt / mind.key");
+        return;
+    }
+    if (!buffers()) {
+        line(0, "0G mind: not enough memory");
+        stopped("not enough memory (DS mode)");
+        return;
+    }
+    if (cothread_create(thinker, NULL, MIND_STACK, COTHREAD_DETACHED) < 0) line(0, "0G mind: no thread");
 }

@@ -43,9 +43,9 @@ all: $(OUT)/okupa.nds
 $(OUT)/okupa.elf: $(CORE_OBJ) $(LIB_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-$(OUT)/okupa.nds: $(OUT)/okupa.elf
+$(OUT)/okupa.nds: $(OUT)/okupa.elf platform/dsi/banner.bin
 	$(BLOCKSDS)/tools/ndstool/ndstool -c $@ -7 $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi.elf -9 $< \
-		-b $(BLOCKSDS)/sys/icon.gif "Okupa;A tiny squatter;victxx"
+		-t platform/dsi/banner.bin
 
 $(OUT)/obj/$(SECP)/%.o: $(SECP)/%.c
 	@mkdir -p $(@D)
