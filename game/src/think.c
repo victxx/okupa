@@ -465,7 +465,11 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
                 !put_str(out, cap, &o, t->decision.thought, strlen(t->decision.thought)) ||
                 !put(out, cap, &o, ",\"ask\":") || !put_str(out, cap, &o, t->decision.ask, strlen(t->decision.ask)) ||
                 !put(out, cap, &o, ",\"remember\":") ||
-                !put_str(out, cap, &o, t->decision.remember, strlen(t->decision.remember)) || !put(out, cap, &o, "}"))
+                !put_str(out, cap, &o, t->decision.remember, strlen(t->decision.remember)))
+                return OK_RANGE;
+            snprintf(head, sizeof head, ",\"x\":%d,\"z\":%d,\"gaze\":\"%s\",\"energy\":%d}", t->decision.x, t->decision.z,
+                     ok_mind_gaze_name(t->decision.gaze), t->decision.energy);
+            if (!put(out, cap, &o, head))
                 return OK_RANGE;
         } else if (!put(out, cap, &o, "{\"activity\":\"sleep\",\"safe_stop\":true}")) {
             return OK_RANGE;

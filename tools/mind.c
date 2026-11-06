@@ -227,8 +227,9 @@ int main(int argc, char **argv)
                t.chat_id[0] ? t.chat_id : "-");
         if (t.stage == OK_THINK_DECIDED) {
             verified++;
-            printf("VERIFIED %s / %s \"%s\"%s%s%s%s%s%s\n", ok_mind_activity_name(t.decision.activity),
-                   ok_mind_mood_name(t.decision.mood), t.decision.line, t.decision.thought[0] ? " thinks: " : "",
+            printf("VERIFIED %s / %s [x%d z%d %s e%d] \"%s\"%s%s%s%s%s%s\n", ok_mind_activity_name(t.decision.activity),
+                   ok_mind_mood_name(t.decision.mood), t.decision.x, t.decision.z, ok_mind_gaze_name(t.decision.gaze),
+                   t.decision.energy, t.decision.line, t.decision.thought[0] ? " thinks: " : "",
                    t.decision.thought, t.decision.ask[0] ? " asks: " : "", t.decision.ask,
                    t.decision.remember[0] ? " keeps: " : "", t.decision.remember);
             /* It remembers what it just did, newest first. */

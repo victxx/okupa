@@ -7,6 +7,7 @@ static const char *activities[OK_ACTIVITIES] = {"look", "scratch", "stretch", "h
                                                  "sigh", "wave",    "eat",     "play", "sleep", "go_outside",
                                                  "go_inside"};
 static const char *moods[OK_FEELINGS] = {"happy", "hungry", "sleepy", "bored", "lonely", "curious"};
+static const char *gazes[OK_LOOKS] = {"player", "window", "door", "frames", "floor", "sky"};
 
 static const char SYSTEM[] =
     "You are the mind of Okupa, a small monkey who moved into a Nintendo DSi without asking and lives in its "
@@ -19,7 +20,11 @@ static const char SYSTEM[] =
     "\"thought\": what Okupa thinks but does not say, at most 60 characters, or \"\", \"ask\": a question for the "
     "player, at most 60 characters, or \"\", \"remember\": a new fact about the player worth keeping forever "
     "(their name, what they like, what happened between you), at most 60 characters, or \"\": never the time, the "
-    "weather, the room or anything already in known}. Speak when the player does or says something, when Okupa sees something or when its "
+    "weather, the room or anything already in known, \"x\": 0 to 100, where it walks first, left to right across "
+    "the floor, or -1 to stay, \"z\": 0 to 100, back to front, or -1, \"gaze\": one of [\"player\",\"window\","
+    "\"door\",\"frames\",\"floor\",\"sky\"], what it looks at, \"energy\": 0 to 100, how lively it moves "
+    "(tired and sad low, excited high)}. You move its whole body: choose where it goes, where it looks and how it "
+    "moves so each decision plays out like a little scene. Speak when the player does or says something, when Okupa sees something or when its "
     "needs change; otherwise stay quiet or just think. Ask rarely, only to learn something about the player (their "
     "name, what they like, where they are, how their day was), never while a question is waiting, and use what you "
     "know. When the player answers, react to it and remember what matters. Never repeat a recent line. Keep to its "
@@ -34,6 +39,7 @@ static const char SYSTEM[] =
 
 const char *ok_mind_activity_name(int a) { return a >= 0 && a < OK_ACTIVITIES ? activities[a] : "?"; }
 const char *ok_mind_mood_name(int m) { return m >= 0 && m < OK_FEELINGS ? moods[m] : "?"; }
+const char *ok_mind_gaze_name(int g) { return g >= 0 && g < OK_LOOKS ? gazes[g] : "-"; }
 
 /* A JSON string literal escaped exactly as Go's encoding/json does it (the 0G
  * broker re-encodes the request with it before the TEE hashes it); 0 if it
@@ -169,6 +175,18 @@ static int pick(const ok_json *obj, const char *key, const char *const *set, int
     return -1;
 }
 
+/* An optional whole number 0..max; -1 if absent, negative or not a number
+ * (a fraction is cut, a value above max is max). */
+static int number(const ok_json *obj, const char *key, int max)
+{
+    ok_json v;
+    size_t i;
+    long n = 0;
+    if (ok_json_member(obj, key, &v) != OK_OK || !v.len || v.at[0] < '0' || v.at[0] > '9') return -1;
+    for (i = 0; i < v.len && v.at[i] >= '0' && v.at[i] <= '9' && n <= max; i++) n = n * 10 + (v.at[i] - '0');
+    return n > max ? max : (int)n;
+}
+
 /* An optional short note: absent, not a string or empty all mean none. */
 static void note(const ok_json *obj, const char *key, char out[OK_MIND_NOTE + 1])
 {
@@ -208,6 +226,11 @@ ok_result ok_mind_parse(const char *body, size_t n, ok_mind *d)
     for (i = 0; i < len && o < OK_MIND_LINE; i++)
         if ((unsigned char)line[i] >= 0x20 && (unsigned char)line[i] < 0x7f) d->line[o++] = line[i];
     d->line[o] = 0;
+    d->x = number(&obj, "x", 100);
+    d->z = number(&obj, "z", 100);
+    d->energy = number(&obj, "energy", 100);
+    if (d->energy < 0) d->energy = 50;
+    d->gaze = pick(&obj, "gaze", gazes, OK_LOOKS);
     note(&obj, "thought", d->thought);
     note(&obj, "ask", d->ask);
     note(&obj, "remember", d->remember);

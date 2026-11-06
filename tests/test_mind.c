@@ -77,6 +77,13 @@ int main(void)
                  "\\\"remember\\\":\\\"The player is called Victor\\\"}", &d) == OK_OK);
     assert(!strcmp(d.thought, "Who is this person?") && !strcmp(d.ask, "What is your name?"));
     assert(!strcmp(d.remember, "The player is called Victor"));
+    assert(d.x == -1 && d.z == -1 && d.gaze == -1 && d.energy == 50); /* no body given: instinct */
+    assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
+                 "\\\"x\\\":80,\\\"z\\\":250,\\\"gaze\\\":\\\"window\\\",\\\"energy\\\":72.5}", &d) == OK_OK);
+    assert(d.x == 80 && d.z == 100 && d.gaze == OK_LOOK_WINDOW && d.energy == 72);
+    assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
+                 "\\\"x\\\":-1,\\\"gaze\\\":\\\"moon\\\"}", &d) == OK_OK);
+    assert(d.x == -1 && d.gaze == -1 && !strcmp(ok_mind_gaze_name(d.gaze), "-"));
     assert(parse("{\\\"activity\\\":\\\"go_outside\\\",\\\"mood\\\":\\\"bored\\\",\\\"line\\\":\\\"\\\"}", &d) == OK_OK);
     assert(d.activity == OK_MIND_GO_OUTSIDE && !d.line[0]); /* quiet is allowed */
     ok_mind_memory(&d, memory);
