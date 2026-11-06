@@ -310,6 +310,13 @@ void ok_r3d_rotate_z(int a)
     mul_rot(r);
 }
 
+/* Key light plus a little from the sky above, Q12. */
+static int32_t light_of(ok_v3 n)
+{
+    ok_fx ndl = dot(n, to_light), up = (n.y + 4096) / 2;
+    return (ndl > 0 ? ndl * 4 / 5 : 0) + up / 5;
+}
+
 /* Model space to screen, with the light at the vertex. */
 static void put(int k, ok_v3 p, ok_v3 n)
 {
@@ -337,10 +344,10 @@ static void put(int k, ok_v3 p, ok_v3 n)
     v->x = (int32_t)sx;
     v->y = (int32_t)sy;
     v->z = (int32_t)(inv >> 6);
-    ndl = dot(v->n, to_light);
-    up = (v->n.y + 4096) / 2;
-    v->l = (ndl > 0 ? ndl * 4 / 5 : 0) + up / 5;
+    v->l = light_of(v->n);
     v->ok = 1;
+    (void)ndl;
+    (void)up;
 }
 
 static int tone_of(int32_t l)
@@ -469,6 +476,20 @@ static void tri(int ia, int ib, int ic)
     g = cross(sub(b->w, a->w), sub(c->w, a->w));
     n = add(add(a->n, b->n), c->n);
     s = (int64_t)g.x * n.x + (int64_t)g.y * n.y + (int64_t)g.z * n.z;
+    if (cur_flags & OK_R3D_FLAT) { /* one light for the whole face: the facets show */
+        vert fa = *a, fb = *b, fc = *c;
+        ok_v3 e1 = sub(b->w, a->w), e2 = sub(c->w, a->w), fn;
+        int64_t x = (int64_t)e1.y * e2.z - (int64_t)e1.z * e2.y, y = (int64_t)e1.z * e2.x - (int64_t)e1.x * e2.z,
+                z = (int64_t)e1.x * e2.y - (int64_t)e1.y * e2.x;
+        while (x > 1 << 20 || x < -(1 << 20) || y > 1 << 20 || y < -(1 << 20) || z > 1 << 20 || z < -(1 << 20))
+            x /= 2, y /= 2, z /= 2;
+        fn = norm(ok_v3_make((ok_fx)x, (ok_fx)y, (ok_fx)z));
+        if (s < 0) fn = ok_v3_make(-fn.x, -fn.y, -fn.z);
+        fa.l = fb.l = fc.l = light_of(fn);
+        if (s < 0) raster(&fa, &fc, &fb);
+        else raster(&fa, &fb, &fc);
+        return;
+    }
     if (s < 0) raster(a, c, b);
     else raster(a, b, c);
 }
@@ -607,13 +628,19 @@ void ok_r3d_capsule(ok_v3 a, ok_v3 b, ok_fx radius, int slices)
 
 void ok_r3d_cylinder(ok_v3 base, ok_fx radius, ok_fx height, int slices)
 {
+    ok_r3d_cone(base, radius, radius, height, slices);
+}
+
+void ok_r3d_cone(ok_v3 base, ok_fx radius, ok_fx top, ok_fx height, int slices)
+{
     int j, k = slices + 1;
-    if (2 * k + 2 > MAX_VERTS) return;
+    if (2 * k + 2 > MAX_VERTS || !height) return;
     for (j = 0; j <= slices; j++) {
-        ok_v3 n = ok_v3_make(ok_r3d_cos(j * OK_TURN / slices), 0, ok_r3d_sin(j * OK_TURN / slices));
-        ok_v3 p = add(base, ok_v3_make(ok_fx_mul(n.x, radius), 0, ok_fx_mul(n.z, radius)));
+        ok_v3 ring = ok_v3_make(ok_r3d_cos(j * OK_TURN / slices), 0, ok_r3d_sin(j * OK_TURN / slices));
+        ok_v3 n = norm(ok_v3_make(ring.x, (ok_fx)((int64_t)(radius - top) * 4096 / height), ring.z));
+        ok_v3 p = add(base, ok_v3_make(ok_fx_mul(ring.x, radius), 0, ok_fx_mul(ring.z, radius)));
         put(j, p, n);
-        put(k + j, add(p, ok_v3_make(0, height, 0)), n);
+        put(k + j, add(base, ok_v3_make(ok_fx_mul(ring.x, top), height, ok_fx_mul(ring.z, top))), n);
         vb[j].u = vb[k + j].u = j * uv_w * 16 / slices;
         vb[j].v = tile ? (int32_t)((int64_t)height * tile * 16 / 4096) : uv_h * 16;
         vb[k + j].v = 0;
@@ -622,7 +649,7 @@ void ok_r3d_cylinder(ok_v3 base, ok_fx radius, ok_fx height, int slices)
     /* Caps: the side vertices again, with flat normals. */
     for (j = 0; j <= slices; j++) {
         ok_v3 n = ok_v3_make(ok_r3d_cos(j * OK_TURN / slices), 0, ok_r3d_sin(j * OK_TURN / slices));
-        ok_v3 p = add(base, ok_v3_make(ok_fx_mul(n.x, radius), height, ok_fx_mul(n.z, radius)));
+        ok_v3 p = add(base, ok_v3_make(ok_fx_mul(n.x, top), height, ok_fx_mul(n.z, top)));
         put(j, p, ok_v3_make(0, 4096, 0));
         vb[j].u = (n.x + 4096) * uv_w * 8 / 4096;
         vb[j].v = (n.z + 4096) * uv_h * 8 / 4096;
@@ -631,6 +658,65 @@ void ok_r3d_cylinder(ok_v3 base, ok_fx radius, ok_fx height, int slices)
     vb[k].u = uv_w * 8;
     vb[k].v = uv_h * 8;
     for (j = 0; j < slices; j++) tri(k, j, j + 1);
+}
+
+/* Side walls between two outlines at z = +-depth, normals pointing away from
+ * (cx, cy). */
+static void walls(const int16_t (*pts)[2], int n, ok_fx depth, int cx, int cy, int closed)
+{
+    int i;
+    for (i = 0; i < n - !closed; i++) {
+        const int16_t *p = pts[i], *q = pts[(i + 1) % n];
+        int mx = (p[0] + q[0]) / 2 - cx, my = (p[1] + q[1]) / 2 - cy;
+        ok_v3 nn = norm(ok_v3_make((q[1] - p[1]) * 64, -(q[0] - p[0]) * 64, 0));
+        if ((int64_t)nn.x * mx + (int64_t)nn.y * my < 0) nn = ok_v3_make(-nn.x, -nn.y, 0);
+        put(MAX_VERTS - 4, ok_v3_make(p[0] * 4096 / 100, p[1] * 4096 / 100, depth), nn);
+        put(MAX_VERTS - 3, ok_v3_make(q[0] * 4096 / 100, q[1] * 4096 / 100, depth), nn);
+        put(MAX_VERTS - 2, ok_v3_make(q[0] * 4096 / 100, q[1] * 4096 / 100, -depth), nn);
+        put(MAX_VERTS - 1, ok_v3_make(p[0] * 4096 / 100, p[1] * 4096 / 100, -depth), nn);
+        quad_idx(MAX_VERTS - 4, MAX_VERTS - 3, MAX_VERTS - 2, MAX_VERTS - 1);
+    }
+}
+
+void ok_r3d_extrude(const int16_t (*pts)[2], int n, ok_fx depth, int cx, int cy)
+{
+    int i, f;
+    if (n < 3 || 2 * (n + 1) > MAX_VERTS - 4) return;
+    for (f = 0; f < 2; f++) {
+        ok_fx z = f ? -depth : depth;
+        ok_v3 nn = ok_v3_make(0, 0, f ? -4096 : 4096);
+        int base = f * (n + 1);
+        put(base + n, ok_v3_make(cx * 4096 / 100, cy * 4096 / 100, z), nn);
+        for (i = 0; i < n; i++) put(base + i, ok_v3_make(pts[i][0] * 4096 / 100, pts[i][1] * 4096 / 100, z), nn);
+        for (i = 0; i < n; i++) tri(base + n, base + i, base + (i + 1) % n);
+    }
+    walls(pts, n, depth, cx, cy, 1);
+}
+
+void ok_r3d_ribbon(const int16_t (*outer)[2], const int16_t (*inner)[2], int n, ok_fx depth)
+{
+    int i, f;
+    if (n < 2 || 4 * n > MAX_VERTS - 4) return;
+    for (f = 0; f < 2; f++) {
+        ok_fx z = f ? -depth : depth;
+        ok_v3 nn = ok_v3_make(0, 0, f ? -4096 : 4096);
+        int base = f * 2 * n;
+        for (i = 0; i < n; i++) {
+            put(base + i, ok_v3_make(outer[i][0] * 4096 / 100, outer[i][1] * 4096 / 100, z), nn);
+            put(base + n + i, ok_v3_make(inner[i][0] * 4096 / 100, inner[i][1] * 4096 / 100, z), nn);
+        }
+        for (i = 0; i + 1 < n; i++) quad_idx(base + i, base + i + 1, base + n + i + 1, base + n + i);
+    }
+    /* The outer wall faces away from the inner edge, the inner one away from the outer. */
+    for (i = 0; i + 1 < n; i++) {
+        int k;
+        for (k = 0; k < 2; k++) {
+            const int16_t *p = k ? inner[i] : outer[i], *q = k ? inner[i + 1] : outer[i + 1], *o = k ? outer[i] : inner[i];
+            int16_t two[2][2];
+            two[0][0] = p[0], two[0][1] = p[1], two[1][0] = q[0], two[1][1] = q[1];
+            walls((const int16_t (*)[2])two, 2, depth, o[0], o[1], 0);
+        }
+    }
 }
 
 void ok_r3d_disc(ok_v3 c, ok_fx rx, ok_fx rz, int slices)

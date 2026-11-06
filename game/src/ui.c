@@ -134,6 +134,13 @@ static void pixels(frame f, int x, int y, const char *const *rows, int n, int sc
 
 /* ------------------------------------------------------------ top screen */
 
+static void icons_ready(void)
+{
+    static int done;
+    if (!done) ok_icons_build();
+    done = 1;
+}
+
 /* The four needs along the bottom: an icon and a bar each, on glass. */
 static void needs(frame f, const ok_pet *p)
 {
@@ -428,6 +435,7 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
 {
     int x, y;
     const char *line = u->say ? u->say : ok_pet_line(p, hour);
+    icons_ready();
     rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
     for (y = 4; y < OK_UI_H; y += 8)
         for (x = 4; x < OK_UI_W; x += 8) rect(bottom, x, y, 1, 1, RGB(11, 10, 10));

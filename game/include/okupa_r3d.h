@@ -26,6 +26,7 @@ typedef struct {
 #define OK_R3D_SHADOW 4 /* darkens what is already drawn, writes no depth */
 #define OK_R3D_BOTH 8   /* both sides visible */
 #define OK_R3D_TEXTURED 16 /* colours from the texture, lit like the rest */
+#define OK_R3D_FLAT 32 /* one light per triangle: low-poly facets */
 
 static inline ok_v3 ok_v3_make(ok_fx x, ok_fx y, ok_fx z)
 {
@@ -76,6 +77,14 @@ void ok_r3d_ellipsoid(ok_v3 centre, ok_v3 radius, int slices, int stacks);
 void ok_r3d_capsule(ok_v3 a, ok_v3 b, ok_fx radius, int slices);
 /* Upright cylinder from y0 to y1, centred on x, z. */
 void ok_r3d_cylinder(ok_v3 base, ok_fx radius, ok_fx height, int slices);
+/* Upright cone or frustum: radius at the base, top at the top. */
+void ok_r3d_cone(ok_v3 base, ok_fx radius, ok_fx top, ok_fx height, int slices);
+/* A flat shape in the xy plane (points in hundredths of a unit), extruded
+ * to z = +-depth; its faces are fans from (cx, cy), which must see the
+ * whole outline. */
+void ok_r3d_extrude(const int16_t (*pts)[2], int n, ok_fx depth, int cx, int cy);
+/* A band between two outlines of n points each (a crescent, an arc), extruded. */
+void ok_r3d_ribbon(const int16_t (*outer)[2], const int16_t (*inner)[2], int n, ok_fx depth);
 /* A flat ellipse facing up (shadows, rugs). */
 void ok_r3d_disc(ok_v3 centre, ok_fx rx, ok_fx rz, int slices);
 /* A flat quad, corners counterclockwise as seen from its front; textured,
