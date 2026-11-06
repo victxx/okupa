@@ -34,6 +34,11 @@ void ok_dsi_mind_look(void);
 /* Pictionary: 0G's vision model guesses the 64x64 drawing. take_guess: 1
  * with the verified guess, -1 if it could not, 0 not yet. */
 void ok_dsi_mind_guess(const uint8_t pixels[512]);
+/* A drawing the player sent: 0G's vision model looks at it and the okupa
+ * says one line about it (decoration only). take_comment: 1 with the
+ * verified line, -1 if it could not, 0 not yet. */
+void ok_dsi_mind_comment(const uint8_t pixels[512]);
+int ok_dsi_mind_take_comment(char *out, size_t cap);
 int ok_dsi_mind_take_guess(char *out, size_t cap);
 /* What it makes, dreams and writes, once each: an object out of boxes, its
  * own 64x64 drawing, last night's dream picture (DS colours) and a letter to

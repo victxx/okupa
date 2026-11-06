@@ -48,16 +48,24 @@ static char seen_did[64];
 static ok_mind mailbox;
 static int mailbox_new;
 
-TWL_BSS static ok_think t; /* the big buffers live in the DSi's own RAM (DSi mode only) */
+/* The big buffers: in DSi mode they live in the DSi's own RAM (TWL_BSS); in
+ * DS mode (an emulator set to DS, say) smaller ones come from the heap and
+ * the mind does less (no camera, no dreams, no 0G Storage). */
+TWL_BSS static ok_think t_twl;
+static ok_think *tp;
+#define t (*tp)
 /* One TLS state per provider host, so each keeps its session for the next
  * connection: a resumed handshake skips the certificate chain and the key
  * exchange, the part that would hold the ARM9 for hundreds of ms. */
 #define TLS_HOSTS 4 /* chat, ears, dreams, the 0G chain */
-TWL_BSS static ok_tls tls_by_host[TLS_HOSTS];
-static ok_tls *tlsp = &tls_by_host[0];
+TWL_BSS static ok_tls tls_twl[TLS_HOSTS];
+static ok_tls *tls_by_host = tls_twl, *tlsp = tls_twl;
+static int tls_hosts = TLS_HOSTS;
 #define tls (*tlsp)
-TWL_BSS static char episode[224 * 1024]; /* a hearing keeps its audio in base64 (~110 KB); a batch's upload body */
-static char recent[OK_MIND_RECENT][OK_MIND_LINE + 24];
+TWL_BSS static char episode_twl[224 * 1024]; /* a hearing keeps its audio in base64 (~110 KB); a batch's upload body */
+static char *episode;
+static size_t episode_cap;
+static char recent[OK_MIND_RECENT][OK_MIND_MEMORY];
 static int recent_count;
 
 /* What it keeps for good (memory.txt), the question it is waiting on, and
@@ -92,18 +100,26 @@ static const uint8_t *clip;
 static size_t clip_len;
 static volatile int clip_waiting, look_wanted, ear_state;
 static uint32_t looked_at;
-TWL_BSS static uint8_t photo[64 * 1024]; /* a camera PNG (37 KB) or a drawing (49 KB) */
+TWL_BSS static uint8_t photo_twl[64 * 1024]; /* a camera PNG (37 KB) or a drawing (49 KB) */
+static uint8_t *photo;
+static size_t photo_cap;
 /* Pictionary: the drawing to guess, and the guess once 0G has made it. */
 static uint8_t doodle[512];
 static volatile int guess_wanted, guess_state; /* guess_state: 1 new guess, -1 it could not */
 static char guess_text[OK_MIND_TEXT + 1];
-TWL_BSS static char sense_buf[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
+/* Its reaction to a drawing the player sent: asked of the vision model. */
+static uint8_t gift[512];
+static volatile int gift_wanted, gift_state;
+static char gift_text[OK_MIND_TEXT + 1];
+TWL_BSS static char sense_twl[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
+static char *sense_buf;
+static size_t sense_cap;
 static char chain[65]; /* sha256 of the last episode written */
 
 /* Episodes waiting to go to 0G Storage together, one JSON object a line: one
  * submission for many keeps the gas down. */
 #define BATCH_MAX (160 * 1024) /* its upload body, 4/3 of it, fits in episode[] */
-TWL_BSS static char batch[BATCH_MAX];
+TWL_BSS static char batch[BATCH_MAX]; /* DSi mode only: 0G Storage is off in DS mode */
 static size_t batch_len;
 static int batch_count;
 static uint32_t stored_at;
@@ -216,6 +232,22 @@ void ok_dsi_mind_guess(const uint8_t pixels[512])
     if (guess_wanted) return;
     memcpy(doodle, pixels, sizeof doodle);
     guess_wanted = 1;
+}
+
+void ok_dsi_mind_comment(const uint8_t pixels[512])
+{
+    if (gift_wanted) return;
+    memcpy(gift, pixels, sizeof gift);
+    gift_wanted = 1;
+}
+
+int ok_dsi_mind_take_comment(char *out, size_t cap)
+{
+    int s = gift_state;
+    if (!s) return 0;
+    gift_state = 0;
+    if (s > 0) snprintf(out, cap, "%s", gift_text);
+    return s;
 }
 
 int ok_dsi_mind_take_guess(char *out, size_t cap)
@@ -467,9 +499,9 @@ static int dial(const char *host)
     snprintf(open_host, sizeof open_host, "%s", host);
     {
         int k, free_slot = -1;
-        for (k = 0; k < TLS_HOSTS && strcmp(tls_by_host[k].host, host); k++)
+        for (k = 0; k < tls_hosts && strcmp(tls_by_host[k].host, host); k++)
             if (free_slot < 0 && !tls_by_host[k].host[0]) free_slot = k;
-        tlsp = &tls_by_host[k < TLS_HOSTS ? k : free_slot >= 0 ? free_slot : 0];
+        tlsp = &tls_by_host[k < tls_hosts ? k : free_slot >= 0 ? free_slot : 0];
     }
     resumed = ok_tls_resume(&tls, host, utc_now(), seed, sizeof seed, sock_read, sock_write, &fd);
     ok_wipe(seed, sizeof seed);
@@ -573,6 +605,11 @@ static int load_settings(uint8_t key[32])
     if (!cfg.host[0] || !cfg.provider[0] || !cfg.model[0] || !have_signer) return 0;
     cfg.have_ear = cfg.have_ear && cfg.ear_host[0] && cfg.ear_provider[0] && cfg.ear_model[0];
     cfg.have_dream = cfg.have_dream && cfg.dream_host[0] && cfg.dream_provider[0] && cfg.dream_model[0];
+    if (!isDSiMode()) { /* DS mode: smaller buffers, no camera */
+        cfg.have_dream = 0;
+        cfg.store_on = 0;
+        cfg.look_every = 0;
+    }
     snprintf(path, sizeof path, "%smind.key", dir_path);
     if (!(f = fopen(path, "r"))) return 0;
     ok = fgets(text, sizeof text, f) != NULL;
@@ -612,7 +649,7 @@ static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned c
     size_t n;
     FILE *f;
     int ok;
-    if (ok_think_episode(&t, p, now_ms, chain, episode, sizeof episode, &n) != OK_OK) {
+    if (ok_think_episode(&t, p, now_ms, chain, episode, episode_cap, &n) != OK_OK) {
         line(13, "Episode: too big, not saved");
         return;
     }
@@ -718,10 +755,17 @@ static void record_facts(const ok_think_provider *p, uint32_t ms)
     else memset(f->og_sig, 0, 65);
     snprintf(f->og_request_id, sizeof f->og_request_id, "%.47s", t.chat_id);
     f->og_ms = ms;
-    if (t.stage == OK_THINK_DECIDED)
+    if (t.stage == OK_THINK_DECIDED) {
         snprintf(f->og_decision, sizeof f->og_decision, "%.39s", ok_mind_activity_name(t.decision.activity));
-    else
+        snprintf(f->og_state, sizeof f->og_state, "decided");
+        snprintf(f->og_said, sizeof f->og_said, "%.47s", t.decision.line);
+        snprintf(f->og_thought, sizeof f->og_thought, "%.63s", t.decision.thought);
+        f->og_decisions++;
+    } else {
         snprintf(f->og_decision, sizeof f->og_decision, "sleep (safe stop: %.20s)", ok_think_stage_name(t.stage));
+        snprintf(f->og_state, sizeof f->og_state, "napping"); /* a nap, never an invented line */
+        f->og_said[0] = f->og_thought[0] = 0;
+    }
 }
 
 static void wait_frames(int frames)
@@ -837,7 +881,8 @@ static void save_made(const char *folder, const char *name, const char *ext, con
 /* Waits, but not when the player has just spoken or asked it to look. */
 static void rest_frames(int frames)
 {
-    while (frames-- > 0 && !clip_waiting && !look_wanted && !guess_wanted && !want_make[0] && !want_draw[0]) wait_frames(1);
+    while (frames-- > 0 && !clip_waiting && !look_wanted && !guess_wanted && !gift_wanted && !want_make[0] && !want_draw[0])
+        wait_frames(1);
 }
 
 /* A failed call: say why on both screens. */
@@ -946,7 +991,7 @@ static void flush_batch(const uint8_t key[32])
     memmove(batch + hl, batch, batch_len);
     memcpy(batch, head, hl);
     feed("storage: %d episodes, %lu KB", batch_count, (unsigned long)((hl + batch_len) / 1024));
-    if (ok_store_put(&store, &net, key, (const uint8_t *)batch, hl + batch_len, episode, sizeof episode, fetch,
+    if (ok_store_put(&store, &net, key, (const uint8_t *)batch, hl + batch_len, episode, episode_cap, fetch,
                      http_fetch, NULL, wait_ms, store_step) == OK_OK &&
         store.stage == OK_STORE_DONE) {
         feed("stored on 0G: %.26s", store.root);
@@ -1023,6 +1068,8 @@ static int thinker(void *arg)
     }
     load_chain();
     load_facts();
+    ok_facts_now.og_features |= 1 | 8 | (cfg.have_ear ? 2 : 0) | (isDSiMode() && cfg.look_every >= 0 ? 4 : 0) |
+                               (cfg.have_dream ? 16 : 0) | (cfg.store_on ? 32 : 0);
     {
         time_t now = time(NULL);
         strftime(today_date, sizeof today_date, "%Y-%m-%d", localtime(&now));
@@ -1051,6 +1098,7 @@ static int thinker(void *arg)
             guess_wanted = 0;
             guess_state = -1;
         }
+        if ((paused || !wifi_ready()) && gift_wanted) gift_wanted = 0; /* the drawing still goes; no comment */
         if (paused) {
             line(0, "0G mind: paused (Y resumes)");
             hang_up();
@@ -1077,7 +1125,7 @@ static int thinker(void *arg)
                 line(3, "Listening: %lu bytes to 0G", (unsigned long)clip_len);
                 feed("hearing: %lu KB to %.20s", (unsigned long)(clip_len / 1024), cfg.ear_model);
                 t0 = cpuGetTiming();
-                r = ok_think_hear(&t, &ear, key, now_ms, nonce, clip, clip_len, sense_buf, sizeof sense_buf, fetch,
+                r = ok_think_hear(&t, &ear, key, now_ms, nonce, clip, clip_len, sense_buf, sense_cap, fetch,
                                   NULL);
                 ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
                 if (r == OK_OK && t.stage == OK_THINK_DECIDED) feed_verified(ms);
@@ -1085,6 +1133,7 @@ static int thinker(void *arg)
                     snprintf(heard_text, sizeof heard_text, "%s", t.heard);
                     line(3, "Heard: %.25s", t.heard);
                     feed("heard: \"%.30s\"", t.heard);
+                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "heard: %.32s", t.heard);
                     today_add("heard the player say: %.56s", t.heard);
                 } else if (r == OK_OK) {
                     failed();
@@ -1103,19 +1152,20 @@ static int thinker(void *arg)
                             frames_alive - looked_at > (uint32_t)cfg.look_every * 60u)) {
             look_wanted = 0;
             looked_at = frames_alive;
-            if (ok_dsi_eye_snap(photo, sizeof photo, &n, why_cam)) {
+            if (ok_dsi_eye_snap(photo, photo_cap, &n, why_cam)) {
                 now_ms = (uint64_t)utc_now() * 1000u;
                 draw(nonce, sizeof nonce);
                 line(3, "Looking: %lu B photo to 0G", (unsigned long)n);
                 feed("looking: %lu KB photo to vision", (unsigned long)(n / 1024));
                 t0 = cpuGetTiming();
-                r = ok_think_see(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sizeof sense_buf, fetch, NULL);
+                r = ok_think_see(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
                 ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
                 if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
                     feed_verified(ms);
                     snprintf(saw_text, sizeof saw_text, "%s", t.saw);
                     line(3, "Saw: %.27s", t.saw);
                     feed("saw: %.33s", t.saw);
+                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "saw: %.34s", t.saw);
                     today_add("saw: %.75s", t.saw);
                 } else if (r == OK_OK) {
                     failed();
@@ -1127,19 +1177,48 @@ static int thinker(void *arg)
             }
         }
 
+        /* A drawing the player sent: the okupa looks at it and says something. */
+        if (gift_wanted) {
+            if (ok_png_drawing(gift, 2, photo, photo_cap, &n) == OK_OK) {
+                now_ms = (uint64_t)utc_now() * 1000u;
+                draw(nonce, sizeof nonce);
+                feed("looking at your drawing...");
+                t0 = cpuGetTiming();
+                r = ok_think_comment(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
+                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
+                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                    feed_verified(ms);
+                    snprintf(gift_text, sizeof gift_text, "%.40s", t.saw);
+                    feed("says: %.32s", gift_text);
+                    snprintf(ok_facts_now.og_said, sizeof ok_facts_now.og_said, "%.47s", gift_text);
+                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "your drawing");
+                    today_add("the player sent a drawing; it said: %.40s", gift_text);
+                    gift_state = 1;
+                } else {
+                    if (r == OK_OK) failed();
+                    gift_state = -1;
+                }
+                save_episode(&p, now_ms, count);
+            } else {
+                gift_state = -1;
+            }
+            gift_wanted = 0;
+        }
+
         /* Pictionary: the player's drawing, guessed by 0G's vision model. */
         if (guess_wanted) {
-            if (ok_png_drawing(doodle, 2, photo, sizeof photo, &n) == OK_OK) {
+            if (ok_png_drawing(doodle, 2, photo, photo_cap, &n) == OK_OK) {
                 now_ms = (uint64_t)utc_now() * 1000u;
                 draw(nonce, sizeof nonce);
                 feed("guessing your drawing (%lu KB)", (unsigned long)(n / 1024));
                 t0 = cpuGetTiming();
-                r = ok_think_guess(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sizeof sense_buf, fetch, NULL);
+                r = ok_think_guess(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
                 ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
                 if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
                     feed_verified(ms);
                     snprintf(guess_text, sizeof guess_text, "%s", t.saw);
                     feed("guess: %.32s", t.saw);
+                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "guessed: %.30s", t.saw);
                     today_add("guessed the player's drawing: %.48s", t.saw);
                     line(3, "Guess: %.25s", t.saw);
                     guess_state = 1;
@@ -1290,7 +1369,7 @@ static int thinker(void *arg)
                 snprintf(drew_name, sizeof drew_name, "%.20s", t.drawing_name[0] ? t.drawing_name : want_draw);
                 feed("drew: %.32s", drew_name);
                 today_add("drew %.70s", drew_name);
-                if (ok_png_drawing(drew, 2, photo, sizeof photo, &n) == OK_OK) save_made("drawings", drew_name, "png", photo, n);
+                if (ok_png_drawing(drew, 2, photo, photo_cap, &n) == OK_OK) save_made("drawings", drew_name, "png", photo, n);
                 drew_new = 1;
             } else if (r == OK_OK) {
                 failed();
@@ -1356,7 +1435,7 @@ static int thinker(void *arg)
                         draw(nonce, sizeof nonce);
                         feed("dreaming: %.28s", about);
                         r = ok_think_dream(&t, &dreamer, key, now_ms, nonce, about, dream_png, sizeof dream_png,
-                                           sense_buf, sizeof sense_buf, fetch, NULL);
+                                           sense_buf, sense_cap, fetch, NULL);
                         if (r == OK_OK && t.stage == OK_THINK_DECIDED &&
                             ok_png_read_rgb15(dream_png, t.image_len, dream_px, 128 * 128, &dream_w, &dream_h, dream_scratch,
                                               sizeof dream_scratch) == OK_OK) {
@@ -1404,13 +1483,33 @@ static int thinker(void *arg)
     return 0;
 }
 
+/* Where the big buffers are: the DSi's RAM, or (DS mode) smaller ones from
+ * the heap, enough for decisions, a short clip and Pictionary. */
+static int buffers(void)
+{
+    if (isDSiMode()) {
+        tp = &t_twl;
+        episode = episode_twl, episode_cap = sizeof episode_twl;
+        photo = photo_twl, photo_cap = sizeof photo_twl;
+        sense_buf = sense_twl, sense_cap = sizeof sense_twl;
+        return 1;
+    }
+    tp = malloc(sizeof *tp);
+    tls_by_host = tlsp = calloc(2, sizeof *tls_by_host);
+    tls_hosts = 2;
+    episode_cap = 96 * 1024, episode = malloc(episode_cap);
+    photo_cap = 52 * 1024, photo = malloc(photo_cap);
+    sense_cap = 72 * 1024, sense_buf = malloc(sense_cap);
+    return tp && tls_by_host && episode && photo && sense_buf;
+}
+
 void ok_dsi_mind_start(const char *dir)
 {
     if (started) return;
-    if (!isDSiMode()) { /* its buffers are in the DSi's extra RAM, which a DS does not have */
+    if (!buffers()) {
         started = 1;
-        line(0, "0G mind: needs DSi mode");
-        snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "needs DSi mode");
+        line(0, "0G mind: not enough memory");
+        snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "not enough memory");
         return;
     }
     started = 1;
