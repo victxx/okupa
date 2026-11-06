@@ -78,8 +78,7 @@ void ok_monkey_skin(const ok_look *look, uint16_t skin[OK_SKIN * OK_SKIN])
     p = &parts[OK_PART_EYES];
     fill(skin, p->x, p->y, p->w, p->h, CREAM);
     p = &parts[OK_PART_MUZZLE];
-    fill(skin, p->x, p->y, p->w, p->h, CREAM);
-    fill(skin, p->x + 13, p->y + 9, 6, 3, RGB(20, 12, 10)); /* nose */
+    fill(skin, p->x, p->y, p->w, p->h, RGB(31, 22, 17)); /* the snout a touch warmer than the face */
     p = &parts[OK_PART_EAR_IN];
     fill(skin, p->x, p->y, p->w, p->h, EAR_IN);
     p = &parts[OK_PART_HANDS];
@@ -797,7 +796,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_scale(H(200 - sq), H(sq), H(200 - sq));
     ok_r3d_translate(P(0, -170, 0));
     part_rows(skin, OK_PART_TOP, ++next_id, 45, 100);
-    ok_r3d_ellipsoid(P(0, 250, 8), P(162, 118, 138), 12, 7);
+    ok_r3d_ellipsoid(P(0, 255, 10), P(172, 128, 146), 12, 8); /* a round tummy */
     /* Tail: ten joints, each turned by a spring a beat behind the one before. */
     part_rows(skin, OK_PART_TAIL, fur_id + 60, 0, 60);
     ok_r3d_push();
@@ -818,7 +817,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_rotate_x(deg(a, OK_SPRING_CHEST));
     ok_r3d_translate(P(0, -295, 0));
     part_rows(skin, OK_PART_TOP, next_id, 0, 55);
-    ok_r3d_ellipsoid(P(0, 352, 0), P(170, 122 + wave(a->ticks, 17, 3), 134), 12, 7);
+    ok_r3d_ellipsoid(P(0, 362, 0), P(148, 112 + wave(a->ticks, 17, 3), 124), 12, 8); /* narrower shoulders */
     if (look->top == OK_TOP_HOODIE) {
         part(skin, OK_PART_HOOD, ++next_id);
         ok_r3d_ellipsoid(P(0, 440, -80), P(150, 72, 100), 10, 6);
@@ -833,7 +832,7 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     for (s = -1; s <= 1; s += 2) {
         int k = s > 0;
         ok_r3d_push();
-        ok_r3d_translate(P(s * 150, 400, 5));
+        ok_r3d_translate(P(s * 140, 410, 5));
         ok_r3d_rotate_z(s * deg(a, k ? OK_SPRING_RAISE_R : OK_SPRING_RAISE_L));
         ok_r3d_rotate_x(-deg(a, k ? OK_SPRING_FWD_R : OK_SPRING_FWD_L));
         part_rows(skin, OK_PART_SLEEVE, ++next_id, 0, 50);
@@ -864,13 +863,11 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     face->head_id = ++next_id;
     part(skin, OK_PART_HEAD, face->head_id);
     ok_r3d_ellipsoid(P(0, 632, -10), P(236, 224, 226), 12, 9);
-    ok_r3d_ellipsoid(P(0, 722, 122), P(170, 42, 84), 10, 5);   /* brow */
-    blob(-150, 556, 100, 82, 74, 80);                          /* cheeks */
-    blob(150, 556, 100, 82, 74, 80);
+    ok_r3d_ellipsoid(P(0, 728, 118), P(150, 38, 80), 10, 5);   /* brow */
     if (bare) { /* a tuft of hair */
-        limb(0, 840, 10, -18, 900, 30, 16);
-        limb(30, 835, 0, 46, 892, 14, 14);
-        limb(-30, 835, 0, -56, 884, 6, 13);
+        limb(0, 845, 20, -14, 880, 46, 15);
+        limb(26, 840, 10, 40, 870, 30, 12);
+        limb(-26, 840, 10, -44, 866, 26, 12);
     }
     if (look->wear != OK_WEAR_HEADPHONES)
         for (s = -1; s <= 1; s += 2) {
@@ -884,17 +881,19 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
             ok_r3d_pop();
         }
     face->mask_id = ++next_id;
+    /* A heart-shaped face: two lobes round the eyes over one soft disc, and a
+     * gentle muzzle low on it. */
     part(skin, OK_PART_EYES, face->mask_id);
-    blob(-75, 645, 150, 102, 110, 92);
-    blob(75, 645, 150, 102, 110, 92);
+    blob(-68, 650, 128, 90, 98, 96);
+    blob(68, 650, 128, 90, 98, 96);
+    ok_r3d_ellipsoid(P(0, 572, 118), P(150, 124, 116), 12, 8);
     part(skin, OK_PART_MUZZLE, face->mask_id);
-    blob(0, 552, 175, 132, 92, 86);
-    blob(0, 478, 142, 86, 48, 72); /* chin */
+    blob(0, 540, 160, 106, 72, 76);
     wear(look->wear, a, face);
     for (i = 0; i < 2; i++)
-        if (!ok_r3d_project(P(i ? 75 : -75, 645, 240), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
-    if (!ok_r3d_project(P(0, 536, 260), &face->mouth_x, &face->mouth_y, &face->mouth_z)) face->mouth_x = -100;
-    if (!ok_r3d_project(P(0, 588, 262), &face->nose_x, &face->nose_y, &face->nose_z)) face->nose_x = -100;
+        if (!ok_r3d_project(P(i ? 70 : -70, 655, 226), &face->eye_x[i], &face->eye_y[i], &face->eye_z[i])) face->eye_x[i] = -100;
+    if (!ok_r3d_project(P(0, 528, 240), &face->mouth_x, &face->mouth_y, &face->mouth_z)) face->mouth_x = -100;
+    if (!ok_r3d_project(P(0, 575, 242), &face->nose_x, &face->nose_y, &face->nose_z)) face->nose_x = -100;
     if (!ok_r3d_project(P(0, 900, 0), &face->top_x, &face->top_y, NULL)) face->top_x = -100;
     ok_r3d_pop();
     ok_r3d_pop();
@@ -954,19 +953,19 @@ static void sprite(uint16_t *frame, const ok_monkey_face *f, int cx, int cy, con
         }
 }
 
-static const char *const eye_open[] = {".##.", "#oo#", "#o##", "####", "####", ".##."};
-static const char *const eye_up[] = {".##.", "#oo#", "#oo#", "#o##", "####", ".##."};
-static const char *const eye_down[] = {".##.", "####", "#o##", "#oo#", ".##."};
-static const char *const eye_half[] = {"####", "#o##", ".##."};
-static const char *const eye_shut[] = {"#..#", ".##."};
-static const char *const eye_joy[] = {".##.", "#..#"};
-static const char *const eye_blink[] = {"####"};
-static const char *const mouth_smile[] = {"#...#", ".###."};
-static const char *const mouth_open[] = {"#####", "#rrr#", ".###."};
-static const char *const mouth_wobble[] = {".#.#.", "#.#.#"};
+static const char *const eye_open[] = {".###.", "#o###", "#oo##", "#####", "#####", "#####", ".###."};
+static const char *const eye_up[] = {".###.", "#oo##", "#oo##", "#o###", "#####", "#####", ".###."};
+static const char *const eye_down[] = {".###.", "#####", "#o###", "#oo##", "#####", ".###."};
+static const char *const eye_half[] = {"#####", "#o###", "#####", ".###."};
+static const char *const eye_shut[] = {"#...#", ".###."};
+static const char *const eye_joy[] = {".###.", "#...#"};
+static const char *const eye_blink[] = {"#####"};
+static const char *const mouth_smile[] = {"#.....#", ".#...#.", "..###.."};
+static const char *const mouth_open[] = {"#######", "#rrrrr#", ".#rrr#.", "..###.."};
+static const char *const mouth_wobble[] = {"..#.#..", ".#.#.#.", "#.....#"};
 static const char *const mouth_yawn[] = {".##.", "#rr#", "#rr#", ".##."};
-static const char *const mouth_small[] = {".##."};
-static const char *const mouth_flat[] = {"####"};
+static const char *const mouth_small[] = {".###.", "#...#"};
+static const char *const mouth_flat[] = {"#####"};
 static const char *const mouth_chew[] = {".##.", "#rr#", ".##."};
 static const char *const cheek[] = {"pp"};
 static const char *const nose[] = {"n.n"};
@@ -1021,15 +1020,15 @@ void ok_monkey_face_draw(uint16_t *frame, const ok_monkey_face *f)
         if (!seen(f->eye_x[i], y, f->eye_z[i])) continue;
         switch (f->eyes) {
         case 'j': sprite(frame, f, x, y, eye_joy, 2, 1); break;
-        case 'h': sprite(frame, f, x, y + 1, eye_half, 3, 1); break;
+        case 'h': sprite(frame, f, x, y + 1, eye_half, 4, 1); break;
         case 's': sprite(frame, f, x, y + 1, eye_shut, 2, 1); break;
         case 'b': sprite(frame, f, x, y + 1, eye_blink, 1, 1); break;
-        case 'u': sprite(frame, f, x, y, eye_up, 6, 1); break;
+        case 'u': sprite(frame, f, x, y, eye_up, 7, 1); break;
         case 'd':
-            sprite(frame, f, x, y, eye_down, 5, 1);
+            sprite(frame, f, x, y, eye_down, 6, 1);
             sprite(frame, f, x + (i ? 1 : -1), y - 5, i ? brow_r : brow_l, 2, 1);
             break;
-        default: sprite(frame, f, x, y, eye_open, 6, 1);
+        default: sprite(frame, f, x, y, eye_open, 7, 1);
         }
         if (f->eyes != 'd') sprite(frame, f, f->eye_x[i] + (i ? 4 : -4), y + 5, f->blush ? blush : cheek, 1, 1);
     }
@@ -1040,13 +1039,13 @@ void ok_monkey_face_draw(uint16_t *frame, const ok_monkey_face *f)
     if (seen(f->nose_x, f->nose_y, f->nose_z)) sprite(frame, f, f->nose_x, f->nose_y, nose, 1, 1);
     if (seen(f->mouth_x, f->mouth_y, f->mouth_z)) {
         switch (f->mouth) {
-        case 'O': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_open, 3, 1); break;
-        case 'w': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_wobble, 2, 1); break;
+        case 'O': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_open, 4, 1); break;
+        case 'w': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_wobble, 3, 1); break;
         case 'y': sprite(frame, f, f->mouth_x, f->mouth_y + 1, mouth_yawn, 4, 1); break;
-        case '.': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_small, 1, 1); break;
+        case '.': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_small, 2, 1); break;
         case '-': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_flat, 1, 1); break;
         case 'c': sprite(frame, f, f->mouth_x, f->mouth_y, mouth_chew, 3, 1); break;
-        default: sprite(frame, f, f->mouth_x, f->mouth_y, mouth_smile, 2, 1);
+        default: sprite(frame, f, f->mouth_x, f->mouth_y, mouth_smile, 3, 1);
         }
     }
     /* Hearts rise while it is petted; z's drift up while it sleeps. */
