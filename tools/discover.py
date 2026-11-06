@@ -117,6 +117,7 @@ def dns(limit, wanted):
             print(f"        hoja {name}: enr:… ({len(nodes)}/{limit})")
     print("Paso 3. Fichas (ENR) decodificadas\n")
     table(nodes, wanted)
+    return nodes
 
 
 # --- discv4 (UDP) ----------------------------------------------------------
@@ -223,11 +224,17 @@ def main():
     parser.add_argument("--dns", action="store_true", help="read the DNS tree instead of asking over UDP")
     parser.add_argument("--bootnode", type=int, default=0, help=f"0..{len(BOOTNODES) - 1}")
     parser.add_argument("--nodes", type=int, default=10)
+    parser.add_argument("--enodes", help="with --dns: write the Sepolia nodes as enode:// lines to this file")
     args = parser.parse_args()
     wanted = sepolia_fork_hash(int(time.time()))
     print(f"Sepolia hoy tiene fork hash {wanted.hex()} (EIP-2124).\n")
     if args.dns:
-        dns(args.nodes, wanted)
+        nodes = dns(args.nodes, wanted)
+        if args.enodes:
+            with open(args.enodes, "w") as out:
+                for n in nodes:
+                    if n["fork"] == wanted and n["id"] and n["ip"] and n["tcp"]:
+                        out.write(f"enode://{n['id'].hex()}@{n['ip']}:{n['tcp']}\n")
     else:
         discv4(BOOTNODES[args.bootnode], args.nodes, wanted)
     print("\nSolo son candidatos: la prueba final es TCP + saludo RLPx + Status de Sepolia.")
