@@ -151,7 +151,7 @@ async function sendSwarmGift() {
   log(`Picture: 64×64, four tones, ${picture.length} B (OKPA 01 02).`, 'dim');
   const batch = await swarm.postageBatch(n.bee);
   const ref = await swarm.uploadEncrypted(n.bee, picture, batch);
-  log(`Swarm: uploaded encrypted. Reference (address+key) ${bytesToHex(ref).slice(0, 16)}… stays secret.`, 'ok');
+  log(`Swarm: uploaded encrypted through ${n.bee}, batch ${batch.slice(0, 10)}…. Chunk address ${bytesToHex(ref.subarray(0, 32)).slice(0, 16)}…; its key half stays secret.`, 'ok');
   const sealed = seal(friend.pub, friend.address, ref, picture);
   const data = okupa.giftSwarm(sealed);
   log(`Sealed the reference to ${friend.address.slice(0, 10)}… with ECIES: ${sealed.length} B. Calldata ${data.length} B (OKPA 01 05).`, 'dim');
@@ -161,7 +161,7 @@ async function sendSwarmGift() {
   log(`Ethereum: included in block ${block} (${status}), as the RPC reports it.`, status === 'success' ? 'ok' : 'bad');
   const a = await arkiv.postGift(n.arkiv, priv, { to: friend.address, kind: okupa.KIND.GIFT_SWARM, chainId: n.chainId, tx: hash, block, sealed });
   log(`Arkiv: mailbox entry ${a.entityKey} (Arkiv tx ${a.txHash}).`, 'ok');
-  record({ act: 'gift-swarm', from: me, to: friend.address, tx: hash, block: String(block), swarmUpload: 'encrypted', sealedBytes: sealed.length, arkivEntity: a.entityKey, arkivTx: a.txHash, swarmRefPrefix: bytesToHex(ref).slice(0, 16) });
+  record({ act: 'gift-swarm', from: me, to: friend.address, tx: hash, block: String(block), swarmUpload: 'encrypted', sealedBytes: sealed.length, arkivEntity: a.entityKey, arkivTx: a.txHash, bee: n.bee, postageBatch: batch, swarmAddress: bytesToHex(ref.subarray(0, 32)), swarmKey: 'withheld (sealed to the recipient)' });
 }
 
 async function sendInlineGift() {
@@ -210,7 +210,7 @@ async function checkMailbox() {
         if (!p || p.kind !== okupa.KIND.PHOTO) throw new Error('not a picture');
         px = p.pixels; bpp = 2; how = 'via Swarm';
         log(`✓ ${e.tx.slice(0, 12)}…: sender ${v.from.slice(0, 10)}… recovered from the signature, block ${v.block}, seal opened, ${picture.length} B from Swarm match the sealed keccak.`, 'ok');
-        record({ act: 'received-swarm', from: v.from, to: me, tx: e.tx, block: String(v.block), arkivEntity: e.key, swarmRefPrefix: bytesToHex(ref).slice(0, 16), pictureKeccak: bytesToHex(pictureHash) });
+        record({ act: 'received-swarm', from: v.from, to: me, tx: e.tx, block: String(v.block), arkivEntity: e.key, swarmAddress: bytesToHex(ref.subarray(0, 32)), pictureKeccak: bytesToHex(pictureHash), pictureBytes: picture.length });
       } else if (v.act.kind === okupa.KIND.GIFT_PICTURE) {
         px = v.act.pixels; bpp = v.act.bpp; how = 'inline';
         log(`✓ ${e.tx.slice(0, 12)}…: inline picture from ${v.from.slice(0, 10)}…, block ${v.block}.`, 'ok');
