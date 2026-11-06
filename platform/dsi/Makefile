@@ -9,7 +9,7 @@ BUILD_ID ?= unknown
 
 SECP := third_party/secp256k1
 BEAR := third_party/bearssl
-CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/font.c game/src/checks.c game/src/save.c \
+CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c \
         third_party/tiny_sha3/sha3.c platform/dsi/main.c
 SECP_SRC := $(SECP)/src/secp256k1.c $(SECP)/src/precomputed_ecmult.c $(SECP)/src/precomputed_ecmult_gen.c
 BEAR_SRC := $(BEAR)/src/hash/sha2small.c $(BEAR)/src/mac/hmac.c $(BEAR)/src/symcipher/aes_ct.c \
