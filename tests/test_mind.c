@@ -45,6 +45,20 @@ int main(void)
     assert(strstr(text, "\"player_said\":\"hola \\\"okupa\\\", qu tal?\""));
     assert(strstr(text, "\"okupa_sees\":\"a person with glasses\"") && strstr(text, "\"place\":\"attic\""));
     assert(strstr(text, "\"recent\":[\"wave: Hey there!\",\"look\"]"));
+    /* What it knows for good, the question it is waiting on, the city. */
+    obs.known[0] = "The player is called Victor";
+    obs.known[1] = "Victor likes mangoes";
+    obs.known_count = 2;
+    obs.asked = "What is your name?";
+    obs.city = "Mumbai";
+    assert(ok_mind_request("glm-5.3", &obs, out, sizeof out, &n) == OK_OK && ok_json_parse(out, n, &root) == OK_OK);
+    assert(ok_json_member(&root, "messages", &v) == OK_OK && ok_json_index(&v, 1, &m) == OK_OK);
+    assert(ok_json_member(&m, "content", &v) == OK_OK && ok_json_string(&v, text, sizeof text, &n) == OK_OK);
+    assert(ok_json_parse(text, n, &root) == OK_OK && strstr(text, "\"city\":\"Mumbai\""));
+    assert(strstr(text, "\"known\":[\"The player is called Victor\",\"Victor likes mangoes\"]"));
+    assert(strstr(text, "\"waiting_for_answer_to\":\"What is your name?\""));
+    obs.known_count = 0;
+    obs.asked = obs.city = NULL;
     obs.heard = obs.saw = obs.player_did = NULL;
     obs.recent_count = 0;
     assert(ok_mind_request("glm-5.3", &obs, out, sizeof out, &n) == OK_OK && !strstr(out, "player_said"));
@@ -57,6 +71,24 @@ int main(void)
     assert(d.activity == OK_MIND_WAVE && d.mood == OK_FEEL_HAPPY && !strcmp(d.line, "Nice lamp!"));
     ok_mind_memory(&d, memory);
     assert(!strcmp(memory, "wave: Nice lamp!"));
+    assert(!d.thought[0] && !d.ask[0] && !d.remember[0]); /* optional notes, absent */
+    assert(parse("{\\\"activity\\\":\\\"look\\\",\\\"mood\\\":\\\"curious\\\",\\\"line\\\":\\\"\\\","
+                 "\\\"thought\\\":\\\"Who is this person?\\\",\\\"ask\\\":\\\"What is your name?\\\","
+                 "\\\"remember\\\":\\\"The player is called Victor\\\"}", &d) == OK_OK);
+    assert(!strcmp(d.thought, "Who is this person?") && !strcmp(d.ask, "What is your name?"));
+    assert(!strcmp(d.remember, "The player is called Victor"));
+    assert(d.x == -1 && d.z == -1 && d.gaze == -1 && d.energy == 50); /* no body given: instinct */
+    assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
+                 "\\\"x\\\":80,\\\"z\\\":250,\\\"gaze\\\":\\\"window\\\",\\\"energy\\\":72.5}", &d) == OK_OK);
+    assert(d.x == 80 && d.z == 100 && d.gaze == OK_LOOK_WINDOW && d.energy == 72);
+    assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
+                 "\\\"x\\\":-1,\\\"gaze\\\":\\\"moon\\\"}", &d) == OK_OK);
+    assert(d.x == -1 && d.gaze == -1 && !strcmp(ok_mind_gaze_name(d.gaze), "-"));
+    assert(!d.make[0] && !d.draw[0] && !d.letter[0]);
+    assert(parse("{\\\"activity\\\":\\\"play\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
+                 "\\\"make\\\":\\\"a paper boat\\\",\\\"draw\\\":\\\"the moon\\\","
+                 "\\\"letter\\\":\\\"Dear Victor, thank you.\\\"}", &d) == OK_OK);
+    assert(!strcmp(d.make, "a paper boat") && !strcmp(d.draw, "the moon") && !strcmp(d.letter, "Dear Victor, thank you."));
     assert(parse("{\\\"activity\\\":\\\"go_outside\\\",\\\"mood\\\":\\\"bored\\\",\\\"line\\\":\\\"\\\"}", &d) == OK_OK);
     assert(d.activity == OK_MIND_GO_OUTSIDE && !d.line[0]); /* quiet is allowed */
     ok_mind_memory(&d, memory);

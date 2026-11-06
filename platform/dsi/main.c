@@ -3,6 +3,7 @@
 #include "account.h"
 #include "audio.h"
 #include "mind.h"
+#include "senses.h"
 #include "net.h"
 #include "okupa_music.h"
 #include "okupa_checks.h"
@@ -30,6 +31,7 @@ static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
 static char save_path[40], temp_path[40], net_dir[40], key_path[40], look_path[40], wall_path[40], sent_path[40];
+static char letters_path[40]; /* the letters the okupa sent: "YYYY-MM-DD hash text" a line */
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -122,6 +124,7 @@ static int open_storage(void)
         snprintf(look_path, sizeof look_path, "%sokupa/look.txt", roots[i]);
         snprintf(wall_path, sizeof wall_path, "%sokupa/wall.bin", roots[i]);
         snprintf(sent_path, sizeof sent_path, "%sokupa/drawing-sent.bin", roots[i]);
+        snprintf(letters_path, sizeof letters_path, "%sokupa/letters.txt", roots[i]);
         return 1;
     }
     return 0;
@@ -250,12 +253,33 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
                                              OK_MOVE_TO_DOOR};
     static const int poses[OK_FEELINGS] = {OK_POSE_HAPPY, OK_POSE_HUNGRY, OK_POSE_SLEEPY,
                                            OK_POSE_BORED, OK_POSE_LONELY, OK_POSE_IDLE};
+    /* When the mind stays quiet, the bubble shows what it decided to do, so
+     * every decision from 0G is seen; the body's own idle glances and small
+     * moves between decisions are local animation, never shown as said. */
+    static const char *const doing[OK_ACTIVITIES] = {"*looks around*", "*scratches*", "*stretches*", "*hops*",
+                                                     "*peeks*",        "*wanders*",   "*sighs*",     "*waves*",
+                                                     "*munches*",      "*plays*",     "*yawns*",     "*heads out*",
+                                                     "*heads in*"};
+    static int last_activity = -1;
     int move = moves[d->activity], where = OK_PLACE_ATTIC, here = ok_house_where();
+    /* Its line (or what it does, if it says nothing); its thought in a
+     * cloud; its question waits in its own bubble for the player to answer
+     * by holding L. All three come from the verified decision. */
+    const char *said = d->line[0] ? d->line : d->thought[0] ? NULL : doing[d->activity];
+    /* It carries on with the same thing, saying nothing: let the body keep
+     * going instead of restarting it, and keep the bubble for news. */
+    if (d->activity == last_activity && !d->line[0] && !d->thought[0] && !d->ask[0]) return;
+    if (d->activity == last_activity && !d->line[0]) said = NULL;
+    last_activity = d->activity;
     if (d->activity == OK_MIND_GO_OUTSIDE) where = OK_PLACE_GARDEN;
     if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
         (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
         move = OK_MOVE_LOOK; /* already there: it just looks around */
-    ok_ui_direct(u, p, move, where, poses[d->mood], d->line);
+    if (move == OK_MOVE_PEEK && u->look.wear != OK_WEAR_SMILEY) move = OK_MOVE_LOOK; /* peeking needs its mask */
+    ok_ui_direct(u, p, move, where, poses[d->mood], said);
+    ok_ui_listening(u, 0);
+    if (d->thought[0]) ok_ui_thought(u, d->thought);
+    if (d->ask[0]) ok_ui_ask(u, d->ask);
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
 }
 
@@ -293,6 +317,38 @@ static void watchdog(void)
     }
 }
 
+/* The day of the last letter the okupa sent, from letters.txt. */
+static void last_letter_day(char out[11])
+{
+    char line[256];
+    FILE *f;
+    out[0] = 0;
+    if (!letters_path[0] || !(f = fopen(letters_path, "r"))) return;
+    while (fgets(line, sizeof line, f))
+        if (strlen(line) > 10) snprintf(out, 11, "%.10s", line);
+    fclose(f);
+}
+
+/* A letter its mind wrote, signed and handed to the network with capped
+ * fees (account.c: at most 40 000 gas x 2 gwei); one a day. */
+static int send_letter(const char *text, char sent_day[11], const char *today)
+{
+    uint8_t tx[400], hash[32];
+    size_t len;
+    FILE *f;
+    if (ok_dsi_net_pending(hash)) return 0; /* one at a time */
+    if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), text, tx, sizeof tx, &len, hash)) return 0;
+    ok_dsi_net_send(tx, len, hash);
+    ok_facts_log(ok_dsi_uptime(), 'E', "signed letter %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+    if ((f = fopen(letters_path, "a"))) {
+        fprintf(f, "%s %02x%02x%02x%02x%02x%02x%02x%02x %s\n", today, hash[0], hash[1], hash[2], hash[3], hash[4], hash[5],
+                hash[6], hash[7], text);
+        fclose(f);
+    }
+    snprintf(sent_day, 11, "%s", today);
+    return 1;
+}
+
 int main(void)
 {
     int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0, threads_on = 0;
@@ -305,6 +361,9 @@ int main(void)
      * game's state (the wall alone is 3 KB) plus a deep render could reach
      * past it. */
     static ok_mind thought; /* the mind's latest decision */
+    int listening = 0; /* a clip is with 0G */
+    int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0; /* Pictionary */
+    char game_guess[OK_MIND_TEXT + 1] = "";
     static uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
@@ -479,12 +538,135 @@ int main(void)
         if (keysDown() || (keysHeld() & KEY_TOUCH)) last_input = now;
         ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, (uint32_t)(now - last_input),
                             !tech_on && (keysDown() & KEY_TOUCH) ? "touched the screen" : NULL);
+        /* Talk to it: hold L and speak, let go, and 0G turns it into words it
+         * answers. R: it looks at you through the camera. (On the SELECT
+         * screens L and R turn pages instead.) */
+        if (!tech_on && (keysDown() & KEY_L) && !ok_dsi_mind_ear_busy()) {
+            ok_dsi_ear_start();
+            ok_ui_ask(&ui, NULL); /* it is being answered */
+            ok_ui_listening(&ui, 1);
+        }
+        if ((keysUp() & KEY_L) && ok_dsi_ear_recording()) {
+            size_t len;
+            const uint8_t *wav = ok_dsi_ear_stop(&len);
+            if (wav) {
+                ok_dsi_mind_hear(wav, len);
+                ok_ui_listening(&ui, 2); /* "Thinking..." until 0G has turned it into words */
+            } else {
+                ok_ui_listening(&ui, 0);
+                ui.say = "Hold L while you talk!";
+                ui.say_ticks = 60 * 3;
+            }
+        }
+        if (listening && !ok_dsi_mind_ear_busy() && !ok_dsi_ear_recording()) ok_ui_listening(&ui, 0);
+        listening = ok_dsi_mind_ear_busy();
+        /* Pictionary against the okupa's mind: X and it guesses the drawing
+         * in the sketchbook (0G's vision model, checked here); A says it is
+         * right, B wrong. */
+        if (!tech_on && (keysDown() & KEY_X) && !game_waiting) {
+            int k;
+            for (k = 0; k < (int)sizeof ui.drawing && !ui.drawing[k]; k++) {}
+            if (k == (int)sizeof ui.drawing) {
+                ui.say = "Draw something first, then press X!";
+                ui.say_ticks = 60 * 3;
+            } else {
+                ok_dsi_mind_guess(ui.drawing);
+                game_waiting = 1;
+                ok_ui_listening(&ui, 2);
+            }
+        }
+        {
+            int g = ok_dsi_mind_take_guess(game_guess, sizeof game_guess);
+            if (g) {
+                ok_ui_listening(&ui, 0);
+                game_waiting = 0;
+            }
+            if (g > 0) {
+                static char q[64];
+                snprintf(q, sizeof q, "Is it a %.30s? A yes, B no", game_guess);
+                ok_ui_ask(&ui, q);
+                game_asked = 1;
+            } else if (g < 0) {
+                ui.say = "My head is foggy... no guess this time.";
+                ui.say_ticks = 60 * 3;
+            }
+        }
+        if (!tech_on && game_asked && (keysDown() & (KEY_A | KEY_B))) {
+            static char said[64], did[96];
+            int right = (keysDown() & KEY_A) != 0;
+            if (right) game_okupa++;
+            else game_you++;
+            snprintf(said, sizeof said, right ? "Yes! Okupa %d - You %d" : "Nooo! Okupa %d - You %d", game_okupa,
+                     game_you);
+            snprintf(did, sizeof did, "said your Pictionary guess '%.30s' was %s", game_guess, right ? "right" : "wrong");
+            ok_ui_ask(&ui, NULL);
+            ui.say = said;
+            ui.say_ticks = 60 * 4;
+            ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, did);
+            ok_facts_log(ok_dsi_uptime(), 'G', "game: %s, Okupa %d - You %d", right ? "right" : "wrong", game_okupa,
+                         game_you);
+            game_asked = 0;
+        }
+        if (!tech_on && (keysDown() & KEY_R)) {
+            ok_dsi_mind_look();
+            ui.say = "Let me look at you...";
+            ui.say_ticks = 60 * 3;
+        }
         if (!tech_on && ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
             if (show_mind) ok_dsi_mind_toggle();
             show_mind = 1;
             show_net = 0;
         }
         if (ok_dsi_mind_take(&thought)) obey(&ui, &pet, &thought, (int64_t)now);
+        /* What its mind made, drew, dreamed or wrote. */
+        {
+            static char said[80], letter_day[11];
+            static int letter_day_read;
+            char today[11], text[141], name[21];
+            uint8_t pixels[512], hash[32];
+            const char *about;
+            ok_object obj;
+            int w, h;
+            strftime(today, sizeof today, "%Y-%m-%d", localtime(&now));
+            static int letters_allowed;
+            if (!letter_day_read && storage) {
+                char on_path[48];
+                FILE *f;
+                last_letter_day(letter_day);
+                letter_day_read = 1;
+                /* The mind may post a letter to mainnet by itself (real gas)
+                 * only if the player opted in: sd:/okupa/letters-on.txt. */
+                snprintf(on_path, sizeof on_path, "%.30sletters-on.txt", net_dir);
+                if ((f = fopen(on_path, "r"))) {
+                    letters_allowed = 1;
+                    fclose(f);
+                }
+            }
+            ok_dsi_mind_letters(letters_allowed && storage && strcmp(letter_day, today) && !ok_dsi_net_pending(hash));
+            if (ok_dsi_mind_take_object(&obj)) {
+                snprintf(said, sizeof said, "I made a %.20s!", obj.name);
+                ui.say = said;
+                ui.say_ticks = 60 * 5;
+            }
+            if (ok_dsi_mind_take_drawing(pixels, name)) {
+                snprintf(said, sizeof said, "I drew %.20s! It's on the SD card.", name);
+                ui.say = said;
+                ui.say_ticks = 60 * 5;
+            }
+            if (ok_dsi_mind_take_dream(&w, &h, &about)) {
+                snprintf(said, sizeof said, "I dreamt of %.50s", about);
+                ui.say = said;
+                ui.say_ticks = 60 * 8;
+            }
+            if (ok_dsi_mind_take_letter(text)) {
+                if (send_letter(text, letter_day, today)) {
+                    ui.say = "I wrote you a letter, on Ethereum for good!";
+                } else {
+                    ui.say = "I wrote you a letter... but could not post it.";
+                }
+                ui.say_ticks = 60 * 5;
+            }
+        }
         if (tech_on) {
             if ((keysDown() & KEY_TOUCH)) {
                 touchRead(&touch);

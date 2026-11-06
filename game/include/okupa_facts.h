@@ -88,6 +88,8 @@ typedef struct {
     uint32_t og_ms;
     char og_decision[40];    /* the closed-set action it chose */
     char og_storage_root[67];
+    char og_clock[32];       /* where UTC came from, e.g. "NTP, RTC 4d 2h slow" */
+    char og_error[32];       /* why the last attempt stopped, "" if it did not */
 
     /* The machine. */
     int dsi_mode;            /* 133 MHz DSi mode */

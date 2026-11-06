@@ -11,7 +11,11 @@
  * Settings on the SD card, in dir:
  *   mind.txt  host=, provider=, model=, signer= (TEE signer), optional ip=
  *             (if DNS fails) and tz= (minutes the RTC is ahead of UTC)
+ *             ear_host=, ear_provider=, ear_model=, ear_signer= (and ear_ip=)
+ *             for speech to text; city= where the console is; look_every=
+ *             seconds between looks through the camera (0: only with R)
  *   mind.key  hex key that owns the 0G ledger paying the provider
+ *   memory.txt  facts its mind chose to keep, one a line (it writes this)
  * Each episode is written to dir/episodes/ as a hash chain (chain.txt holds
  * the last link) for the host to put on 0G Storage. Without settings, Wi-Fi
  * or a verified answer the okupa sleeps: nothing is made up. */
@@ -21,7 +25,27 @@ void ok_dsi_mind_start(const char *dir);
 void ok_dsi_mind_observe(const ok_pet *p, int outside, uint32_t seconds_since_player, const char *did);
 /* Y on the Dev screen: pause or resume the mind. */
 void ok_dsi_mind_toggle(void);
-/* 1 once per new verified decision. */
+/* L released: the clip goes to 0G (Whisper) to become words; the clip must
+ * stay put while ok_dsi_mind_ear_busy(). R: look through the camera. */
+void ok_dsi_mind_hear(const uint8_t *wav, size_t len);
+int ok_dsi_mind_ear_busy(void);
+int ok_dsi_mind_ear_state(void); /* 0 idle, 2 the clip is with 0G */
+void ok_dsi_mind_look(void);
+/* Pictionary: 0G's vision model guesses the 64x64 drawing. take_guess: 1
+ * with the verified guess, -1 if it could not, 0 not yet. */
+void ok_dsi_mind_guess(const uint8_t pixels[512]);
+int ok_dsi_mind_take_guess(char *out, size_t cap);
+/* What it makes, dreams and writes, once each: an object out of boxes, its
+ * own 64x64 drawing, last night's dream picture (DS colours) and a letter to
+ * send on Ethereum. ok_dsi_mind_letters: whether it may write one now (the
+ * game loop keeps the cap: one a day, none while another is pending). */
+#include "okupa_make.h"
+int ok_dsi_mind_take_object(ok_object *o);
+int ok_dsi_mind_take_drawing(uint8_t pixels[512], char name[21]);
+const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about);
+int ok_dsi_mind_take_letter(char text[141]);
+void ok_dsi_mind_letters(int allowed);
+/* 1 once per new verified decision (with its line, thought, question). */
 int ok_dsi_mind_take(ok_mind *d);
 /* Lines for the Dev screen. */
 const char (*ok_dsi_mind_lines(void))[33];
