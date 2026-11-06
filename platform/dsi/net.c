@@ -235,12 +235,20 @@ int ok_dsi_wifi_connect(const char *ssid, const char *password, char status[33],
     return 1;
 }
 
+/* Bounded wait that never trusts a blocking call: ask without waiting once
+ * per frame, until the deadline. The screen keeps updating meanwhile. */
 static int wait_for(int fd, short events, int ms)
 {
-    struct pollfd p = {fd, events, 0};
-    int rc = poll(&p, 1, ms);
-    stir();
-    return rc > 0 && (p.revents & events);
+    int frames;
+    for (frames = 0; frames <= ms * 60 / 1000; frames++) {
+        struct pollfd p = {fd, events, 0};
+        int rc = poll(&p, 1, 0);
+        stir();
+        if (rc > 0) return (p.revents & events) != 0;
+        if (rc < 0) return 0;
+        swiWaitForVBlank();
+    }
+    return 0;
 }
 
 static int lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *len)
@@ -251,6 +259,7 @@ static int lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *le
     int fd, tries, ok = 0;
     (void)ctx;
     if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) return 0;
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     memset(&addr, 0, sizeof addr);
     addr.sin_len = sizeof addr;
     addr.sin_family = AF_INET;
@@ -394,13 +403,27 @@ void ok_dsi_network_test(char lines[][33], int count, void (*show)(void))
     ok_keccak_update(&pool, mac, sizeof mac);
     ip = Wifi_GetIPInfo(&gw, &mask, &dns_server, &dns2);
     line(0, "Wi-Fi: %s", inet_ntoa(ip));
-    line(1, "DNS: %s", inet_ntoa(dns_server));
+    /* After a reconnect dswifi can report 255.255.255.255 (or 0) as the DNS
+     * server: never send there. The router usually answers DNS itself; the
+     * walk itself is verified, so any resolver will do. */
+    if (dns_server.s_addr == 0 || dns_server.s_addr == 0xffffffffu) {
+        dns_server = (gw.s_addr && gw.s_addr != 0xffffffffu) ? gw : dns2;
+        if (dns_server.s_addr == 0 || dns_server.s_addr == 0xffffffffu) dns_server.s_addr = htonl(0x01010101); /* 1.1.1.1 */
+        line(1, "DNS: %s (fallback)", inet_ntoa(dns_server));
+    } else {
+        line(1, "DNS: %s", inet_ntoa(dns_server));
+    }
 
     ok_forkid(&ok_sepolia, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
     w.lookup = lookup;
     w.found = found;
     line(2, "Sepolia list: reading DNS...");
     n = ok_dnsdisc_walk_tree(&w, TREE, fork, MAX_NODES);
+    if (!w.seq && dns_server.s_addr != htonl(0x01010101)) {
+        dns_server.s_addr = htonl(0x01010101); /* the local resolver did not answer: try 1.1.1.1 */
+        line(1, "DNS: %s (fallback)", inet_ntoa(dns_server));
+        n = ok_dnsdisc_walk_tree(&w, TREE, fork, MAX_NODES);
+    }
     if (!w.seq) {
         line(2, "Sepolia list: no verified root");
         return;
