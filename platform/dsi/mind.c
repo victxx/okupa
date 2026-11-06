@@ -48,15 +48,15 @@ static char seen_did[64];
 static ok_mind mailbox;
 static int mailbox_new;
 
-static ok_think t;
+TWL_BSS static ok_think t; /* the big buffers live in the DSi's own RAM (DSi mode only) */
 /* One TLS state per provider host, so each keeps its session for the next
  * connection: a resumed handshake skips the certificate chain and the key
  * exchange, the part that would hold the ARM9 for hundreds of ms. */
 #define TLS_HOSTS 4 /* chat, ears, dreams, the 0G chain */
-static ok_tls tls_by_host[TLS_HOSTS];
+TWL_BSS static ok_tls tls_by_host[TLS_HOSTS];
 static ok_tls *tlsp = &tls_by_host[0];
 #define tls (*tlsp)
-static char episode[224 * 1024]; /* a hearing keeps its audio in base64 (~110 KB); a batch's upload body */
+TWL_BSS static char episode[224 * 1024]; /* a hearing keeps its audio in base64 (~110 KB); a batch's upload body */
 static char recent[OK_MIND_RECENT][OK_MIND_LINE + 24];
 static int recent_count;
 
@@ -80,11 +80,11 @@ static uint8_t drew[512];
 static char drew_name[21];
 static char letter[141];
 static volatile int made_new, drew_new, letter_new, dream_new, letters_ok;
-static uint16_t dream_px[128 * 128];
+TWL_BSS static uint16_t dream_px[128 * 128];
 static int dream_w, dream_h;
 static char dream_about[OK_MIND_DREAM + 1];
-static uint8_t dream_png[64 * 1024];      /* a 128x128 PNG is 25..50 KB */
-static uint8_t dream_scratch[120 * 1024]; /* the PNG's data plus 128 rows of 385 bytes */
+TWL_BSS static uint8_t dream_png[64 * 1024];      /* a 128x128 PNG is 25..50 KB */
+TWL_BSS static uint8_t dream_scratch[120 * 1024]; /* the PNG's data plus 128 rows of 385 bytes */
 static char asked[OK_MIND_NOTE + 1];
 static uint32_t asked_at;
 static char heard_text[OK_MIND_TEXT + 1], saw_text[OK_MIND_TEXT + 1];
@@ -92,18 +92,18 @@ static const uint8_t *clip;
 static size_t clip_len;
 static volatile int clip_waiting, look_wanted, ear_state;
 static uint32_t looked_at;
-static uint8_t photo[64 * 1024]; /* a camera PNG (37 KB) or a drawing (49 KB) */
+TWL_BSS static uint8_t photo[64 * 1024]; /* a camera PNG (37 KB) or a drawing (49 KB) */
 /* Pictionary: the drawing to guess, and the guess once 0G has made it. */
 static uint8_t doodle[512];
 static volatile int guess_wanted, guess_state; /* guess_state: 1 new guess, -1 it could not */
 static char guess_text[OK_MIND_TEXT + 1];
-static char sense_buf[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
+TWL_BSS static char sense_buf[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
 static char chain[65]; /* sha256 of the last episode written */
 
 /* Episodes waiting to go to 0G Storage together, one JSON object a line: one
  * submission for many keeps the gas down. */
 #define BATCH_MAX (160 * 1024) /* its upload body, 4/3 of it, fits in episode[] */
-static char batch[BATCH_MAX];
+TWL_BSS static char batch[BATCH_MAX];
 static size_t batch_len;
 static int batch_count;
 static uint32_t stored_at;
@@ -1407,7 +1407,13 @@ static int thinker(void *arg)
 void ok_dsi_mind_start(const char *dir)
 {
     if (started) return;
-   started = 1;
+    if (!isDSiMode()) { /* its buffers are in the DSi's extra RAM, which a DS does not have */
+        started = 1;
+        line(0, "0G mind: needs DSi mode");
+        snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "needs DSi mode");
+        return;
+    }
+    started = 1;
     snprintf(dir_path, sizeof dir_path, "%s", dir ? dir : "");
     if (cothread_create(thinker, NULL, 64 * 1024, COTHREAD_DETACHED) < 0) line(0, "0G mind: no thread");
 }
