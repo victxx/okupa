@@ -23,7 +23,7 @@ BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 .PHONY: all test sanitize clean peer preview
 # Keep library objects between builds.
 .SECONDARY:
-all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https
+all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https
 
 # The host peer: sockets and entropy around the same core.
 $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
@@ -43,13 +43,19 @@ $(BUILD)/okupa-dnswalk: tools/dnswalk.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildca
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
 # Host renders of the DSi screens.
-$(BUILD)/okupa-preview: tools/preview.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
+$(BUILD)/okupa-preview: tools/preview.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
-preview: $(BUILD)/okupa-preview
+# The looks to choose from, with the same renderer.
+$(BUILD)/okupa-directions: tools/directions.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
+
+preview: $(BUILD)/okupa-preview $(BUILD)/okupa-directions
 	@mkdir -p build/preview
 	./$(BUILD)/okupa-preview build/preview
+	./$(BUILD)/okupa-directions build/preview
 
 $(BUILD)/secp/%.o: $(SECP)/src/%.c
 	@mkdir -p $(dir $@)
