@@ -49,8 +49,11 @@ static void present(int top, int bottom)
 }
 
 /* Redraws while a long task (the network test) runs. */
+static volatile uint32_t heartbeat; /* the game loop's pulse, for the freeze watchdog */
+
 static void show_now(void)
 {
+    heartbeat++; /* long Wi-Fi steps on this thread are not a freeze */
     ok_dsi_audio_pump();
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
@@ -290,7 +293,6 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
 /* ---- Watchdog: if the game loop stops for 2 s, the vertical blank
  * interrupt (which still runs) writes on the bottom screen where the
  * network and the mind threads are, so a freeze explains itself. ----------- */
-static volatile uint32_t heartbeat;
 /* The boot step under way, for the watchdog: a freeze before the first frame
  * names it on the bottom screen. */
 static volatile const char *boot_step = "video";
@@ -386,9 +388,13 @@ static int send_letter(const char *text, char sent_day[11], const char *today)
     FILE *f;
     if (ok_dsi_net_pending(hash)) return 0; /* one at a time */
     if (letter_to_state < 0) return 0; /* letters-to.txt is wrong: never guess a recipient */
-    if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), text, letter_to_state == 1 ? letter_to : NULL,
-                               tx, sizeof tx, &len, hash))
-        return 0;
+    {
+        uint64_t nonce = ok_dsi_net_peek_nonce();
+        if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), nonce, text, letter_to_state == 1 ? letter_to : NULL, tx,
+                                   sizeof tx, &len, hash))
+            return 0;
+        ok_dsi_net_commit_nonce(nonce); /* used up only once really signed */
+    }
     ok_dsi_net_send(tx, len, hash);
     ok_facts_log(ok_dsi_uptime(), 'E', "letter %02x%02x%02x%02x to %.16s", hash[0], hash[1], hash[2], hash[3],
                  letter_to_label());
@@ -528,6 +534,20 @@ int main(void)
         load_look(&ui.look);
         ok_dsi_net_files(net_dir);
         load_wall(&ui);
+        ok_dsi_account_open(key_path, &ui); /* the key is there from the start, not only after Dev > Wallet */
+        /* A drawing waiting from last time with nothing pending any more: it
+         * was seen in a block (hang it now) or it never got posted (free the page). */
+        {
+            uint8_t h[32];
+            if (sent_waiting && !ok_dsi_net_pending(h)) {
+                if (ok_dsi_net_was_included(sent_hash)) hang(&ui);
+                else {
+                    sent_waiting = 0;
+                    ui.drawing_sent = 0;
+                    remove(sent_path);
+                }
+            }
+        }
     }
     machine_facts(0);
     boot_step = "timer";
@@ -605,7 +625,7 @@ int main(void)
                 redraw = 1;
             }
         }
-        if (hang_waiting && !tech_on) {
+        if (hang_waiting) { /* at once: a power cut before it hangs must not lose it */
             hang(&ui);
             hang_waiting = 0;
         }
@@ -890,8 +910,9 @@ int main(void)
                 uint8_t hash[32];
                 size_t len;
                 if (!ok_dsi_net_pending(hash)) {
-                    uint64_t nonce = ok_dsi_net_take_nonce();
+                    uint64_t nonce = ok_dsi_net_peek_nonce();
                     if (ok_dsi_account_hello(ok_dsi_net_chain_id(), nonce, tx, sizeof tx, &len, hash)) {
+                        ok_dsi_net_commit_nonce(nonce);
                         ok_dsi_net_send(tx, len, hash);
                         ok_facts_log(ok_dsi_uptime(), 'E', "signed hello %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
                     }
@@ -908,20 +929,23 @@ int main(void)
                 } else if (ok_dsi_net_pending(hash)) {
                     ui.say = "One letter at a time: the last one is still on its way.";
                     ui.say_ticks = 300;
-                } else if (ok_dsi_account_act(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), ui.drawing, tx, sizeof tx,
+                } else if (ok_dsi_account_act(ok_dsi_net_chain_id(), ok_dsi_net_peek_nonce(), ui.drawing, tx, sizeof tx,
                                               &len, hash)) {
-                    ok_dsi_net_send(tx, len, hash);
-                    ok_facts_log(ok_dsi_uptime(), 'E', "signed drawing %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+                    ok_dsi_net_commit_nonce(ok_dsi_net_peek_nonce()); /* used up only once really signed */
+                    /* What the drawing is waiting for goes on the SD first, so a
+                     * power cut never leaves a pending drawing nobody hangs. */
                     memcpy(sent_pixels, ui.drawing, 512);
                     memcpy(sent_hash, hash, 32);
-                    sent_waiting = 1;
-                    ui.drawing_sent = 1;
-                    ok_dsi_mind_comment(ui.drawing); /* its mind on 0G looks at the drawing and says something */
                     if ((f = fopen(sent_path, "wb"))) {
                         fwrite(sent_hash, 1, 32, f);
                         fwrite(sent_pixels, 1, 512, f);
                         fclose(f);
                     }
+                    ok_dsi_net_send(tx, len, hash);
+                    ok_facts_log(ok_dsi_uptime(), 'E', "signed drawing %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+                    sent_waiting = 1;
+                    ui.drawing_sent = 1;
+                    ok_dsi_mind_comment(ui.drawing); /* its mind on 0G looks at the drawing and says something */
                 }
             }
             if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
@@ -964,7 +988,7 @@ int main(void)
 #ifdef OKUPA_PERF_ALWAYS
             if (1) {
 #else
-            if (keysHeld() & KEY_R) { /* hold R: how fast it really runs */
+            if (keysHeld() & KEY_START) { /* hold START: how fast it really runs (R is the camera) */
 #endif
                 char perf[64];
                 int i;

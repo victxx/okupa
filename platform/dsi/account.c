@@ -79,6 +79,16 @@ void ok_dsi_account_scribble(int x, int y, ok_ui *u)
         ok_keccak_final(&k, priv);
         round++;
     } while (ok_keys_public(priv, pub) != OK_OK);
+    /* Never replace a key that is already on the card (it may hold funds):
+     * if one is there after all, use it. New keys go to a new file first. */
+    if ((f = fopen(key_path, "r"))) {
+        fclose(f);
+        ok_wipe(priv, sizeof priv);
+        ok_wipe(&pool, sizeof pool);
+        u->wallet_ready = 0;
+        ok_dsi_account_open(key_path, u);
+        return;
+    }
     if (!(f = fopen(key_path, "w"))) {
         snprintf(u->wallet_address, sizeof u->wallet_address, "Could not write the SD");
         ok_wipe(priv, sizeof priv);

@@ -36,6 +36,11 @@ uint64_t ok_dsi_net_chain_id(void);
 int ok_dsi_net_take_included(uint8_t hash[32], uint64_t *block);
 /* The account's next nonce, counted on the console (nonce-<network>.txt). */
 uint64_t ok_dsi_net_take_nonce(void);
+/* Read the next nonce; use it up only after a successful signature. */
+uint64_t ok_dsi_net_peek_nonce(void);
+void ok_dsi_net_commit_nonce(uint64_t used);
+/* 1 if this hash was seen in a block (included-<network>.txt). */
+int ok_dsi_net_was_included(const uint8_t hash[32]);
 
 /* Wi-Fi set-up from the Dev screen; the postman stands back meanwhile. */
 int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void));

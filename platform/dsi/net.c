@@ -202,7 +202,10 @@ int ok_dsi_net_pending(uint8_t hash[32])
     return pending_len != 0;
 }
 
-uint64_t ok_dsi_net_take_nonce(void)
+/* The next nonce, read only: it is used up (ok_dsi_net_commit_nonce) only
+ * once a transaction with it was really signed, so a failed signature never
+ * leaves a gap that would block every later transaction. */
+uint64_t ok_dsi_net_peek_nonce(void)
 {
     unsigned long long nonce = 0;
     FILE *f = fopen(nonce_path, "r");
@@ -210,11 +213,45 @@ uint64_t ok_dsi_net_take_nonce(void)
         if (fscanf(f, "%llu", &nonce) != 1) nonce = 0;
         fclose(f);
     }
-    if ((f = fopen(nonce_path, "w"))) {
-        fprintf(f, "%llu\n", nonce + 1);
-        fclose(f);
-    }
     return nonce;
+}
+
+/* Written to a new file, then swapped in: a power cut never leaves it empty. */
+void ok_dsi_net_commit_nonce(uint64_t used)
+{
+    char tmp[56];
+    FILE *f;
+    snprintf(tmp, sizeof tmp, "%.50s.tmp", nonce_path);
+    if (!(f = fopen(tmp, "w"))) return;
+    fprintf(f, "%llu\n", (unsigned long long)used + 1);
+    if (fclose(f) == 0) {
+        remove(nonce_path);
+        rename(tmp, nonce_path);
+    }
+}
+
+uint64_t ok_dsi_net_take_nonce(void)
+{
+    uint64_t n = ok_dsi_net_peek_nonce();
+    ok_dsi_net_commit_nonce(n);
+    return n;
+}
+
+/* 1 if this transaction hash is in included-<network>.txt (seen in a block). */
+int ok_dsi_net_was_included(const uint8_t hash[32])
+{
+    char line[160], hex[65];
+    int k;
+    FILE *f = included_path[0] ? fopen(included_path, "r") : NULL;
+    if (!f) return 0;
+    for (k = 0; k < 32; k++) snprintf(hex + 2 * k, 3, "%02x", hash[k]);
+    while (fgets(line, sizeof line, f))
+        if (!strncmp(line, hex, 64)) {
+            fclose(f);
+            return 1;
+        }
+    fclose(f);
+    return 0;
 }
 
 void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32])
@@ -717,6 +754,7 @@ static int sock_write(void *ctx, const uint8_t *buf, size_t n)
 }
 
 static int current_row, current_node, admitted;
+static int dial_had_tx; /* this session hands over (and watches for) the pending transaction */
 static char current_client[48];
 
 static void sock_log(void *ctx, const char *text)
@@ -741,7 +779,7 @@ static int hold(void *ctx)
     }
     /* Stay only while there is a letter to see into a block: a held mainnet
      * peer gossips non-stop, and that costs the game frames for nothing. */
-    return !ui_wifi && online() && pending_len;
+    return !ui_wifi && online() && pending_len && dial_had_tx;
 }
 
 /* ---- What the technical screens show ------------------------------------------ */
@@ -785,8 +823,10 @@ static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
         f->best_head = h->number;
         memcpy(f->best_head_hash, h->hash, 32);
     }
-    watch_from = h->number + 1;
-    save_watch_from();
+    if (c->root_ok) { /* a body that does not match its header gets asked for again */
+        watch_from = h->number + 1;
+        save_watch_from();
+    }
     line(LINES - 2, "Block %llu: %u txs, root %s", (unsigned long long)h->number, (unsigned)c->count,
          c->root_ok ? "ok" : "BAD");
     ok_facts_log(ok_dsi_uptime(), 'E', "block %llu: %u tx, root %s", (unsigned long long)h->number, (unsigned)c->count,
@@ -898,6 +938,7 @@ static int dial(int i, int row)
     io.write = sock_write;
     io.log = sock_log;
     io.hold = hold;
+    dial_had_tx = pending_len != 0;
     if (pending_len) {
         io.txs = pending_list;
         io.tx_lens = &pending_len;

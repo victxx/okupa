@@ -134,12 +134,14 @@ typedef struct {
     uint32_t asked;
     ok_header h[WATCH_HEADERS];
     int count, at;
+    int mismatches; /* bodies that did not match their header, for this block */
 } watcher;
 
 static void ask_body(const ok_io *io, ok_rlpx_session *s, int snappy, watcher *w)
 {
     size_t len;
     w->request++;
+    w->asked = io->seconds ? io->seconds(io->ctx) : 0; /* the timeout counts from this request */
     if (ok_eth_get_bodies(w->request, (const uint8_t(*)[32])&w->h[w->at].hash, 1, out, sizeof out, &len) == OK_OK &&
         send_message(io, s, OK_P2P_ETH_OFFSET + OK_ETH_GET_BLOCK_BODIES, out, len, snappy))
         w->waiting = 2;
@@ -200,6 +202,14 @@ static void watch_answer(const ok_io *io, ok_rlpx_session *s, int snappy, watche
             rep->found = 1;
             say(io, "FOUND in block %llu at index %d, root ok", (unsigned long long)w->h[w->at].number, (int)c.found);
         }
+        /* A body that does not match its header proves nothing: ask again
+         * (another time, or another peer) instead of moving past the block,
+         * but give up on it after three tries. */
+        if (!c.root_ok && ++w->mismatches < 3) {
+            w->count = 0;
+            return;
+        }
+        w->mismatches = 0;
         w->next = w->h[w->at].number + 1;
         if (++w->at < w->count && !rep->found) ask_body(io, s, snappy, w);
         else w->more = w->count == WATCH_HEADERS;
