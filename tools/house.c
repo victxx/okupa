@@ -7,6 +7,7 @@
 
 static uint16_t frame[OK_R3D_W * OK_R3D_H], skin[OK_SKIN * OK_SKIN];
 static uint8_t drawing[512];
+static int carrying; /* the stills hold an envelope (posting a drawing) */
 
 /* A small sun with a smile, as if the player had drawn it. */
 static void sketch(void)
@@ -32,6 +33,7 @@ static void still(const char *dir, const char *name, int hour, int minute, int m
     ok_house_room(&room);
     ok_monkey_init(&a, &room, mood == OK_POSE_ASLEEP, 11);
     a.next_idle = 100000;
+    a.carry = carrying;
     for (i = 0; i < ticks; i++) ok_monkey_step(&a, mood, look.wear);
     ok_monkey_skin(&look, skin);
     ok_house_draw(frame, hour, minute, mood == OK_POSE_ASLEEP, drawing, &look, skin, &a, &face);
@@ -90,6 +92,19 @@ int main(int argc, char **argv)
     still(dir, "golden", 18, 50, OK_POSE_HAPPY, 60);
     still(dir, "night", 22, 15, OK_POSE_IDLE, 60);
     still(dir, "asleep", 23, 30, OK_POSE_ASLEEP, 60);
+    { /* the terrace, with pictures on the easels and in the temple */
+        int i;
+        for (i = 6; i < 12; i++) ok_house_frame(i, drawing);
+        ok_house_place(OK_PLACE_GARDEN);
+        still(dir, "terrace-day", 11, 0, OK_POSE_IDLE, 60);
+
+        still(dir, "terrace-night", 22, 0, OK_POSE_IDLE, 60);
+        ok_house_place(OK_PLACE_ATTIC);
+        for (i = 6; i < 12; i++) ok_house_frame(i, NULL);
+        carrying = 1;
+        still(dir, "posting", 16, 0, OK_POSE_HAPPY, 60);
+        carrying = 0;
+    }
     if (argc > 2) film(argv[2]);
     return 0;
 }

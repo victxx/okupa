@@ -850,8 +850,10 @@ static void easel(int slot, int x, int z, int yaw)
     limb_house(120, 0, 60, 40, 760, -10, 14);
     limb_house(0, 0, -200, 0, 720, -30, 12);
     box(-150, 300, 30, 150, 330, 90);
+    /* The canvas on the ledge, in front of the legs: in the easel's own
+     * frame, so it faces the way the easel does. */
+    framed_at(slot, hung[slot] ? gallery[slot] : NULL, 0, 520, 70, 150, 0, slot % 3, 0, 12);
     ok_r3d_pop();
-    framed_at(slot, hung[slot] ? gallery[slot] : NULL, x, 520, z + 40, 150, 0, slot % 3, yaw, 12);
 }
 
 /* A little temple for art on the terrace: a stone platform, four columns,
@@ -969,14 +971,28 @@ static void island(int cx, int cy, int cz, int size, int seed, int segs)
             ok_r3d_quad(q[0], q[1], q[2], q[3]);
         }
     }
-    otex(OK_OUT_GRASS, 3, RGB(5, 10, 3), 0); /* the lawn on top, as a fan */
-    for (i = 0; i < segs; i++) {
-        int a0 = i * OK_TURN / segs, a1 = (i + 1) * OK_TURN / segs, r0 = island_r(a0, seed), r1 = island_r(a1, seed);
-        ok_v3 c = P(cx, cy, cz), p0 = P(cx + (int)((int64_t)ok_r3d_cos(a0) * r0 / 4096) * size / 1000, cy,
-                                       cz + (int)((int64_t)ok_r3d_sin(a0) * r0 / 4096) * size / 1000);
-        ok_v3 p1 = P(cx + (int)((int64_t)ok_r3d_cos(a1) * r1 / 4096) * size / 1000, cy,
-                     cz + (int)((int64_t)ok_r3d_sin(a1) * r1 / 4096) * size / 1000);
-        ok_r3d_quad(c, p1, p0, p0);
+    otex(OK_OUT_GRASS, 3, RGB(5, 10, 3), 0);
+    /* The lawn on top in rings, not one fan of long wedges: big thin
+     * triangles bend the texture and the depth, and the grass looked like
+     * the face of a clock. */
+    {
+        static const int16_t rr[] = {0, 300, 600, 1000}, rs[] = {0, 250, 500, 750, 1000};
+        const int16_t *rad = ok_r3d_on_hardware() ? rr : rs;
+        int rings = ok_r3d_on_hardware() ? 3 : 4;
+        for (i = 0; i < segs; i++) {
+            int a0 = i * OK_TURN / segs, a1 = (i + 1) * OK_TURN / segs, r0 = island_r(a0, seed), r1 = island_r(a1, seed);
+            int x0 = (int)((int64_t)ok_r3d_cos(a0) * r0 / 4096), z0 = (int)((int64_t)ok_r3d_sin(a0) * r0 / 4096);
+            int x1 = (int)((int64_t)ok_r3d_cos(a1) * r1 / 4096), z1 = (int)((int64_t)ok_r3d_sin(a1) * r1 / 4096);
+            for (k = 0; k < rings; k++) {
+                int f0 = rad[k], f1 = rad[k + 1];
+                ok_v3 in0 = P(cx + x0 * f0 / 1000 * size / 1000, cy, cz + z0 * f0 / 1000 * size / 1000);
+                ok_v3 in1 = P(cx + x1 * f0 / 1000 * size / 1000, cy, cz + z1 * f0 / 1000 * size / 1000);
+                ok_v3 out0 = P(cx + x0 * f1 / 1000 * size / 1000, cy, cz + z0 * f1 / 1000 * size / 1000);
+                ok_v3 out1 = P(cx + x1 * f1 / 1000 * size / 1000, cy, cz + z1 * f1 / 1000 * size / 1000);
+                if (!f0) ok_r3d_quad(in0, out1, out0, out0);
+                else ok_r3d_quad(in0, in1, out1, out0);
+            }
+        }
     }
     ok_r3d_tile(0);
 }

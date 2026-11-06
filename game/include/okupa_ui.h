@@ -10,13 +10,21 @@
  * set) by plain C, so the DSi, the host preview and later a phone share it. */
 #define OK_UI_W 256
 #define OK_UI_H 192
-enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM };
+enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM,
+       OK_UI_GALLERY };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
        OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING,
        /* Buttons the platform may act on (the okupa has already said a hint):
         * look through the camera, listen through the microphone, a game
         * (it guesses the sketchbook's drawing), its letters, a friend. */
        OK_UI_PHOTO, OK_UI_TALK, OK_UI_GAMES, OK_UI_MAIL, OK_UI_FRIEND };
+/* What the platform really handles (ok_ui.wired): a button for any other
+ * of these is hidden, never shown dead. */
+#define OK_UI_HAS_PHOTO 1
+#define OK_UI_HAS_TALK 2
+#define OK_UI_HAS_GAMES 4
+#define OK_UI_HAS_MAIL 8
+#define OK_UI_HAS_FRIEND 16
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
 #define OK_UI_WALL 6 /* framed drawings, each hung only once seen in a block */
@@ -51,6 +59,12 @@ typedef struct {
     int ready, happy_ticks;
     int pressed, pressed_ticks; /* the button just tapped (1..12, 100 Wear, 101 Out, 102.. a tab), for its pressed look */
     int page;                   /* the home screen's menu: 0 care, 1 more */
+    int wired;                  /* OK_UI_HAS_*: set by the platform for what it really does */
+    /* Posting a drawing: it walks out with the envelope while the drawing
+     * is on its way (drawing_sent), and comes back to hang it once a block
+     * has it, or empty-handed after a while; 2 = back, still waiting. */
+    int outing, outing_ticks;
+    char unlocked[40];          /* the line for what the last picture unlocked */
     int sound;                  /* a sound to play, OK_SFX_* + 1; the platform plays it and clears it */
     int heard_bites, heard_move;
     uint32_t intro_t;           /* ticks into the splash or the opening film */
