@@ -63,6 +63,8 @@ typedef struct {
 
 typedef struct {
     ok_spring s[OK_SPRINGS];
+    int32_t eased[OK_SPRINGS]; /* each pose target, eased towards the new one (times 256) */
+    int eased_ready;
     ok_monkey_room room;
     int32_t x, z, goal_x, goal_z; /* hundredths */
     int mood, move, move_t, stage, next_idle, walking, phase;

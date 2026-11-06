@@ -16,6 +16,8 @@
 #include "okupa_keccak.h"
 #include "okupa_r3d.h"
 #include "okupa_ui.h"
+#include "okupa_icons.h"
+#include "okupa_text.h"
 #include <fat.h>
 #include <malloc.h>
 #include <nds.h>
@@ -50,6 +52,7 @@ static void show_now(void)
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     ok_ui_render(shown_ui, shown_pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
+    ok_r3d_swap();
     present(top_bg, bottom_bg);
 }
 
@@ -68,6 +71,37 @@ static int64_t hw_divide(int64_t n, int64_t d)
     q = REG_DIV_RESULT;
     leaveCriticalSection(ime);
     return q;
+}
+
+/* The sky behind the 3D: the mood's 512x256 panorama and its palette, uploaded when the mood changes; each
+ * frame only the turn and pitch move it. */
+static int sky_bg, sky_mood = -1;
+static void sky_layer(int cam_az, int pitch, int focal, int mood, int next, int k)
+{
+    int m = k >= 128 ? next : mood;
+    int32_t pa, pd, cx, cy;
+    if (m != sky_mood) {
+        uint16_t *dst = bgGetGfxPtr(sky_bg);
+        const uint8_t *src = ok_sky_art[m];
+        int x, y;
+        for (y = 0; y < 256; y++)
+            for (x = 0; x < 512; x += 2) dst[(y * 512 + x) / 2] = (uint16_t)(src[y * 512 + x] | src[y * 512 + x + 1] << 8);
+        for (x = 0; x < 256; x++) BG_PALETTE[x] = ok_sky_palette[m][x];
+        sky_mood = m;
+    }
+    if (pitch > OK_TURN / 2) pitch -= OK_TURN;
+    /* Texels per screen pixel (8 fraction bits): 512 a turn across, 256 rows
+     * for 120 degrees down; the screen's centre on where the camera looks. */
+    pa = 20861 / focal; /* 256 * 512 / (2 pi focal) */
+    pd = 31291 / focal; /* 256 * 256 / (2.094 focal) */
+    cx = (((cam_az + OK_TURN / 4) & (OK_TURN - 1)) * 512 / OK_TURN) << 8;
+    cy = ((80 * OK_TURN / 360 - pitch) * 256 / (120 * OK_TURN / 360)) << 8;
+    REG_BG2PA = (int16_t)pa;
+    REG_BG2PB = 0;
+    REG_BG2PC = 0;
+    REG_BG2PD = (int16_t)pd;
+    REG_BG2X = cx - 128 * pa;
+    REG_BG2Y = cy - 96 * pd;
 }
 
 /* The DSi's own SD slot first, then a flashcart; never the internal memory. */
@@ -232,20 +266,47 @@ int main(void)
     ok_look worn;
     ok_tech tech;
     time_t now = time(NULL), last = now, saved_at = now, last_input = now;
-    ok_mind thought; /* the mind's latest decision */
-    uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
+    /* The big state lives outside the stack: the main stack is the DSi's
+     * 16 KB of DTCM, shared with the interrupt and system stacks, and the
+     * game's state (the wall alone is 3 KB) plus a deep render could reach
+     * past it. */
+    static ok_mind thought; /* the mind's latest decision */
+    static uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
-    ok_pet pet;
-    ok_ui ui;
+    static ok_pet pet;
+    static ok_ui ui;
 
     defaultExceptionHandler(); /* a crash shows the registers and the address, not just "Data abort" */
-    videoSetMode(MODE_5_2D);
+    /* Top screen: the 3D hardware (BG0), the game's 2D layer over it (BG3,
+     * see-through where a pixel's bit 15 is clear) and the sky behind it
+     * (BG2, a 512x256 256-colour panorama the hardware turns and scales). */
+    videoSetMode(MODE_5_3D);
     videoSetModeSub(MODE_5_2D);
-    vramSetBankA(VRAM_A_MAIN_BG);
+    vramSetBankA(VRAM_A_MAIN_BG_0x06000000);
+    vramSetBankB(VRAM_B_MAIN_BG_0x06020000);
     vramSetBankC(VRAM_C_SUB_BG);
+    vramSetBankD(VRAM_D_TEXTURE);
     top_bg = top = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+    sky_bg = bgInit(2, BgType_Bmp8, BgSize_B8_512x256, 8, 0);
+    bgWrapOn(sky_bg);
+    bgSetPriority(top, 0);
+    bgSetPriority(sky_bg, 3);
     bottom_bg = bottom = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+    glInit();
+    glEnable(GL_TEXTURE_2D | GL_OUTLINE | GL_BLEND);
+    REG_BG0CNT = (REG_BG0CNT & ~3u) | 1u; /* the 3D between the 2D layer and the sky */
+    glClearColor(0, 0, 0, 31);
+    glClearPolyID(63);
+    glClearDepth(GL_MAX_DEPTH);
+    glViewport(0, 0, 255, 191);
+    {
+        int i;
+        for (i = 0; i < 8; i++) glSetOutlineColor(i, RGB15(3, 2, 2));
+    }
+    ok_house_sky_layer = sky_layer;
+    ok_icons_build(); /* drawn once in software, before the 3D goes to the hardware */
+    ok_r3d_hardware(1);
     if (isDSiMode()) setCpuClock(true);
 
     ok_ui_init(&ui);
@@ -268,12 +329,17 @@ int main(void)
     machine_facts(0);
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
     ok_r3d_divider(hw_divide);
+    ok_house_clock = now_us;
     ok_dsi_audio_start();
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
+#ifndef OKUPA_NO_NET /* a build for measuring the drawing alone */
     ok_dsi_net_start();
+#endif
     ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
+#ifndef OKUPA_NO_NET
     ok_dsi_mind_start(storage ? net_dir : NULL);
+#endif
     ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
     frame_at = cpuGetTiming();
@@ -398,6 +464,7 @@ int main(void)
                 show_mind = 0;
                 tm = localtime(&now);
                 ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
+                ok_r3d_swap();
                 present(top, bottom);
                 fails = ok_checks_run(ui.dev, OK_UI_DEV_LINES - 4, now_us);
                 snprintf(ui.dev[OK_UI_DEV_LINES - 3], sizeof ui.dev[0], "CPU: %s",
@@ -423,7 +490,8 @@ int main(void)
             if (r == OK_UI_WALLET_HELLO && storage) {
                 /* One hello at a time: while one is waiting, pressing again
                  * just keeps handing out the same bytes. */
-                uint8_t tx[512], hash[32];
+                static uint8_t tx[512];
+                uint8_t hash[32];
                 size_t len;
                 if (!ok_dsi_net_pending(hash)) {
                     uint64_t nonce = ok_dsi_net_take_nonce();
@@ -434,7 +502,8 @@ int main(void)
                 }
             }
             if (r == OK_UI_SEND_DRAWING && storage) {
-                uint8_t tx[700], hash[32];
+                static uint8_t tx[700];
+                uint8_t hash[32];
                 size_t len;
                 FILE *f;
                 if (!ui.wallet_ready) {
@@ -484,6 +553,20 @@ int main(void)
             uint32_t start = now_us();
             tm = localtime(&now);
             ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
+            if (keysHeld() & KEY_R) { /* hold R: how fast it really runs */
+                char perf[64];
+                int i;
+                const uint32_t *pr = ok_house_prof;
+                snprintf(perf, sizeof perf, "%u fps  draw %u  loop %u ms", (unsigned)(loop_us ? 1000000 / loop_us : 0),
+                         (unsigned)(draw_us / 1000 % 10000), (unsigned)(loop_us / 1000 % 10000));
+                for (i = 0; i < OK_UI_W * 24; i++) back[0][(OK_UI_H - 24) * OK_UI_W + i] = 0x8000;
+                ok_text_draw(back[0], &ok_sans_regular, 2, OK_UI_H - 23, perf, 0xffff);
+                snprintf(perf, sizeof perf, "%u %u %u %u %u | %u %u %u", (unsigned)(pr[0] / 100 % 10000), (unsigned)(pr[1] / 100 % 10000),
+                         (unsigned)(pr[2] / 100 % 10000), (unsigned)(pr[3] / 100 % 10000), (unsigned)(pr[4] / 100 % 10000),
+                         (unsigned)(pr[5] / 100 % 10000), (unsigned)(pr[6] / 100 % 10000), (unsigned)(pr[7] / 100 % 10000));
+                ok_text_draw(back[0], &ok_sans_regular, 2, OK_UI_H - 11, perf, 0xffff);
+            }
+            ok_r3d_swap();
             present(top, bottom);
             draw_us = (draw_us * 7 + (now_us() - start)) / 8;
             /* From one drawn frame to the next: drawing, the game, and the

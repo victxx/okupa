@@ -307,6 +307,7 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
     hang_pictures(u);
     if (memcmp(&skin_look, &u->look, sizeof skin_look)) {
         ok_monkey_skin(&u->look, skin);
+        ok_r3d_texture_changed(skin);
         skin_look = u->look;
     }
     ok_house_draw(f, hour, minute, p->asleep, NULL, &u->look, skin, &u->anim, &face); /* frames fill as drawings are sent */
@@ -602,28 +603,43 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         return;
     }
     icons_ready();
-    rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
-    for (y = 4; y < OK_UI_H; y += 8)
-        for (x = 4; x < OK_UI_W; x += 8) rect(bottom, x, y, 1, 1, RGB(11, 10, 10));
-    if (u->scene == OK_UI_SKETCH) {
-        sketch(bottom, font, u);
-        line = "Draw me something for the house!";
-    } else if (u->scene == OK_UI_DEV) {
-        dev(bottom, font, u);
-    } else if (u->scene == OK_UI_WIFI) {
-        wifi(bottom, font, u);
-        line = u->wifi_status[0] ? u->wifi_status : "Which Wi-Fi do we use?";
-    } else if (u->scene == OK_UI_PASSWORD) {
-        password(bottom, font, u);
-        line = "Psst. I won't peek.";
-    } else if (u->scene == OK_UI_WALLET) {
-        wallet(bottom, font, u);
-        line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
-    } else if (u->scene == OK_UI_CLOSET) {
-        closet(bottom, font, u);
-        if (!u->say) line = "How do I look?";
-    } else {
-        home_buttons(bottom, font, u, p);
+    {
+        /* The bottom screen only when it may have changed, or ten times a
+         * second: redrawing it every frame costs the DS a lot. */
+        static const uint16_t *last_buf;
+        static int last_scene = -1, last_pressed;
+        static uint32_t last_tick;
+        int draw = bottom != last_buf || u->scene != last_scene || u->pressed != last_pressed || u->pressed_ticks ||
+                   u->scene == OK_UI_SKETCH || u->scene == OK_UI_WALLET || u->ticks - last_tick >= 6 || u->ticks < last_tick;
+        if (draw) {
+            last_buf = bottom;
+            last_scene = u->scene;
+            last_pressed = u->pressed;
+            last_tick = u->ticks;
+            rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
+            for (y = 4; y < OK_UI_H; y += 8)
+                for (x = 4; x < OK_UI_W; x += 8) rect(bottom, x, y, 1, 1, RGB(11, 10, 10));
+        }
+        if (u->scene == OK_UI_SKETCH) {
+            if (draw) sketch(bottom, font, u);
+            line = "Draw me something for the house!";
+        } else if (u->scene == OK_UI_DEV) {
+            if (draw) dev(bottom, font, u);
+        } else if (u->scene == OK_UI_WIFI) {
+            if (draw) wifi(bottom, font, u);
+            line = u->wifi_status[0] ? u->wifi_status : "Which Wi-Fi do we use?";
+        } else if (u->scene == OK_UI_PASSWORD) {
+            if (draw) password(bottom, font, u);
+            line = "Psst. I won't peek.";
+        } else if (u->scene == OK_UI_WALLET) {
+            if (draw) wallet(bottom, font, u);
+            line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
+        } else if (u->scene == OK_UI_CLOSET) {
+            if (draw) closet(bottom, font, u);
+            if (!u->say) line = "How do I look?";
+        } else if (draw) {
+            home_buttons(bottom, font, u, p);
+        }
     }
     top_screen(top, font, u, p, hour, minute, line);
 }

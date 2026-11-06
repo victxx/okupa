@@ -44,15 +44,28 @@ static void fade(uint16_t *f, uint16_t to, int k)
 {
     int i;
     if (k <= 0) return;
+    if (ok_r3d_on_hardware() && k < 1000) { /* over the hardware's 3D: an ordered dither of the colour */
+        static const uint8_t bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+        int x, y, level = k * 16 / 1000;
+        for (y = 0; y < H; y++)
+            for (x = 0; x < W; x++)
+                if (bayer[(y & 3) * 4 + (x & 3)] < level) f[y * W + x] = to | 0x8000;
+        return;
+    }
     for (i = 0; i < W * H; i++) f[i] = mix(f[i], to, k > 1000 ? 1000 : k);
 }
 
 static void disc(uint16_t *f, int cx, int cy, int r2x, uint16_t c) /* r2x: radius in half pixels */
 {
-    int x, y, r = r2x / 2 + 1;
-    for (y = cy - r; y <= cy + r; y++)
-        for (x = cx - r; x <= cx + r; x++)
-            if (x >= 0 && y >= 0 && x < W && y < H && ((x - cx) * (x - cx) + (y - cy) * (y - cy)) * 4 <= r2x * r2x) f[y * W + x] = c;
+    int y, r = r2x / 2 + 1;
+    for (y = cy - r; y <= cy + r; y++) { /* a span a row: the DS is slow per pixel */
+        int dy = y - cy, dx = 0, x0, x1, x;
+        if (y < 0 || y >= H || dy * dy * 4 > r2x * r2x) continue;
+        while ((dx + 1) * (dx + 1) * 4 + dy * dy * 4 <= r2x * r2x) dx++;
+        x0 = cx - dx < 0 ? 0 : cx - dx;
+        x1 = cx + dx >= W ? W - 1 : cx + dx;
+        for (x = x0; x <= x1; x++) f[y * W + x] = c;
+    }
 }
 
 /* Text at an integer scale; dotted draws only every third diagonal, like a
@@ -88,7 +101,6 @@ void ok_intro_splash(uint16_t *top, uint16_t *bottom, uint32_t t)
     char by[16];
     int letters = clamp(((int)t - 118) / 4, 0, 12);
     fill(top, paper);
-    fill(bottom, paper);
     /* A sun of halftone dots behind the name, its rays turning slowly. */
     for (y = 3; y < H; y += 6)
         for (x = 3; x < W; x += 6) {
@@ -113,12 +125,21 @@ void ok_intro_splash(uint16_t *top, uint16_t *bottom, uint32_t t)
     snprintf(by, sizeof by, "%.*s", letters, "by victorxva");
     big_text(top, &ok_sans_bold, 128, 126, by, 1, ink, 0, 99);
     if (t > 118 && letters < 12 && (t / 8) % 2) big_text(top, &ok_sans_bold, 128 + ok_text_width(&ok_sans_bold, by) / 2 + 4, 126, "_", 1, ink, 0, 99);
-    /* Below: a halftone falling into the bottom, and a line to tap. */
-    for (y = 3; y < H; y += 6)
-        for (x = 3; x < W; x += 6) {
-            int k = y * 1000 / H;
-            disc(bottom, x, y, clamp(k * k / 1000 * 6 / 1000, 0, 6), RGB(24, 21, 16));
+    /* Below: a halftone falling into the bottom (drawn once, then copied), and a line to tap. */
+    {
+        static uint16_t below[W * H];
+        static int below_ready;
+        if (!below_ready) {
+            fill(below, paper);
+            for (y = 3; y < H; y += 6)
+                for (x = 3; x < W; x += 6) {
+                    int k = y * 1000 / H;
+                    disc(below, x, y, clamp(k * k / 1000 * 6 / 1000, 0, 6), RGB(24, 21, 16));
+                }
+            below_ready = 1;
         }
+        memcpy(bottom, below, sizeof below);
+    }
     big_text(bottom, &ok_sans_regular, 128, 150, "(c) 2026 victorxva", 1, RGB(12, 10, 8), 0, 99);
     if (t > 200 && (t / 30) % 2) big_text(bottom, &ok_sans_bold, 128, 84, "Touch the screen", 1, ink, 0, 99);
     /* In from black, out to black. */

@@ -113,6 +113,27 @@ int ok_r3d_id_at(int x, int y);
 uint16_t *ok_r3d_frame(void);
 /* Triangles drawn since ok_r3d_begin (the DSi hardware takes about 2048). */
 int ok_r3d_triangles(void);
+/* On the DS's 3D hardware (built with OK_R3D_GL, after ok_r3d_hardware(1))
+ * the frame passed to ok_r3d_begin becomes the 2D layer drawn over the 3D,
+ * a kept frame is a recorded command list replayed each frame, and
+ * ok_r3d_depth_at/id_at answer 0. ok_r3d_retains() is 1 for both. */
+int ok_r3d_retains(void);
+/* Turns the hardware renderer on (builds with OK_R3D_GL; nothing otherwise). */
+void ok_r3d_hardware(int on);
+/* 1 once the 3D goes to the hardware: no depth or objects to read back,
+ * and the 2D layer is see-through over the 3D. */
+int ok_r3d_on_hardware(void);
+/* The 3D layer's background is see-through this frame (a sky behind it). */
+void ok_r3d_see_through(void);
+/* On the hardware: keep what was drawn since the camera was set, and draw
+ * it again under the current camera (0 if nothing is kept); forget it. */
+void ok_r3d_world_keep(void);
+int ok_r3d_world_again(void);
+void ok_r3d_world_forget(void);
+/* Shows the frame drawn on the hardware (once a frame; nothing in software). */
+void ok_r3d_swap(void);
+/* The texels behind a texture changed (the hardware keeps uploaded copies). */
+void ok_r3d_texture_changed(const uint16_t *texels);
 /* A faster 64-bit division, if the platform has one (the DS's hardware divider). */
 void ok_r3d_divider(int64_t (*divide)(int64_t n, int64_t d));
 /* Work counted since the last clear, when built with OK_R3D_STATS (zeros otherwise). */
