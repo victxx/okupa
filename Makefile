@@ -21,8 +21,15 @@ BEAR_SRC = $(BEAR)/src/hash/sha2small.c $(BEAR)/src/mac/hmac.c \
   $(BEAR)/src/codec/dec32be.c $(BEAR)/src/codec/enc32be.c $(BEAR)/src/codec/dec32le.c $(BEAR)/src/codec/enc32le.c
 BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 
-.PHONY: all test sanitize clean
-all: $(addprefix $(BUILD)/test-,$(TESTS))
+.PHONY: all test sanitize clean peer
+all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer
+
+# The host peer: sockets and entropy around the same core.
+$(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
+
+peer: $(BUILD)/okupa-peer
 
 $(BUILD)/secp/%.o: $(SECP)/src/%.c
 	@mkdir -p $(dir $@)
@@ -38,6 +45,7 @@ $(BUILD)/test-%: tests/test_%.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/
 
 test: all
 	@for t in $(TESTS); do ./$(BUILD)/test-$$t || exit 1; done
+	@sh tests/peer_loopback.sh $(BUILD)/okupa-peer
 
 sanitize:
 	$(MAKE) test BUILD=build/sanitize CFLAGS='$(SANITIZE_FLAGS)'
