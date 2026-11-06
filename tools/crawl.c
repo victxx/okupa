@@ -2,6 +2,7 @@
  * with the core's crawler; only the UDP socket and the clock live here.
  * Prints one enode:// per node found.
  *   build/okupa-crawl [seconds] [--mainnet seeds.txt]   (seeds: enode:// lines) */
+#define _POSIX_C_SOURCE 200809L /* nanosleep with -std=c99 */
 #include "okupa_discv4.h"
 #include "okupa_eth.h"
 #include "okupa_keys.h"
@@ -98,7 +99,10 @@ int main(int argc, char **argv)
     }
     while ((now = time(NULL)) - start < seconds) {
         ok_v4_crawl_step(&c, (uint32_t)now);
-        usleep(20000);
+        {
+            struct timespec pause = {0, 20000000};
+            nanosleep(&pause, NULL);
+        }
     }
     fprintf(stderr, "okupa-crawl: %ds, %d nodes known, %u bonded, %u records, %u on the network, %u sent, %u received\n",
             seconds, c.count, c.bonded, c.records, c.found_count, c.sent, c.received);
