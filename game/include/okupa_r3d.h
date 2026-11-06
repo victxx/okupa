@@ -125,6 +125,8 @@ void ok_r3d_hardware(int on);
 int ok_r3d_on_hardware(void);
 /* Triangles in the kept frame's recording (hardware), for measuring. */
 int ok_r3d_kept_triangles(void);
+/* Textures uploaded to the hardware, and how many could not be. */
+int ok_r3d_textures(int *failed);
 /* The 3D layer's background is see-through this frame (a sky behind it). */
 void ok_r3d_see_through(void);
 /* On the hardware: the 2D layer over the 3D at k/16 this frame (a fade). */

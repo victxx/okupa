@@ -383,27 +383,28 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
         }
     }
     box(-1400, 910, -1090, 1400, 990, -1020);
-    /* The round window: sky by the hour, the sun crossing it by day, the moon at night. */
+    /* The round window: sky by the hour, the sun crossing it by day, the moon at night;
+     * its layers well apart, for the hardware's coarser depth. */
     ok_r3d_push();
     ok_r3d_translate(P(0, 1250, -1095));
     ok_r3d_rotate_x(OK_TURN / 4);
     tex(OK_ROOM_FRAME, 0, RGB(22, 21, 19), 0);
     ok_r3d_disc(P(0, 0, 0), U(340), U(340), 16);
     mat(l->sky, OK_R3D_UNLIT);
-    ok_r3d_disc(P(0, 5, 0), U(280), U(280), 16);
+    ok_r3d_disc(P(0, 12, 0), U(280), U(280), 16);
     if (l->sun >= 0) {
         int sx = -230 + 460 * l->sun / 1000, sz = 60 - (l->sun - 500) * (l->sun - 500) / 2500;
         mat(RGB(31, 30, 18), OK_R3D_UNLIT);
-        ok_r3d_disc(P(sx, 8, -sz), U(70), U(70), 10);
+        ok_r3d_disc(P(sx, 20, -sz), U(70), U(70), 10);
     } else if (l->night) {
         mat(RGB(29, 29, 24), OK_R3D_UNLIT);
-        ok_r3d_disc(P(-110, 8, -90), U(70), U(70), 10);
+        ok_r3d_disc(P(-110, 20, -90), U(70), U(70), 10);
         mat(l->sky, OK_R3D_UNLIT);
-        ok_r3d_disc(P(-85, 10, -105), U(58), U(58), 10);
+        ok_r3d_disc(P(-85, 26, -105), U(58), U(58), 10);
     }
     tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), 0);
-    box(-280, 6, -22, 280, 22, 22);
-    box(-22, 6, -280, 22, 22, 280);
+    box(-280, 30, -22, 280, 46, 22);
+    box(-22, 30, -280, 22, 46, 280);
     ok_r3d_pop();
     bulbs(-1300, 960, 0, 1950, -980, 9, on, lit, &lights);
     bulbs(0, 1950, 1300, 960, -980, 9, on, lit, &lights);
@@ -1021,10 +1022,10 @@ static void outside_scene(const light *l, int on)
         tex(OK_ROOM_FRAME, 0, RGB(22, 21, 19), OK_R3D_EDGE);
         ok_r3d_disc(P(0, 0, 0), U(340), U(340), 16);
         mat(on ? RGB(31, 24, 11) : RGB(12, 16, 22), on ? OK_R3D_UNLIT : 0);
-        ok_r3d_disc(P(0, 6, 0), U(282), U(282), 16);
+        ok_r3d_disc(P(0, 14, 0), U(282), U(282), 16);
         tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), 0);
-        box(-282, 8, -22, 282, 24, 22);
-        box(-22, 8, -282, 22, 24, 282);
+        box(-282, 30, -22, 282, 46, 22);
+        box(-22, 30, -282, 22, 46, 282);
         ok_r3d_pop();
         /* The door, big and rectangular as inside, under a little porch roof, with a lantern. */
         otex(OK_OUT_DOOR, 8, RGB(8, 5, 3), OK_R3D_EDGE);

@@ -316,14 +316,14 @@ void ok_r3d_camera(ok_v3 eye, ok_v3 target, int focal_px)
      * length, a 64th of the size: a plain 90 degree frustum does the rest. */
     gl_kx = focal_px * 8;            /* focal / 128 / 64, times 65536 */
     gl_ky = focal_px * 65536 / 6144; /* focal / 96 / 64 */
-    if (gl_on) { /* the camera as the hardware's matrix: world (a 64th) to the fixed frustum */
+    if (gl_on) { /* the camera as the hardware's matrix: world (a 16th) to the fixed frustum */
         int32_t m[12], sx = focal_px * 4096 / 128, sy = focal_px * 4096 / 96;
         m[0] = (int32_t)((int64_t)cam.r.x * sx >> 12), m[1] = (int32_t)((int64_t)cam.u.x * sy >> 12), m[2] = -cam.f.x;
         m[3] = (int32_t)((int64_t)cam.r.y * sx >> 12), m[4] = (int32_t)((int64_t)cam.u.y * sy >> 12), m[5] = -cam.f.y;
         m[6] = (int32_t)((int64_t)cam.r.z * sx >> 12), m[7] = (int32_t)((int64_t)cam.u.z * sy >> 12), m[8] = -cam.f.z;
-        m[9] = (int32_t)(-((int64_t)dot(cam.r, eye) >> 6) * sx >> 12);
-        m[10] = (int32_t)(-((int64_t)dot(cam.u, eye) >> 6) * sy >> 12);
-        m[11] = (int32_t)((int64_t)dot(cam.f, eye) >> 6);
+        m[9] = (int32_t)(-((int64_t)dot(cam.r, eye) >> 4) * sx >> 12);
+        m[10] = (int32_t)(-((int64_t)dot(cam.u, eye) >> 4) * sy >> 12);
+        m[11] = (int32_t)((int64_t)dot(cam.f, eye) >> 4);
         if (gl_open) gx(FIFO_END, 0, 0, 0);
         gl_open = 0;
         gl_dirty = 1;
@@ -671,8 +671,8 @@ static void gl_tri(const vert *a, const vert *b, const vert *c)
         if (x0 > x1 || y0 > y1) return;
     }
     v[0] = a, v[1] = b, v[2] = c;
-    for (i = 0; i < 3; i++) { /* world space, a 64th: it must fit the hardware's 16 bits */
-        int32_t x = v[i]->w.x >> 6, y = v[i]->w.y >> 6, z = v[i]->w.z >> 6;
+    for (i = 0; i < 3; i++) { /* world space, a 16th (fine depth, up to 128 units): it must fit 16 bits */
+        int32_t x = v[i]->w.x >> 4, y = v[i]->w.y >> 4, z = v[i]->w.z >> 4;
         if (x > 32767 || x < -32767 || y > 32767 || y < -32767 || z > 32767 || z < -32767) return;
     }
     if (gl_dirty) gl_state();
@@ -686,7 +686,7 @@ static void gl_tri(const vert *a, const vert *b, const vert *c)
                                      : (uint32_t)(tone[k] & 0x7fff);
         /* One packet a vertex: colour, texture coordinate, position. */
         {
-            uint32_t w[5], xy = ((uint32_t)(uint16_t)(p->w.y >> 6) << 16) | (uint16_t)(p->w.x >> 6), zz = (uint32_t)(uint16_t)(p->w.z >> 6);
+            uint32_t w[5], xy = ((uint32_t)(uint16_t)(p->w.y >> 4) << 16) | (uint16_t)(p->w.x >> 4), zz = (uint32_t)(uint16_t)(p->w.z >> 4);
             int n = 0, j;
             if (textured) {
                 const gl_texe *e = &texes[gl_tex_cur];
@@ -747,7 +747,7 @@ void ok_r3d_hardware(int on)
     if (on) { /* vertices come pre-projected: one fixed frustum for good */
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
-        glFrustumf32(-64, 64, -64, 64, 64, 16384);
+        glFrustumf32(-256, 256, -256, 256, 256, 65536); /* world in 16ths: near 1 unit, far 256 */
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
     }
@@ -761,6 +761,14 @@ int ok_r3d_on_hardware(void)
 int ok_r3d_kept_triangles(void)
 {
     return gx_kept_polys;
+}
+
+int ok_r3d_textures(int *failed)
+{
+    int i, bad = 0;
+    for (i = 0; i < ntex; i++) bad += texes[i].name < 0;
+    if (failed) *failed = bad + (ntex == GL_TEXES);
+    return ntex;
 }
 
 int ok_r3d_retains(void)
@@ -836,6 +844,12 @@ int ok_r3d_on_hardware(void)
 
 int ok_r3d_kept_triangles(void)
 {
+    return 0;
+}
+
+int ok_r3d_textures(int *failed)
+{
+    if (failed) *failed = 0;
     return 0;
 }
 
