@@ -143,9 +143,10 @@ static ok_v3 cross(ok_v3 a, ok_v3 b)
 static ok_v3 norm(ok_v3 a)
 {
     uint32_t len = isqrt64((uint64_t)((int64_t)a.x * a.x + (int64_t)a.y * a.y + (int64_t)a.z * a.z));
+    int64_t inv;
     if (!len) return ok_v3_make(0, 4096, 0);
-    return ok_v3_make((ok_fx)((int64_t)a.x * 4096 / len), (ok_fx)((int64_t)a.y * 4096 / len),
-                      (ok_fx)((int64_t)a.z * 4096 / len));
+    inv = ((int64_t)1 << 30) / len; /* one division, the DSi has no fast one */
+    return ok_v3_make((ok_fx)(a.x * inv >> 18), (ok_fx)(a.y * inv >> 18), (ok_fx)(a.z * inv >> 18));
 }
 
 static ok_v3 rot(const xform *x, ok_v3 v)
@@ -314,10 +315,13 @@ static void put(int k, ok_v3 p, ok_v3 n)
     vert *v = &vb[k];
     ok_v3 d;
     ok_fx vx, vy, vz, ndl, up;
-    int64_t sx, sy;
+    int64_t sx, sy, inv;
     v->w = add(rot(&stack[sp], p), stack[sp].t);
     v->n = rot(&stack[sp], n);
-    if (stack[sp].scaled) v->n = norm(v->n);
+    if (stack[sp].scaled) { /* nearly unit already: one Newton step back to 1 */
+        ok_fx k = (3 * 4096 - dot(v->n, v->n)) / 2;
+        v->n = scale(v->n, k);
+    }
     d = sub(v->w, cam.eye);
     vx = dot(d, cam.r);
     vy = dot(d, cam.u);
@@ -325,12 +329,13 @@ static void put(int k, ok_v3 p, ok_v3 n)
     v->ok = 0;
     v->u = v->v = 0;
     if (vz < NEAR) return;
-    sx = (int64_t)W * 8 + (int64_t)vx * cam.focal * 16 / vz;
-    sy = (int64_t)H * 8 - (int64_t)vy * cam.focal * 16 / vz;
+    inv = ((int64_t)1 << 40) / vz;
+    sx = (int64_t)W * 8 + ((int64_t)vx * cam.focal * 16 * inv >> 40);
+    sy = (int64_t)H * 8 - ((int64_t)vy * cam.focal * 16 * inv >> 40);
     if (sx < -GUARD || sx > GUARD || sy < -GUARD || sy > GUARD) return;
     v->x = (int32_t)sx;
     v->y = (int32_t)sy;
-    v->z = (int32_t)(((int64_t)1 << 34) / vz);
+    v->z = (int32_t)(inv >> 6);
     ndl = dot(v->n, to_light);
     up = (v->n.y + 4096) / 2;
     v->l = (ndl > 0 ? ndl * 4 / 5 : 0) + up / 5;
@@ -359,7 +364,7 @@ static void raster(const vert *a, const vert *b, const vert *c)
     int64_t area = (int64_t)(b->x - a->x) * (c->y - a->y) - (int64_t)(b->y - a->y) * (c->x - a->x);
     int32_t minx, maxx, miny, maxy, x, y, x0, x1, y0, y1;
     int64_t dax, dbx, dcx, day, dby, dcy, wa0, wb0, wc0;
-    int64_t dzdx, dldx, dudx = 0, dvdx = 0;
+    int64_t dzdx, dldx, dudx = 0, dvdx = 0, dzdy, dldy, dudy = 0, dvdy = 0, z0, l0, u0 = 0, v0 = 0;
     int textured = cur_flags & OK_R3D_TEXTURED;
     if (area == 0) return;
     if (area > 0) {
@@ -403,10 +408,19 @@ static void raster(const vert *a, const vert *b, const vert *c)
     }
     dzdx = (dax * a->z + dbx * b->z + dcx * c->z) * 256 / area;
     dldx = (dax * a->l + dbx * b->l + dcx * c->l) * 256 / area;
+    dzdy = (day * a->z + dby * b->z + dcy * c->z) * 256 / area;
+    dldy = (day * a->l + dby * b->l + dcy * c->l) * 256 / area;
+    z0 = lerp8(wa0, wb0, wc0, a->z, b->z, c->z, area);
+    l0 = lerp8(wa0, wb0, wc0, a->l, b->l, c->l, area);
     if (textured) {
         dudx = (dax * a->u + dbx * b->u + dcx * c->u) * 256 / area;
         dvdx = (dax * a->v + dbx * b->v + dcx * c->v) * 256 / area;
+        dudy = (day * a->u + dby * b->u + dcy * c->u) * 256 / area;
+        dvdy = (day * a->v + dby * b->v + dcy * c->v) * 256 / area;
+        u0 = lerp8(wa0, wb0, wc0, a->u, b->u, c->u, area);
+        v0 = lerp8(wa0, wb0, wc0, a->v, b->v, c->v, area);
     }
+    /* Divisions above are per triangle; per row and pixel it is all adds. */
     for (y = y0; y <= y1; y++) {
         int64_t wa = wa0 + day * (y - y0), wb = wb0 + dby * (y - y0), wc = wc0 + dcy * (y - y0), z, l, u = 0, v = 0;
         uint16_t *row = fb + y * W;
@@ -415,11 +429,11 @@ static void raster(const vert *a, const vert *b, const vert *c)
         /* Skip to the first pixel inside, then step the depth and light from there. */
         for (x = x0; x <= x1 && (wa | wb | wc) < 0; x++, wa += dax, wb += dbx, wc += dcx) {}
         if (x > x1) continue;
-        z = lerp8(wa, wb, wc, a->z, b->z, c->z, area);
-        l = lerp8(wa, wb, wc, a->l, b->l, c->l, area);
+        z = z0 + dzdy * (y - y0) + dzdx * (x - x0);
+        l = l0 + dldy * (y - y0) + dldx * (x - x0);
         if (textured) {
-            u = lerp8(wa, wb, wc, a->u, b->u, c->u, area);
-            v = lerp8(wa, wb, wc, a->v, b->v, c->v, area);
+            u = u0 + dudy * (y - y0) + dudx * (x - x0);
+            v = v0 + dvdy * (y - y0) + dvdx * (x - x0);
         }
         for (; x <= x1; x++, wa += dax, wb += dbx, wc += dcx, z += dzdx, l += dldx, u += dudx, v += dvdx) {
             if ((wa | wb | wc) < 0) break;
@@ -523,13 +537,20 @@ static void grid(int rows, int slices)
 void ok_r3d_ellipsoid(ok_v3 c, ok_v3 r, int slices, int stacks)
 {
     int i, j;
-    if ((stacks + 1) * (slices + 1) > MAX_VERTS) return;
+    int64_t ix, iy, iz;
+    if ((stacks + 1) * (slices + 1) > MAX_VERTS || !r.x || !r.y || !r.z) return;
+    /* The normal leans by 1/radius on each axis; the smallest radius gets 1. */
+    {
+        ok_fx m = r.x < r.y ? (r.x < r.z ? r.x : r.z) : (r.y < r.z ? r.y : r.z);
+        ix = (int64_t)m * 4096 / r.x;
+        iy = (int64_t)m * 4096 / r.y;
+        iz = (int64_t)m * 4096 / r.z;
+    }
     for (i = 0; i <= stacks; i++)
         for (j = 0; j <= slices; j++) {
             ok_v3 s = sphere_at(i, stacks, j, slices);
             ok_v3 p = add(c, ok_v3_make(ok_fx_mul(s.x, r.x), ok_fx_mul(s.y, r.y), ok_fx_mul(s.z, r.z)));
-            ok_v3 n = norm(ok_v3_make((ok_fx)((int64_t)s.x * 4096 / r.x), (ok_fx)((int64_t)s.y * 4096 / r.y),
-                                      (ok_fx)((int64_t)s.z * 4096 / r.z)));
+            ok_v3 n = norm(ok_v3_make((ok_fx)(s.x * ix >> 12), (ok_fx)(s.y * iy >> 12), (ok_fx)(s.z * iz >> 12)));
             put(i * (slices + 1) + j, p, n);
             set_uv(i * (slices + 1) + j, i, stacks, j, slices);
         }
