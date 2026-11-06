@@ -10,6 +10,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@arkiv-network/sdk": "1.0.1",
     "@noble/ciphers": "2.4.0",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
