@@ -58,7 +58,8 @@ void ok_r3d_texture(const uint16_t *texels, int stride);
 void ok_r3d_uv(int x, int y, int w, int h);
 /* With texels_per_unit > 0, boxes, quads and cylinder sides tile the
  * rectangle (both sides powers of two) across their faces instead of
- * stretching it; discs always show it once. 0 turns tiling off. */
+ * stretching it (discs and caps lie flat, like a lawn); untiled, a disc
+ * shows its rectangle once. 0 turns tiling off. */
 void ok_r3d_tile(int texels_per_unit);
 
 /* The model transform, a small stack. */

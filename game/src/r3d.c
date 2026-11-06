@@ -659,10 +659,12 @@ void ok_r3d_cone(ok_v3 base, ok_fx radius, ok_fx top, ok_fx height, int slices)
         put(j, p, ok_v3_make(0, 4096, 0));
         vb[j].u = (n.x + 4096) * uv_w * 8 / 4096;
         vb[j].v = (n.z + 4096) * uv_h * 8 / 4096;
+        if (tile) planar(j, p, 1);
     }
     put(k, add(base, ok_v3_make(0, height, 0)), ok_v3_make(0, 4096, 0));
     vb[k].u = uv_w * 8;
     vb[k].v = uv_h * 8;
+    if (tile) planar(k, add(base, ok_v3_make(0, height, 0)), 1);
     for (j = 0; j < slices; j++) tri(k, j, j + 1);
 }
 
@@ -731,13 +733,15 @@ void ok_r3d_disc(ok_v3 c, ok_fx rx, ok_fx rz, int slices)
     ok_v3 up = ok_v3_make(0, 4096, 0);
     if (slices + 2 > MAX_VERTS) return;
     put(slices + 1, c, up);
-    vb[slices + 1].u = uv_w * 8; /* a textured disc shows its rectangle once, like a rug */
+    vb[slices + 1].u = uv_w * 8; /* a textured disc shows its rectangle once, like a rug, */
     vb[slices + 1].v = uv_h * 8;
+    if (tile) planar(slices + 1, c, 1); /* or, tiling, lies flat across it like a lawn */
     for (j = 0; j <= slices; j++) {
         ok_fx cs = ok_r3d_cos(j * OK_TURN / slices), sn = ok_r3d_sin(j * OK_TURN / slices);
         put(j, add(c, ok_v3_make(ok_fx_mul(cs, rx), 0, ok_fx_mul(sn, rz))), up);
         vb[j].u = (cs + 4096) * uv_w * 8 / 4096;
         vb[j].v = (sn + 4096) * uv_h * 8 / 4096;
+        if (tile) planar(j, add(c, ok_v3_make(ok_fx_mul(cs, rx), 0, ok_fx_mul(sn, rz))), 1);
     }
     for (j = 0; j < slices; j++) tri(slices + 1, j, j + 1);
 }

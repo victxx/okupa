@@ -16,6 +16,11 @@ enum { OK_ROOM_PLANKS, OK_ROOM_PLASTER, OK_ROOM_BRICK, OK_ROOM_BEAM, OK_ROOM_RUG
        OK_ROOM_CRATE, OK_ROOM_KNIT, OK_ROOM_COTTON, OK_ROOM_LEAVES, OK_ROOM_TIN, OK_ROOM_WALLPAPER, OK_ROOM_CLAY,
        OK_ROOM_FRAME, OK_ROOM_BOARDS };
 extern const uint16_t ok_room_skin[128 * 128];
+/* The outside's 16 textures, the same way (game/src/outside_skin.c). */
+enum { OK_OUT_TILES, OK_OUT_MOSS_TILES, OK_OUT_GRASS, OK_OUT_FLOWERS, OK_OUT_EARTH, OK_OUT_COBBLE, OK_OUT_STUCCO,
+       OK_OUT_SIDING, OK_OUT_DOOR, OK_OUT_BARK, OK_OUT_LEAVES, OK_OUT_DECK, OK_OUT_STONE, OK_OUT_BRICK, OK_OUT_IVY,
+       OK_OUT_CLOUD };
+extern const uint16_t ok_outside_skin[128 * 128];
 
 /* Where the okupa lives, wanders and sleeps. */
 void ok_house_room(ok_monkey_room *room);
