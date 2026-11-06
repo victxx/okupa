@@ -31,6 +31,21 @@ ok_result ok_v4_decode(const uint8_t *in, size_t n, ok_v4_packet *p)
     return OK_OK;
 }
 
+ok_result ok_v4_decode_light(const uint8_t *in, size_t n, ok_v4_packet *p)
+{
+    uint8_t digest[32];
+    size_t used;
+    if (!in || !p) return OK_ARGUMENT;
+    if (n < HEAD + 2 || n > OK_V4_MAX) return OK_FORMAT;
+    ok_keccak256(in + 32, n - 32, digest);
+    if (memcmp(digest, in, 32)) return OK_FORMAT;
+    memset(p->sender, 0, 64);
+    memcpy(p->hash, in, 32);
+    p->type = in[HEAD];
+    if (ok_rlp_item_at(in + HEAD + 1, n - HEAD - 1, &p->data, &used) != OK_OK || !p->data.list) return OK_FORMAT;
+    return OK_OK;
+}
+
 /* Signs type || data in place: out = hash || sig || type || data. */
 static ok_result seal(const uint8_t priv[32], uint8_t *out, size_t len, uint8_t hash[32])
 {
@@ -191,5 +206,160 @@ ok_result ok_v4_enrresponse_read(const ok_v4_packet *p, uint8_t request_hash[32]
             }
         }
         return ok_enr_parse(start - header, record.len + header, enr);
+    }
+}
+
+const char *const ok_sepolia_bootnodes[] = {
+    "enr:-KG4QHn1Os72NN5Z44Ehf9CHPmN490GBphTFirfk33pFuWnkY9UNrQMfHkuCw6a-ykeRhGKrPL5ppMXiZQchgPrCDJQBgmlkgnY0gmlwhNRj2kKDaXA2kCoAHKALAA0CAAAAAAAAAF6Jc2VjcDI1NmsxoQJK_ye9jx9mela-ME_Kt5e017Ywv3hYH_5rwNhIUrtzNoN1ZHCCTriEdWRwNoJOuA",
+    "enr:-KG4QCpiRltiyX7LgozCkQ8XBrcDzejBXbE7YRUQFmIEgv46SC8B4CJLcOO3O2bH-_u-B242GTzO_hQPhv3rpyvAHXMBgmlkgnY0gmlwhIHUpj2DaXA2kCYEqIAABAHQAAAAA2GdUACJc2VjcDI1NmsxoQNmVWXve5c0uvsn_agjTKQ8pR6gl9DynZyTQNruBDfJ4YN1ZHCCdsOEdWRwNoJ2ww",
+    "enr:-KG4QJUWvc8qvCUr7x-qCFWee6HPLgmRUfVn-M_yqXD-sjSoAalKCV3NgUhmlqozjTJIj_nPr7J_uT8WJwbWiIx3Cv4BgmlkgnY0gmlwhJB-_BiDaXA2kCQAYYABAADQAAAAAYEgYAGJc2VjcDI1NmsxoQKOQetrA-97TELUzuGegVD1_cHKKNnjOmJ9CYdeSTor7YN1ZHCCdsOEdWRwNoJ2ww",
+    "enr:-KG4QIBsIiST0JBBvgSNxvHQOeH5PkRgWeufahVXYQQWj7GLYPFDsviuQ6qU-3Xx4qnARaZiI-qqVRyw_2qqmOKRY1UBgmlkgnY0gmlwhLKc14yDaXA2kCoBBP8A9DxKAAAAAAAAAAGJc2VjcDI1NmsxoQKx4n3wy0KtwnuZCHmlxMmc4b0VvfC4Ka_f3sUPvjUq1oN1ZHCCdsOEdWRwNoJ2ww",
+    "enr:-KG4QPM5C6wuTxu5yk4jkI9Mm64iSUKMPNt8y8kmoFzOlYrnYV4SBeZK7UiS4YWrkX4y2FD9_eH7xiPGvLQ-nXoXIcYBgmlkgnY0gmlwhAXfXlGDaXA2kCoBBP8C8BytAAAAAAAAAAGJc2VjcDI1NmsxoQIC3FMD8Si9DIBVofsSbJkpvXTUAfyi8q66XXQgjRhUsIN1ZHCCdsOEdWRwNoJ2ww",
+};
+const int ok_sepolia_bootnode_count = sizeof ok_sepolia_bootnodes / sizeof ok_sepolia_bootnodes[0];
+
+enum { NEW, PINGED, BONDED, ASKED, DONE };
+#define EXPIRY 60 /* seconds; generous, as console clocks are often off by a bit */
+
+void ok_v4_crawl_init(ok_v4_crawl *c, const uint8_t priv[32], const uint8_t want_fork[4], uint32_t seed)
+{
+    void *ctx = c->ctx;
+    int (*send)(void *, const ok_v4_endpoint *, const uint8_t *, size_t) = c->send;
+    int (*recv)(void *, uint8_t *, size_t, ok_v4_endpoint *) = c->recv;
+    void (*found)(void *, const ok_enr *) = c->found;
+    memset(c, 0, sizeof *c);
+    c->ctx = ctx;
+    c->send = send;
+    c->recv = recv;
+    c->found = found;
+    memcpy(c->priv, priv, 32);
+    memcpy(c->want_fork, want_fork, 4);
+    c->rng = seed ? seed : 0x6f6b7061u;
+}
+
+static ok_v4_entry *add(ok_v4_crawl *c, const uint8_t id[64], const ok_v4_endpoint *at)
+{
+    int i;
+    for (i = 0; i < c->count; i++)
+        if (!memcmp(c->table[i].id, id, 64)) return NULL;
+    if (c->count >= OK_V4_TABLE || !at->udp) return NULL;
+    memset(&c->table[c->count], 0, sizeof c->table[0]);
+    memcpy(c->table[c->count].id, id, 64);
+    c->table[c->count].at = *at;
+    return &c->table[c->count++];
+}
+
+ok_result ok_v4_crawl_add_enr(ok_v4_crawl *c, const char *text)
+{
+    ok_enr e;
+    ok_v4_endpoint at;
+    ok_result r = ok_enr_parse_text(text, strlen(text), &e);
+    if (r != OK_OK) return r;
+    if (!e.has_ip || !e.udp) return OK_FORMAT;
+    memcpy(at.ip, e.ip, 4);
+    at.udp = e.udp;
+    at.tcp = e.tcp;
+    add(c, e.pub, &at);
+    return OK_OK;
+}
+
+static ok_v4_entry *by_address(ok_v4_crawl *c, const ok_v4_endpoint *from)
+{
+    int i;
+    for (i = 0; i < c->count; i++)
+        if (!memcmp(c->table[i].at.ip, from->ip, 4) && c->table[i].at.udp == from->udp) return &c->table[i];
+    return NULL;
+}
+
+static uint32_t next_random(ok_v4_crawl *c)
+{
+    c->rng ^= c->rng << 13;
+    c->rng ^= c->rng >> 17;
+    c->rng ^= c->rng << 5;
+    return c->rng;
+}
+
+static void handle(ok_v4_crawl *c, const uint8_t *buf, size_t n, const ok_v4_endpoint *from, uint32_t now)
+{
+    static uint8_t out[OK_V4_MAX];
+    ok_v4_packet p;
+    ok_v4_entry *e;
+    size_t len, pos = 0;
+    if (ok_v4_decode_light(buf, n, &p) != OK_OK) return;
+    c->received++;
+    e = by_address(c, from);
+    if (p.type == OK_V4_PING) {
+        /* Answering is how they learn we are a real node. */
+        if (ok_v4_pong(c->priv, from, p.hash, now + EXPIRY, out, sizeof out, &len) == OK_OK) {
+            c->send(c->ctx, from, out, len);
+            c->sent++;
+        }
+        if (e && e->state < BONDED) {
+            e->state = BONDED;
+            e->last = now;
+            c->bonded++;
+        }
+    } else if (p.type == OK_V4_PONG) {
+        if (e && e->state < BONDED) {
+            e->state = BONDED;
+            e->last = now;
+            c->bonded++;
+        }
+    } else if (p.type == OK_V4_NEIGHBORS) {
+        ok_v4_node node;
+        while (ok_v4_neighbors_next(&p, &pos, &node) == OK_OK) add(c, node.id, &node.at);
+    } else if (p.type == OK_V4_ENRRESPONSE && e && e->state == ASKED) {
+        uint8_t request[32];
+        ok_enr enr;
+        if (ok_v4_enrresponse_read(&p, request, &enr) != OK_OK || memcmp(request, e->enr_request, 32)) return;
+        e->state = DONE;
+        c->records++;
+        /* The record is self-signed: only trust it if it is the node we asked. */
+        if (memcmp(enr.pub, e->id, 64) || !enr.has_eth || memcmp(enr.fork_hash, c->want_fork, 4) || !enr.has_ip ||
+            !enr.tcp)
+            return;
+        c->found_count++;
+        c->found(c->ctx, &enr);
+    }
+}
+
+void ok_v4_crawl_step(ok_v4_crawl *c, uint32_t now)
+{
+    static uint8_t buf[OK_V4_MAX];
+    ok_v4_endpoint from, self;
+    int i, budget = 8;
+    for (i = 0; i < 32; i++) {
+        int n = c->recv(c->ctx, buf, sizeof buf, &from);
+        if (n <= 0) break;
+        handle(c, buf, (size_t)n, &from, now);
+    }
+    memset(&self, 0, sizeof self);
+    for (i = 0; i < c->count && budget > 0; i++) {
+        ok_v4_entry *e = &c->table[c->cursor];
+        size_t len;
+        c->cursor = (c->cursor + 1) % c->count;
+        if (e->state == NEW || (e->state == PINGED && now - e->last >= 3 && e->tries < 2)) {
+            if (ok_v4_ping(c->priv, &self, &e->at, now + EXPIRY, buf, sizeof buf, &len, NULL) != OK_OK) continue;
+            c->send(c->ctx, &e->at, buf, len);
+            e->state = PINGED;
+            e->tries++;
+            e->last = now;
+            budget--;
+            c->sent++;
+        } else if (e->state == BONDED && now - e->last >= 1) {
+            uint8_t target[64];
+            int k;
+            for (k = 0; k < 64; k += 4) {
+                uint32_t r = next_random(c);
+                memcpy(target + k, &r, 4);
+            }
+            if (ok_v4_findnode(c->priv, target, now + EXPIRY, buf, sizeof buf, &len) == OK_OK) c->send(c->ctx, &e->at, buf, len);
+            if (ok_v4_enrrequest(c->priv, now + EXPIRY, buf, sizeof buf, &len, e->enr_request) == OK_OK)
+                c->send(c->ctx, &e->at, buf, len);
+            e->state = ASKED;
+            e->last = now;
+            budget -= 2;
+            c->sent += 2;
+        }
     }
 }
