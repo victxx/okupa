@@ -12,7 +12,11 @@
 #define OK_UI_H 192
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
-       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING };
+       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING,
+       /* Buttons the platform may act on (the okupa has already said a hint):
+        * look through the camera, listen through the microphone, a game
+        * (it guesses the sketchbook's drawing), its letters, a friend. */
+       OK_UI_PHOTO, OK_UI_TALK, OK_UI_GAMES, OK_UI_MAIL, OK_UI_FRIEND };
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
 #define OK_UI_WALL 6 /* framed drawings, each hung only once seen in a block */
@@ -45,7 +49,8 @@ typedef struct {
     ok_monkey_anim anim;
     ok_look look;
     int ready, happy_ticks;
-    int pressed, pressed_ticks; /* the button just tapped (1..8, 100 = Wear), for its pressed look */
+    int pressed, pressed_ticks; /* the button just tapped (1..12, 100 Wear, 101 Out, 102.. a tab), for its pressed look */
+    int page;                   /* the home screen's menu: 0 care, 1 more */
     int sound;                  /* a sound to play, OK_SFX_* + 1; the platform plays it and clears it */
     int heard_bites, heard_move;
     uint32_t intro_t;           /* ticks into the splash or the opening film */

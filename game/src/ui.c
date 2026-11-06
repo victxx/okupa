@@ -144,22 +144,6 @@ static void icons_ready(void)
 }
 
 /* The four needs along the bottom: an icon and a bar each, on glass. */
-static void needs(frame f, const ok_pet *p)
-{
-    static const int icon[OK_NEEDS] = {OK_ICON_FEED, OK_ICON_SLEEP, OK_ICON_PLAY, OK_ICON_PET};
-    int i;
-    for (i = 0; i < OK_NEEDS; i++) {
-        int x = 5 + i * 62, y = 173, v = p->need[i] * 34 / OK_NEED_MAX;
-        uint16_t c = p->need[i] < 35 ? RGB(30, 9, 7) : p->need[i] < 65 ? RGB(30, 23, 6) : RGB(10, 25, 12);
-        glass(f, x, y, 60, 16);
-        ok_icons_draw(icon[i], f, x + 10, y + 8, 16);
-        rect(f, x + 21, y + 6, 36, 5, RGB(3, 3, 4));
-        rect(f, x + 22, y + 7, v, 3, c);
-        rect(f, x + 22, y + 7, v, 1, RGB(31, 31, 28)); /* a glint along the top */
-        rect(f, x + 22, y + 7, v, 1, c | RGB(8, 8, 8));
-    }
-}
-
 static void clock_pill(frame f, const uint8_t (*font)[8], int hour, int minute)
 {
     static const char *const sun[] = {"...y...", ".y.y.y.", "..yyy..", "yyyYyyy", "..yyy..", ".y.y.y.", "...y..."};
@@ -322,7 +306,6 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
     }
     ok_house_draw(f, hour, minute, p->asleep, NULL, &u->look, skin, &u->anim, &face); /* frames fill as drawings are sent */
     clock_pill(f, font, hour, minute);
-    needs(f, p);
     /* One bubble at a time: answering, a question, something just said, a thought, then its mood. */
     if (u->listening) listening(f, font, u, face.top_x, face.top_y);
     else if (u->ask_ticks) bubble_as(f, font, u->ask, face.top_x, face.top_y, ASK, u->ticks);
@@ -346,16 +329,26 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
 
 /* --------------------------------------------------------- bottom screen */
 
-/* Buttons: four columns, two rows. */
-enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_PHOTO, B_MAIL, B_DEV, BUTTONS };
-static const char *labels[BUTTONS] = {"Feed", "Play", "Pet", "Sleep", "Draw", "Photo", "Mail", "Dev"};
-static const int soon[BUTTONS] = {0, 0, 0, 0, 0, 1, 1, 0};
+/* Buttons: two menus of four columns and two rows, picked by two tabs. The
+ * care buttons fill like a glass with how full that need is. */
+enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_PHOTO, B_TALK, B_GAMES, B_MAIL, B_FRIEND, B_DREAM, B_DEV, BUTTONS };
+static const char *labels[BUTTONS] = {"Feed", "Play", "Pet", "Sleep", "Draw", "Photo",
+                                      "Talk", "Games", "Mail", "Friend", "Dream", "Dev"};
+static const int soon[BUTTONS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0};
 static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(31, 20, 21), RGB(20, 19, 30),
-                                         RGB(30, 24, 16), RGB(24, 24, 24), RGB(24, 24, 24), RGB(21, 27, 22)};
-#define BX(i) (8 + ((i) % 4) * 62)
-#define BY(i) (36 + ((i) / 4) * 66)
+                                         RGB(30, 24, 16), RGB(22, 26, 30), RGB(29, 22, 28), RGB(24, 29, 18),
+                                         RGB(30, 27, 20), RGB(24, 24, 24), RGB(22, 22, 31), RGB(21, 27, 22)};
+#define PER_PAGE 8
+#define BX(s) (8 + ((s) % 4) * 62)
+#define BY(s) (34 + ((s) / 4) * 58)
 #define BW 54
-#define BH 58
+#define BH 52
+/* The two tabs under the buttons. */
+#define TABS 2
+#define TAB_X(i) (64 + (i) * 66)
+#define TAB_Y 150
+#define TAB_W 62
+#define TAB_H 20
 /* Out to the terrace and back, beside the closet. */
 #define OUT_X 140
 #define OUT_Y 8
@@ -369,15 +362,25 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 
 static void button(frame f, const uint8_t (*font)[8], int i, const char *label, int pressed, const ok_pet *p)
 {
-    static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY, OK_ICON_PET, OK_ICON_SLEEP,
-                                      OK_ICON_DRAW, OK_ICON_PHOTO, OK_ICON_MAIL, OK_ICON_DEV};
-    int x = BX(i), y = BY(i) + (pressed ? 2 : 0);
+    static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY, OK_ICON_PET, OK_ICON_SLEEP, OK_ICON_DRAW, OK_ICON_PHOTO,
+                                      OK_ICON_TALK, OK_ICON_GAMES, OK_ICON_MAIL, OK_ICON_FRIEND, OK_ICON_DREAM, OK_ICON_DEV};
+    static const int need[4] = {OK_NEED_HUNGER, OK_NEED_FUN, OK_NEED_LOVE, OK_NEED_ENERGY};
+    int s = i % PER_PAGE, x = BX(s), y = BY(s) + (pressed ? 2 : 0);
     uint16_t card = soon[i] ? RGB(19, 18, 17) : PAPER;
-    if (!pressed) round_box(f, x, BY(i) + 3, BW, BH, 6, RGB(3, 3, 3)); /* shadow */
+    if (!pressed) round_box(f, x, BY(s) + 3, BW, BH, 6, RGB(3, 3, 3)); /* shadow */
     round_box(f, x, y, BW, BH, 6, pressed ? half(card) + (uint16_t)RGB(6, 6, 6) - 0x8000u : card);
-    round_box(f, x + 3, y + 3, BW - 6, 34, 5, soon[i] ? RGB(16, 15, 15) : accent[i]);
-    ok_icons_draw(i == B_SLEEP && p->asleep ? OK_ICON_WAKE : icon[i], f, x + BW / 2, y + 20 - (pressed ? 0 : 1), 32);
-    centred(f, font, x + BW / 2, y + 44, label, soon[i] ? RGB(11, 10, 10) : INK, 2);
+    if (i < 4) { /* the need, as a level inside the icon's box: red when low */
+        int v = p->need[need[i]], h = (v * 30 + OK_NEED_MAX / 2) / OK_NEED_MAX;
+        uint16_t c = v < 35 ? RGB(31, 13, 10) : accent[i];
+        h = h < 0 ? 0 : h > 30 ? 30 : h;
+        round_box(f, x + 3, y + 3, BW - 6, 30, 5, half(half(accent[i])) + (uint16_t)RGB(5, 5, 5) - 0x8000u);
+        if (h) round_box(f, x + 3, y + 33 - h, BW - 6, h, h < 10 ? h / 2 : 5, c);
+        if (h > 2 && h < 29) rect(f, x + 7, y + 33 - h, BW - 14, 1, c | RGB(10, 10, 10)); /* its surface */
+    } else {
+        round_box(f, x + 3, y + 3, BW - 6, 30, 5, soon[i] ? RGB(16, 15, 15) : accent[i]);
+    }
+    ok_icons_draw(i == B_SLEEP && p->asleep ? OK_ICON_WAKE : icon[i], f, x + BW / 2, y + 18 - (pressed ? 0 : 1), 32);
+    centred(f, font, x + BW / 2, y + 39, label, soon[i] ? RGB(11, 10, 10) : INK, 2);
     if (soon[i]) {
         round_box(f, x + BW - 30, y - 4, 32, 11, 4, RGB(29, 11, 8));
         centred(f, font, x + BW - 14, y - 2, "soon", PAPER, 1);
@@ -405,7 +408,20 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, cons
     text(f, font, 10, 11, "OKUPA", RGB(31, 26, 3), 2);
     mood_chip(f, font, p, 62, 9);
     for (i = 0; i < BUTTONS; i++)
-        button(f, font, i, i == B_SLEEP && p->asleep ? "Wake" : labels[i], u->pressed == i + 1 && u->pressed_ticks > 0, p);
+        if (i / PER_PAGE == u->page)
+            button(f, font, i, i == B_SLEEP && p->asleep ? "Wake" : labels[i], u->pressed == i + 1 && u->pressed_ticks > 0, p);
+    if (u->page == 1) { /* the rest of the second menu: what the console's buttons do */
+        round_box(f, 8, BY(4), 240, BH, 6, RGB(13, 12, 12));
+        centred(f, font, 128, BY(4) + 9, "Hold L: talk to me", RGB(27, 26, 24), 1);
+        centred(f, font, 128, BY(4) + 22, "R: I take a look through the camera", RGB(27, 26, 24), 1);
+        centred(f, font, 128, BY(4) + 35, "X: I guess what you drew", RGB(27, 26, 24), 1);
+    }
+    for (i = 0; i < TABS; i++) {
+        int on = u->page == i, down = u->pressed == 102 + i && u->pressed_ticks;
+        round_box(f, TAB_X(i), TAB_Y + (down ? 1 : 0), TAB_W, TAB_H, 7, on ? RGB(31, 26, 3) : RGB(14, 13, 12));
+        centred(f, font, TAB_X(i) + TAB_W / 2, TAB_Y + 7 + (down ? 1 : 0), i ? "More" : "Care",
+                on ? INK : RGB(24, 23, 21), 2);
+    }
     round_box(f, CLOSET_X, CLOSET_Y + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), CLOSET_W, CLOSET_H, 7,
               u->pressed == 100 && u->pressed_ticks ? RGB(22, 20, 12) : RGB(31, 26, 3));
     ok_icons_draw(OK_ICON_WEAR, f, CLOSET_X + 13, CLOSET_Y + 10, 16);
@@ -630,14 +646,16 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         /* The bottom screen only when it may have changed, or ten times a
          * second: redrawing it every frame costs the DS a lot. */
         static const uint16_t *last_buf;
-        static int last_scene = -1, last_pressed;
+        static int last_scene = -1, last_pressed, last_page;
         static uint32_t last_tick;
-        int draw = bottom != last_buf || u->scene != last_scene || u->pressed != last_pressed || u->pressed_ticks ||
+        int draw = bottom != last_buf || u->scene != last_scene || u->pressed != last_pressed || u->page != last_page ||
+                   u->pressed_ticks ||
                    u->scene == OK_UI_SKETCH || u->scene == OK_UI_WALLET || u->ticks - last_tick >= 6 || u->ticks < last_tick;
         if (draw) {
             last_buf = bottom;
             last_scene = u->scene;
             last_pressed = u->pressed;
+            last_page = u->page;
             last_tick = u->ticks;
             rect(bottom, 0, 0, OK_UI_W, OK_UI_H, RGB(8, 7, 7));
             for (y = 4; y < OK_UI_H; y += 8)
@@ -1083,17 +1101,32 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         u->pressed_ticks = 8;
         return OK_UI_CHANGED;
     }
+    for (i = 0; i < TABS; i++) {
+        if (!inside(x, y, TAB_X(i), TAB_Y, TAB_W, TAB_H)) continue;
+        u->page = i;
+        u->pressed = 102 + i;
+        u->pressed_ticks = 8;
+        u->sound = 1 + OK_SFX_POP;
+        return OK_UI_CHANGED;
+    }
     for (i = 0; i < BUTTONS; i++) {
         int action, ok;
-        if (!inside(x, y, BX(i), BY(i), BW, BH)) continue;
+        if (i / PER_PAGE != u->page || !inside(x, y, BX(i % PER_PAGE), BY(i % PER_PAGE), BW, BH)) continue;
         u->pressed = i + 1;
         u->pressed_ticks = 8;
         u->sound = 1 + OK_SFX_TAP;
         switch (i) {
         case B_DRAW: u->scene = OK_UI_SKETCH; u->eraser = 0; return OK_UI_CHANGED;
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
-        case B_PHOTO: say(u, "A camera? Soon, I promise."); return OK_UI_CHANGED;
-        case B_MAIL: say(u, "No letters yet. Friends are coming."); return OK_UI_CHANGED;
+        case B_PHOTO: say(u, "Press R and I'll take a look!"); return OK_UI_PHOTO;
+        case B_TALK: say(u, "Hold L and tell me something!"); return OK_UI_TALK;
+        case B_GAMES: say(u, "Draw me something, then press X: I'll guess it!"); return OK_UI_GAMES;
+        case B_MAIL: say(u, "No letters yet. I'll write you one."); return OK_UI_MAIL;
+        case B_FRIEND: say(u, "A friend? Soon, I promise."); return OK_UI_FRIEND;
+        case B_DREAM:
+            if (u->dream_w) u->dream_ticks = 1200;
+            else say(u, "No dreams yet. Let me sleep on it!");
+            return OK_UI_CHANGED;
         }
         action = i == B_FEED ? OK_DO_FEED : i == B_PLAY ? OK_DO_PLAY : i == B_PET ? OK_DO_PET
                  : p->asleep ? OK_DO_WAKE : OK_DO_SLEEP;

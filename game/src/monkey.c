@@ -1114,8 +1114,12 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
             solid(INK3);
             ok_r3d_ellipsoid(P(x, y - 6, 197 + hz), P(34, 46, 24), 6, 4); /* sunk in, so it never stands out in profile */
             ok_r3d_material(WHITE, ++next_id, OK_R3D_UNLIT);
-            ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 218), P(11, 12, 4), 4, 3);
-            ok_r3d_ellipsoid(P(x + 9, y - 20, 216 + hz), P(5, 5, 3), 4, 2); /* a second, small glint */
+            if (hz) { /* on the hardware a glint smaller than a pixel is dropped: one bigger, coarser */
+                ok_r3d_ellipsoid(P(x - 9, y + 10 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 234 + hz), P(17, 18, 4), 4, 2);
+            } else {
+                ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 218), P(11, 12, 4), 4, 3);
+                ok_r3d_ellipsoid(P(x + 9, y - 20, 216), P(5, 5, 3), 4, 2); /* a second, small glint */
+            }
             if (f->eyes == 'h') { /* heavy lids */
                 part(skin, OK_PART_HEAD, f->head_id);
                 ok_r3d_ellipsoid(P(x, y + 22, 210 + hz), P(36, 26, 24), 6, 3);

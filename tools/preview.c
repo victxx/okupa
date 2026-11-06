@@ -146,8 +146,12 @@ int main(int argc, char **argv)
     ok_ui_touch(&u, &p, 159, 60, 0, t); /* Pet */
     shot(dir, "home-petted", &u, &p, 10);
     p.need[OK_NEED_HUNGER] = 20;
+    p.need[OK_NEED_ENERGY] = 55;
     u.say = NULL;
     shot(dir, "home-hungry-evening", &u, &p, 19);
+    u.page = 1; /* the second menu */
+    shot(dir, "home-more", &u, &p, 19);
+    u.page = 0;
     p.asleep = 1;
     u.ready = 0;
     shot(dir, "home-asleep-night", &u, &p, 23);

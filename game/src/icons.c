@@ -283,12 +283,75 @@ static void note(void)
     ok_r3d_pop();
 }
 
+static void microphone(void)
+{
+    ok_r3d_rotate_z(DEG(-18));
+    ok_r3d_rotate_x(DEG(12));
+    mat(RGB(9, 9, 11));
+    ok_r3d_capsule(P(0, 10, 0), P(0, -84, 0), U(17), 6);
+    mat(RGB(21, 22, 25));
+    gem(0, 44, 0, 42, 48, 42, 10, 6);
+    mat(RGB(8, 8, 10)); /* the grille */
+    gem(-16, 54, 38, 6, 6, 4, 4, 2);
+    gem(14, 54, 38, 6, 6, 4, 4, 2);
+    gem(0, 34, 42, 6, 6, 4, 4, 2);
+    mat(RGB(29, 8, 7));
+    gem(0, -26, 17, 6, 6, 4, 4, 2);
+}
+
+static void dice(void)
+{
+    ok_r3d_rotate_y(DEG(-32));
+    ok_r3d_rotate_x(DEG(24));
+    mat(RGB(31, 30, 27));
+    ok_r3d_box(P(-62, -62, -62), P(62, 62, 62));
+    mat(RGB(29, 6, 8));
+    gem(0, 0, 64, 15, 15, 4, 6, 3);
+    mat(RGB(6, 5, 5));
+    gem(-30, 64, -30, 12, 4, 12, 6, 3);
+    gem(30, 64, 30, 12, 4, 12, 6, 3);
+    gem(-64, 30, -30, 4, 12, 12, 6, 3);
+    gem(-64, 0, 0, 4, 12, 12, 6, 3);
+    gem(-64, -30, 30, 4, 12, 12, 6, 3);
+}
+
+static void friends(void)
+{
+    ok_r3d_rotate_x(DEG(10));
+    mat(RGB(14, 20, 30));
+    gem(44, 10, -24, 44, 44, 40, 10, 6);
+    mat(RGB(28, 17, 7));
+    gem(-36, -8, 10, 48, 48, 42, 10, 6);
+    mat(RGB(5, 4, 4)); /* their eyes */
+    gem(-52, 0, 50, 6, 9, 3, 4, 2);
+    gem(-22, 0, 50, 6, 9, 3, 4, 2);
+    gem(34, 20, 15, 5, 8, 3, 4, 2);
+    gem(60, 20, 13, 5, 8, 3, 4, 2);
+    mat(RGB(31, 18, 20));
+    gem(-62, -18, 44, 7, 5, 3, 4, 2);
+    gem(-10, -18, 46, 7, 5, 3, 4, 2);
+}
+
+static void dream_cloud(void)
+{
+    ok_r3d_rotate_x(DEG(10));
+    mat(RGB(27, 26, 31));
+    gem(0, -26, 0, 80, 26, 30, 8, 4);
+    gem(-44, -8, 0, 38, 34, 30, 8, 5);
+    gem(6, 14, 0, 46, 44, 34, 8, 5);
+    gem(52, -10, 0, 34, 30, 28, 8, 5);
+    mat(RGB(31, 26, 6));
+    gem(58, 64, 14, 15, 15, 8, 5, 3);
+    gem(-60, 58, 10, 9, 9, 6, 4, 2);
+}
+
 /* ------------------------------------------------------------ the sheet */
 
 void ok_icons_build(void)
 {
     static void (*const model[OK_ICONS])(void) = {banana, beach_ball, heart, moon, sun, pencil,
-                                                  camera, envelope, gear, shirt, house, note};
+                                                  camera, envelope, gear, shirt, house, note,
+                                                  microphone, dice, friends, dream_cloud};
     static int built;
     int i, x, y, k, pass;
     if (built) return; /* once: the platform may build them early */

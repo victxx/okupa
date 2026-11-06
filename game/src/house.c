@@ -271,7 +271,7 @@ static void framed_at(int slot, const uint8_t *pixels, int fx, int fy, int fz, i
     tex(OK_ROOM_BEAM, 8, woods[wood], OK_R3D_EDGE); /* the frame */
     box(-h, -h, 0, h, h, 26);
     mat(RGB(29, 27, 23), 0); /* the mount */
-    ok_r3d_quad(P(-m, -m, 28), P(m, -m, 28), P(m, m, 28), P(-m, m, 28));
+    ok_r3d_quad(P(-m, -m, 36), P(m, -m, 36), P(m, m, 36), P(-m, m, 36)); /* layers well apart: the hardware's depth is coarse */
     if (pixels) {
         ok_r3d_flatten(0);
         ok_r3d_texture(art[slot], 64);
@@ -281,7 +281,7 @@ static void framed_at(int slot, const uint8_t *pixels, int fx, int fy, int fz, i
     } else {
         mat(RGB(25, 23, 19), 0); /* empty: a bare, slightly shadowed backing */
     }
-    ok_r3d_quad(P(-d, -d, 30), P(d, -d, 30), P(d, d, 30), P(-d, d, 30));
+    ok_r3d_quad(P(-d, -d, 46), P(d, -d, 46), P(d, d, 46), P(-d, d, 46));
     if (!lean) {
         limb_house(0, h, 2, -h / 2, h + h / 2, -6, 4); /* the string and the nail */
         limb_house(0, h, 2, h / 2, h + h / 2, -6, 4);
