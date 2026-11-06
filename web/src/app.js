@@ -14,6 +14,7 @@ import * as arkiv from './arkiv.js';
 import { clients, sendAct, quoteAct, waitIncluded, verifiedAct } from './chain.js';
 import { ANON, anonFetch } from './anon.js';
 import { startScene } from './scene.js';
+import { pixelText } from './font.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -29,8 +30,11 @@ const me = account.address.toLowerCase();
 const myPub = publicKey(hexToBytes(priv));
 const friendCode = `${account.address}:${bytesToHex(myPub)}`;
 
-let netId = store.get('net', 'local');
-if (!NETWORKS[netId] || NETWORKS[netId].readOnly) netId = 'local';
+// Served from a real host (not this computer), the local dev stack isn't there: start on mainnet.
+const hosted = !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+if (hosted) delete NETWORKS.local;
+let netId = store.get('net', hosted ? 'mainnet' : 'local');
+if (!NETWORKS[netId] || NETWORKS[netId].readOnly) netId = hosted ? 'mainnet' : 'local';
 const net = () => NETWORKS[netId];
 
 // ---------- log: only what really happened ----------
@@ -139,7 +143,7 @@ function renderWall(animateNewest = false) {
   hangInAttic(animateNewest);
   if (!hung.length) { w.textContent = 'Nothing on the wall yet.'; w.className = 'wall muted'; return; }
   w.className = 'wall';
-  for (const h of hung) w.append(frame(hexToBytes(h.pixels), h.bpp, [`from ${h.from.slice(0, 8)}…`, `${h.how} · ${h.tx.slice(0, 8)}…`]));
+  for (const h of hung) w.append(frame(hexToBytes(h.pixels), h.bpp, [`${h.how}`, `from ${h.from.slice(0, 8)}…`]));
 }
 
 // ---------- network ----------
@@ -165,7 +169,7 @@ function setupNet() {
     }
   }
   $('net').value = netId;
-  $('visitNet').value = store.get('visitNet', 'sepolia');
+  $('visitNet').value = store.get('visitNet', 'mainnet');
   for (const [id, a] of [['', { name: 'direct RPC reads' }], ...Object.entries(ANON)]) {
     const o = document.createElement('option'); o.value = id; o.textContent = a.name; $('visitVia').append(o);
   }
@@ -408,6 +412,12 @@ fetch('./download/rom.json').then((r) => r.json()).then((r) => {
   $('romInfo').textContent = `Build ${r.commit} · ${mb} MB · sha256 ${r.sha256.slice(0, 12)}…`;
   $('romLine').textContent = `The game · build ${r.commit} · ${mb} MB`;
 }).catch(() => {});
+pixelText($('logo'), 'OKUPA', { scale: 6, ink: '#2b2a28', shadow: '#c8302c', off: 1 });
+pixelText($('logoSmall'), 'OKUPA', { scale: 2, ink: '#2b2a28', shadow: '#c8302c', off: 1 });
+pixelText($('logoFoot'), 'OKUPA', { scale: 2, ink: '#74716b' });
+const beeNote = () => { $('beeNote').textContent = /127\.0\.0\.1|localhost/.test(net().bee || '') ? `Needs a Bee node on this computer (${net().bee}).` : ''; };
+beeNote(); $('net').addEventListener('change', beeNote);
+$('tryVisit').onclick = () => { $('visitAddr').value = '0x6dEaE2a0eF2E59191A1991f55f8324b5E5c62985'; $('visitNet').value = 'mainnet'; $('visit').click(); };
 $('lookClose').onclick = () => $('look').close();
 $('check').onclick = (e) => busy(e.target, checkMailbox);
 $('visit').onclick = (e) => busy(e.target, visit);

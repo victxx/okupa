@@ -1,0 +1,9 @@
+{
+  "framework": null,
+  "installCommand": "true",
+  "buildCommand": "true",
+  "outputDirectory": "dist",
+  "headers": [
+    { "source": "/download/(.*)", "headers": [{ "key": "Content-Disposition", "value": "attachment" }] }
+  ]
+}
