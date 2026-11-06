@@ -338,8 +338,8 @@ static void closet(frame f, const uint8_t (*font)[8], const ok_ui *u)
     text(f, font, 10, 10, "Closet", RGB(31, 26, 3), 2);
     for (i = 0; i < OK_TOPS; i++) {
         int on = u->look.top == i;
-        round_box(f, 8 + i * 82, TOP_Y, 76, 24, 5, on ? RGB(31, 26, 3) : PAPER);
-        centred(f, font, 8 + i * 82 + 38, TOP_Y + 8, ok_top_name(i), INK, 1);
+        round_box(f, 8 + i * 61, TOP_Y, 57, 24, 5, on ? RGB(31, 26, 3) : PAPER);
+        centred(f, font, 8 + i * 61 + 28, TOP_Y + 8, ok_top_name(i), INK, 1);
     }
     for (i = 0; i < OK_COLOURS; i++) {
         int x = 8 + i * 31, on = u->look.colour == i;
@@ -559,6 +559,7 @@ void ok_ui_init(ok_ui *u)
     memset(u, 0, sizeof *u);
     u->last_x = u->last_y = -1;
     u->look.wear = OK_WEAR_NONE; /* the smiley mask lies on the floor until it is worn */
+    u->look.top = OK_TOP_NONE;   /* and it wears nothing but its fur, for now */
     ok_house_room(&room);
     ok_monkey_init(&u->anim, &room, 0, 0x6f6b7570u);
 }
@@ -812,7 +813,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (u->scene == OK_UI_CLOSET) {
         for (i = 0; i < OK_TOPS; i++)
-            if (inside(x, y, 8 + i * 82, TOP_Y, 76, 24)) u->look.top = (uint8_t)i;
+            if (inside(x, y, 8 + i * 61, TOP_Y, 57, 24)) u->look.top = (uint8_t)i;
         for (i = 0; i < OK_COLOURS; i++)
             if (inside(x, y, 8 + i * 31, SWATCH_Y, 26, 22)) u->look.colour = (uint8_t)i;
         for (i = 0; i < OK_WEARS; i++)

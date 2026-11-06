@@ -41,7 +41,7 @@ const char *ok_wear_name(int wear)
 
 const char *ok_top_name(int top)
 {
-    static const char *n[OK_TOPS] = {"Hoodie", "T-shirt", "Stripes"};
+    static const char *n[OK_TOPS] = {"Hoodie", "T-shirt", "Stripes", "None"};
     return top >= 0 && top < OK_TOPS ? n[top] : "";
 }
 
@@ -83,6 +83,20 @@ void ok_monkey_skin(const ok_look *look, uint16_t skin[OK_SKIN * OK_SKIN])
     fill(skin, p->x, p->y, p->w, p->h, EAR_IN);
     p = &parts[OK_PART_HANDS];
     fill(skin, p->x, p->y, p->w, p->h, CREAM);
+    if (look->top == OK_TOP_NONE) { /* just fur, a paler belly */
+        p = &parts[OK_PART_TOP];
+        fill(skin, p->x, p->y, p->w, p->h, FUR);
+        {
+            int x, y, cx = p->w / 2, cy = p->h * 68 / 100, rx = p->w * 3 / 32, ry = p->h * 26 / 100;
+            for (y = 0; y < p->h; y++)
+                for (x = 0; x < p->w; x++)
+                    if ((x - cx) * (x - cx) * ry * ry + (y - cy) * (y - cy) * rx * rx <= rx * rx * ry * ry)
+                        skin[(p->y + y) * OK_SKIN + p->x + x] = RGB(27, 19, 13);
+        }
+        p = &parts[OK_PART_SLEEVE];
+        fill(skin, p->x, p->y, p->w, p->h, FUR);
+        return;
+    }
     /* The top, and sleeves: full for the hoodie, short for the tees. */
     p = &parts[OK_PART_TOP];
     fill(skin, p->x, p->y, p->w, p->h, top);
@@ -1007,7 +1021,7 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
 {
     int s;
     for (s = -1; s <= 1; s += 2) {
-        int x = s * 82 + f->look * 8, y = 652;
+        int x = s * 72 + f->look * 8, y = 644;
         switch (f->eyes) {
         case 'j': /* smiling eyes, ^ ^ */
             solid(INK3);
@@ -1042,33 +1056,33 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
         }
     }
     solid(RGB(13, 7, 5)); /* a small soft nose */
-    ok_r3d_ellipsoid(P(0, 576, 236), P(20, 12, 8), 8, 4);
+    ok_r3d_ellipsoid(P(0, 582, 236), P(20, 12, 8), 8, 4);
     solid(INK3);
     switch (f->mouth) {
     case 'O':
     case 'y': {
         int tall = f->mouth == 'y' ? 30 : 22;
-        ok_r3d_ellipsoid(P(0, 512, 224), P(f->mouth == 'y' ? 22 : 30, tall, 12), 8, 6);
+        ok_r3d_ellipsoid(P(0, 522, 224), P(f->mouth == 'y' ? 22 : 30, tall, 12), 8, 6);
         ok_r3d_material(RGB(30, 12, 13), ++next_id, 0);
-        ok_r3d_ellipsoid(P(0, 512 - tall / 2, 231), P(16, 9, 6), 6, 4); /* tongue */
+        ok_r3d_ellipsoid(P(0, 522 - tall / 2, 231), P(16, 9, 6), 6, 4); /* tongue */
         break;
     }
-    case 'c': ok_r3d_ellipsoid(P(0, 514, 226), P(18, 14, 10), 6, 4); break;
-    case '.': ok_r3d_ellipsoid(P(0, 514, 228), P(12, 10, 6), 6, 4); break;
-    case '-': limb(-24, 516, 229, 24, 516, 229, 5); break;
+    case 'c': ok_r3d_ellipsoid(P(0, 524, 226), P(18, 14, 10), 6, 4); break;
+    case '.': ok_r3d_ellipsoid(P(0, 524, 228), P(12, 10, 6), 6, 4); break;
+    case '-': limb(-24, 526, 229, 24, 526, 229, 5); break;
     case 'w':
-        limb(-28, 512, 228, -10, 522, 230, 5);
-        limb(-10, 522, 230, 10, 512, 230, 5);
-        limb(10, 512, 230, 28, 522, 228, 5);
+        limb(-28, 522, 228, -10, 532, 230, 5);
+        limb(-10, 532, 230, 10, 522, 230, 5);
+        limb(10, 522, 230, 28, 532, 228, 5);
         break;
     default: /* a little smile */
-        limb(-32, 530, 226, -14, 514, 231, 6);
-        limb(-14, 514, 231, 14, 514, 231, 6);
-        limb(14, 514, 231, 32, 530, 226, 6);
+        limb(-32, 540, 226, -14, 524, 231, 6);
+        limb(-14, 524, 231, 14, 524, 231, 6);
+        limb(14, 524, 231, 32, 540, 226, 6);
     }
     ok_r3d_material(f->blush ? RGB(31, 13, 15) : RGB(31, 17, 17), ++next_id, 0); /* cheeks */
-    ok_r3d_ellipsoid(P(-124, 588, 178), P(30, 15, 10), 6, 4);
-    ok_r3d_ellipsoid(P(124, 588, 178), P(30, 15, 10), 6, 4);
+    ok_r3d_ellipsoid(P(-118, 592, 182), P(30, 15, 10), 6, 4);
+    ok_r3d_ellipsoid(P(118, 592, 182), P(30, 15, 10), 6, 4);
 }
 
 void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
