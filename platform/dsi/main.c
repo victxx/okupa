@@ -291,6 +291,9 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
  * interrupt (which still runs) writes on the bottom screen where the
  * network and the mind threads are, so a freeze explains itself. ----------- */
 static volatile uint32_t heartbeat;
+/* The boot step under way, for the watchdog: a freeze before the first frame
+ * names it on the bottom screen. */
+static volatile const char *boot_step = "video";
 static void watch_text(uint16_t *fb, int x, int y, const char *s)
 {
     const uint8_t (*font)[8] = ok_font();
@@ -318,6 +321,8 @@ static void watchdog(void)
         watch_text(fb, 0, 10, t);
         snprintf(t, sizeof t, "mind: %.23s", ok_dsi_mind_where ? ok_dsi_mind_where : "-");
         watch_text(fb, 0, 20, t);
+        snprintf(t, sizeof t, "boot: %.23s", boot_step);
+        watch_text(fb, 0, 30, t);
     }
 }
 
@@ -484,6 +489,10 @@ int main(void)
     bgSetPriority(top, 0);
     bgSetPriority(sky_bg, 3);
     bottom_bg = bottom = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+    /* The watchdog from here on: a boot that hangs says where. */
+    irqSet(IRQ_VBLANK, watchdog);
+    irqEnable(IRQ_VBLANK);
+    boot_step = "3D";
     glInit();
     glEnable(GL_TEXTURE_2D | GL_OUTLINE | GL_BLEND);
     REG_BG0CNT = (REG_BG0CNT & ~3u) | 1u; /* the 3D between the 2D layer and the sky */
@@ -496,6 +505,7 @@ int main(void)
         for (i = 0; i < 8; i++) glSetOutlineColor(i, RGB15(3, 2, 2));
     }
     ok_house_sky_layer = sky_layer;
+    boot_step = "icons";
     ok_icons_build(); /* drawn once in software, before the 3D goes to the hardware */
     ok_r3d_hardware(1);
     if (isDSiMode()) setCpuClock(true);
@@ -505,6 +515,7 @@ int main(void)
     ok_pet_init(&pet, (int64_t)now);
     shown_ui = &ui;
     shown_pet = &pet;
+    boot_step = "SD card";
     storage = open_storage();
     if (storage) {
         if (load_file(save_path, &pet, ui.drawing) || load_file(temp_path, &pet, ui.drawing)) {
@@ -513,13 +524,13 @@ int main(void)
         } else {
             save_status = "Save: new okupa on SD";
         }
+        boot_step = "SD files";
         load_look(&ui.look);
         ok_dsi_net_files(net_dir);
         load_wall(&ui);
     }
     machine_facts(0);
-    irqSet(IRQ_VBLANK, watchdog);
-    irqEnable(IRQ_VBLANK);
+    boot_step = "timer";
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
 #ifndef OKUPA_SOFT_DIV
     ok_r3d_divider(hw_divide);
@@ -527,7 +538,9 @@ int main(void)
     (void)hw_divide;
 #endif
     ok_house_clock = now_us;
+    boot_step = "sound";
     ok_dsi_audio_start();
+    boot_step = "intro";
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
     ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
@@ -536,6 +549,7 @@ int main(void)
     ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
     frame_at = cpuGetTiming();
+    boot_step = "running";
 
     for (;;) {
         int ticks = 0;
