@@ -1,5 +1,6 @@
 #include "okupa_json.h"
 #include "okupa_keys.h"
+#include "okupa_sha256.h"
 #include "okupa_think.h"
 #include "okupa_zerog.h"
 #include <assert.h>
@@ -12,7 +13,7 @@ static struct {
     int fail_net, status, tamper, no_id;
     const char *upstream; /* model id the broker forwards, NULL = unchanged */
     const char *content;
-    char req_body[8192];
+    char req_body[200000];
     size_t req_len;
     char resp_body[4096];
     size_t resp_len;
@@ -21,15 +22,32 @@ static struct {
     char last_auth[1024];
 } fake;
 
-static int fetch(void *ctx, const char *host, const char *req, size_t n, char *resp, size_t cap, size_t *got)
+static int fetch(void *ctx, const char *host, const char *head, size_t head_len, const char *payload,
+                 size_t payload_len, char *resp, size_t cap, size_t *got)
 {
-    const char *body = strstr(req, "\r\n\r\n");
+    static char req[200000];
+    const char *body;
+    size_t n = head_len + payload_len;
     int k;
     (void)ctx;
+    assert(n < sizeof req);
+    memcpy(req, head, head_len);
+    if (payload_len) memcpy(req + head_len, payload, payload_len);
+    req[n] = 0;
+    body = strstr(req, "\r\n\r\n");
     assert(!strcmp(host, "tee.example"));
     fake.calls++;
     if (fake.fail_net) return 62;
-    if (!strncmp(req, "POST /v1/proxy/chat/completions ", 32)) {
+    if (!strncmp(req, "POST /v1/proxy/audio/transcriptions ", 36)) {
+        /* Whisper: the multipart body is hashed as is, and the answer has no model. */
+        assert(body && strstr(req, "Content-Type: multipart/form-data; boundary="));
+        fake.req_len = n - (size_t)(body + 4 - req);
+        memcpy(fake.req_body, body + 4, fake.req_len);
+        fake.resp_len = (size_t)snprintf(fake.resp_body, sizeof fake.resp_body,
+                                         "{\"text\":\" Hola, me llamo V\xc3\xad" "ctor.\",\"usage\":{\"seconds\":2}}");
+        k = snprintf(resp, cap, "HTTP/1.1 200 OK\r\nZG-Res-Key: chat-abc_1\r\nContent-Length: %lu\r\n\r\n%s",
+                     (unsigned long)fake.resp_len, fake.resp_body);
+    } else if (!strncmp(req, "POST /v1/proxy/chat/completions ", 32)) {
         const char *a = strstr(req, "Authorization: Bearer app-sk-");
         assert(a && body);
         snprintf(fake.last_auth, sizeof fake.last_auth, "%.*s", (int)(strstr(a, "\r\n") - a), a);
@@ -55,6 +73,7 @@ static int fetch(void *ctx, const char *host, const char *req, size_t n, char *r
         uint8_t sig[65];
         int i;
         assert(!strncmp(req, "GET /v1/proxy/signature/", 24) && strstr(req, "?model=0GM-1.0 HTTP/1.1\r\n"));
+        assert(!payload_len);
         if (fake.tamper) fake.resp_body[0] = ' ';
         ok_zerog_text((const uint8_t *)fake.req_body, fake.req_len, (const uint8_t *)fake.resp_body, fake.resp_len,
                       text);
@@ -133,7 +152,11 @@ int main(void)
     fake.upstream = "0GM-1.0-0427";
     run(&p, good);
     assert(t.stage == OK_THINK_DECIDED && !strcmp(t.upstream_model, "0GM-1.0-0427"));
-    assert(strstr(t.forwarded, "\"model\":\"0GM-1.0-0427\"") && t.forwarded_len == t.request_len + 5);
+    {
+        uint8_t h[32];
+        ok_sha256(fake.req_body, fake.req_len, h); /* the renamed request, as the TEE hashed it */
+        assert(!memcmp(h, t.req_sha, 32) && fake.req_len == t.request_len + 5);
+    }
     assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
     assert(strstr(episode, "\"upstream_model\":\"0GM-1.0-0427\""));
     fake.upstream = NULL;
@@ -174,6 +197,33 @@ int main(void)
     /* Hosts and models that would break the URL are refused up front. */
     p.model = "a b";
     assert(run(&p, good) == OK_ARGUMENT && t.stage == OK_THINK_SETUP && fake.calls == 0);
+
+    /* Hearing: Whisper's transcript, verified over our exact multipart bytes;
+     * accents dropped for the small screen. */
+    p.model = "0GM-1.0";
+    {
+        static char buf[4096];
+        static const uint8_t wav[44] = {'R', 'I', 'F', 'F'};
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {4};
+        assert(ok_think_hear(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.heard, "Hola, me llamo Vctor.") && !t.body_json);
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
+        assert(strstr(episode, "\"kind\":\"hearing\"") && strstr(episode, "\"request_b64\":\"LS1va3Vw"));
+        assert(ok_think_hear(&t, &p, device, 1, nonce, wav, sizeof wav, buf, 100, fetch, NULL) == OK_RANGE);
+
+        /* Sight: one sentence from a vision answer, the image inside a
+         * canonical request. */
+        fake.content = "A person with glasses is smiling at the camera.";
+        assert(ok_think_see(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "A person with glasses is smiling at the camera."));
+        assert(strstr(fake.req_body, "\"url\":\"data:image/png;base64,UklGR"));
+        assert(!strncmp(fake.req_body, "{\"chat_template_kwargs\":", 24));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"sight\""));
+    }
 
     /* Keep-alive: the connection stays unless the server says it closes. */
     assert(ok_think_keeps_open("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", 38));

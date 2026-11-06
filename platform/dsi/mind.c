@@ -303,14 +303,15 @@ static int dial(const char *host)
     return 0;
 }
 
-static int fetch(void *ctx, const char *host, const char *req, size_t n, char *resp, size_t cap, size_t *got)
+static int fetch(void *ctx, const char *host, const char *req, size_t n, const char *body, size_t body_len,
+                 char *resp, size_t cap, size_t *got)
 {
     int e, tries;
     (void)ctx;
     for (tries = 0; tries < 2; tries++) {
         int reused = fd >= 0;
         if (!reused && (e = dial(host))) return e;
-        e = ok_think_exchange(&tls, req, n, resp, cap, got);
+        e = ok_think_exchange(&tls, req, n, body, body_len, resp, cap, got);
         if (!e) {
             if (!ok_think_keeps_open(resp, *got)) hang_up();
             return 0;
@@ -464,10 +465,8 @@ static void record_facts(const ok_think_provider *p, uint32_t ms)
     snprintf(f->og_signer, sizeof f->og_signer, "%.42s", t.recovered);
     f->og_verified = t.stage == OK_THINK_DECIDED || t.stage == OK_THINK_ANSWER;
     tls_name(f->og_tls, sizeof f->og_tls);
-    if (t.forwarded_len) ok_sha256(t.forwarded, t.forwarded_len, f->og_req_sha);
-    else memset(f->og_req_sha, 0, 32);
-    if (t.response) ok_sha256(t.response, t.response_len, f->og_resp_sha);
-    else memset(f->og_resp_sha, 0, 32);
+    memcpy(f->og_req_sha, t.req_sha, 32);
+    memcpy(f->og_resp_sha, t.resp_sha, 32);
     if (t.recovered[0]) memcpy(f->og_sig, t.sig, 65);
     else memset(f->og_sig, 0, 65);
     snprintf(f->og_request_id, sizeof f->og_request_id, "%.47s", t.chat_id);
