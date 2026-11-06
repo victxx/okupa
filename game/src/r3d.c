@@ -61,7 +61,7 @@ static int cur_id, cur_flags;
 static vert vb[MAX_VERTS];
 static int triangles;
 static const uint16_t *tex;
-static int tex_stride, uv_x, uv_y, uv_w = 1, uv_h = 1;
+static int tex_stride, uv_x, uv_y, uv_w = 1, uv_h = 1, tile;
 static uint8_t lut[4][3][32]; /* channel value under each tone */
 /* A kept frame (ok_r3d_keep), and the rectangle drawn since it was kept. */
 static uint16_t keep_fb[W * H];
@@ -176,6 +176,7 @@ void ok_r3d_begin(uint16_t *frame, uint16_t background)
     sp = 0;
     stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;
     triangles = 0;
+    tile = 0;
     dirty_x0 = dirty_y0 = 0;
     dirty_x1 = W - 1;
     dirty_y1 = H - 1;
@@ -448,7 +449,7 @@ static void raster(const vert *a, const vert *b, const vert *c)
             if (textured) {
                 int k = tone_of((int32_t)(l >> 8)), tu = (int)(u >> 12), tv = (int)(v >> 12);
                 uint16_t t;
-                tv = tv < 0 ? 0 : tv >= uv_h ? uv_h - 1 : tv;
+                tv = tile ? tv & (uv_h - 1) : tv < 0 ? 0 : tv >= uv_h ? uv_h - 1 : tv;
                 t = tex[(uv_y + tv) * tex_stride + uv_x + (tu & (uv_w - 1))];
                 row[x] = (uint16_t)(0x8000u | lut[k][0][t & 31] | lut[k][1][t >> 5 & 31] << 5 | lut[k][2][t >> 10 & 31] << 10);
             } else {
@@ -478,6 +479,26 @@ static void quad_idx(int a, int b, int c, int d)
     tri(a, c, d);
 }
 
+void ok_r3d_tile(int texels_per_unit)
+{
+    tile = texels_per_unit;
+}
+
+/* Tiling: the texture laid flat on the plane facing axis, so neighbouring
+ * faces and boxes line up. */
+static void planar(int k, ok_v3 p, int axis)
+{
+    ok_fx u = axis == 0 ? p.z : p.x, v = axis == 1 ? p.z : -p.y;
+    vb[k].u = (int32_t)((int64_t)u * tile * 16 / 4096);
+    vb[k].v = (int32_t)((int64_t)v * tile * 16 / 4096);
+}
+
+static int axis_of(ok_v3 n)
+{
+    ok_fx x = n.x < 0 ? -n.x : n.x, y = n.y < 0 ? -n.y : n.y, z = n.z < 0 ? -n.z : n.z;
+    return x >= y && x >= z ? 0 : y >= z ? 1 : 2;
+}
+
 void ok_r3d_quad(ok_v3 a, ok_v3 b, ok_v3 c, ok_v3 d)
 {
     ok_v3 n = norm(cross(sub(b, a), sub(c, a)));
@@ -485,8 +506,16 @@ void ok_r3d_quad(ok_v3 a, ok_v3 b, ok_v3 c, ok_v3 d)
     put(1, b, n);
     put(2, c, n);
     put(3, d, n);
-    vb[1].u = vb[2].u = uv_w * 16;
-    vb[0].v = vb[1].v = uv_h * 16;
+    if (tile) {
+        int ax = axis_of(n);
+        planar(0, a, ax);
+        planar(1, b, ax);
+        planar(2, c, ax);
+        planar(3, d, ax);
+    } else {
+        vb[1].u = vb[2].u = uv_w * 16;
+        vb[0].v = vb[1].v = uv_h * 16;
+    }
     quad_idx(0, 1, 2, 3);
 }
 
@@ -504,6 +533,7 @@ void ok_r3d_box(ok_v3 lo, ok_v3 hi)
             else if (faces[f][1]) p = ok_v3_make(u ? hi.x : lo.x, faces[f][1] > 0 ? hi.y : lo.y, v ? hi.z : lo.z);
             else p = ok_v3_make(u ? hi.x : lo.x, v ? hi.y : lo.y, faces[f][2] > 0 ? hi.z : lo.z);
             put(k, p, n);
+            if (tile) planar(k, p, f / 2);
         }
         quad_idx(0, 1, 2, 3);
     }
@@ -584,6 +614,9 @@ void ok_r3d_cylinder(ok_v3 base, ok_fx radius, ok_fx height, int slices)
         ok_v3 p = add(base, ok_v3_make(ok_fx_mul(n.x, radius), 0, ok_fx_mul(n.z, radius)));
         put(j, p, n);
         put(k + j, add(p, ok_v3_make(0, height, 0)), n);
+        vb[j].u = vb[k + j].u = j * uv_w * 16 / slices;
+        vb[j].v = tile ? (int32_t)((int64_t)height * tile * 16 / 4096) : uv_h * 16;
+        vb[k + j].v = 0;
     }
     grid(1, slices);
     /* Caps: the side vertices again, with flat normals. */
@@ -591,8 +624,12 @@ void ok_r3d_cylinder(ok_v3 base, ok_fx radius, ok_fx height, int slices)
         ok_v3 n = ok_v3_make(ok_r3d_cos(j * OK_TURN / slices), 0, ok_r3d_sin(j * OK_TURN / slices));
         ok_v3 p = add(base, ok_v3_make(ok_fx_mul(n.x, radius), height, ok_fx_mul(n.z, radius)));
         put(j, p, ok_v3_make(0, 4096, 0));
+        vb[j].u = (n.x + 4096) * uv_w * 8 / 4096;
+        vb[j].v = (n.z + 4096) * uv_h * 8 / 4096;
     }
     put(k, add(base, ok_v3_make(0, height, 0)), ok_v3_make(0, 4096, 0));
+    vb[k].u = uv_w * 8;
+    vb[k].v = uv_h * 8;
     for (j = 0; j < slices; j++) tri(k, j, j + 1);
 }
 
@@ -602,9 +639,14 @@ void ok_r3d_disc(ok_v3 c, ok_fx rx, ok_fx rz, int slices)
     ok_v3 up = ok_v3_make(0, 4096, 0);
     if (slices + 2 > MAX_VERTS) return;
     put(slices + 1, c, up);
-    for (j = 0; j <= slices; j++)
-        put(j, add(c, ok_v3_make(ok_fx_mul(ok_r3d_cos(j * OK_TURN / slices), rx), 0,
-                                 ok_fx_mul(ok_r3d_sin(j * OK_TURN / slices), rz))), up);
+    vb[slices + 1].u = uv_w * 8; /* a textured disc shows its rectangle once, like a rug */
+    vb[slices + 1].v = uv_h * 8;
+    for (j = 0; j <= slices; j++) {
+        ok_fx cs = ok_r3d_cos(j * OK_TURN / slices), sn = ok_r3d_sin(j * OK_TURN / slices);
+        put(j, add(c, ok_v3_make(ok_fx_mul(cs, rx), 0, ok_fx_mul(sn, rz))), up);
+        vb[j].u = (cs + 4096) * uv_w * 8 / 4096;
+        vb[j].v = (sn + 4096) * uv_h * 8 / 4096;
+    }
     for (j = 0; j < slices; j++) tri(slices + 1, j, j + 1);
 }
 
@@ -638,6 +680,7 @@ void ok_r3d_restore(uint16_t *frame)
     sp = 0;
     stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;
     triangles = 0;
+    tile = 0;
 }
 
 void ok_r3d_finish(void)

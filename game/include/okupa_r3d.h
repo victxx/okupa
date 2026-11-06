@@ -55,6 +55,10 @@ void ok_r3d_material(uint16_t colour, int id, int flags);
  * to bottom from its top pole to its bottom one. w must be a power of two. */
 void ok_r3d_texture(const uint16_t *texels, int stride);
 void ok_r3d_uv(int x, int y, int w, int h);
+/* With texels_per_unit > 0, boxes, quads and cylinder sides tile the
+ * rectangle (both sides powers of two) across their faces instead of
+ * stretching it; discs always show it once. 0 turns tiling off. */
+void ok_r3d_tile(int texels_per_unit);
 
 /* The model transform, a small stack. */
 void ok_r3d_push(void);
