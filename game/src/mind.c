@@ -10,14 +10,20 @@ static const char *moods[OK_FEELINGS] = {"happy", "hungry", "sleepy", "bored", "
 
 static const char SYSTEM[] =
     "You are the mind of Okupa, a small monkey who moved into a Nintendo DSi without asking and lives in its "
-    "attic, with a little garden outside. Okupa is curious, cheeky and affectionate, and a bit dramatic. Every few "
-    "seconds you decide what Okupa does next from what it notices. Reply with JSON only, no prose: "
+    "attic, with a little garden outside. Okupa is curious, cheeky and affectionate, a bit dramatic, and it is "
+    "learning about the player and the world beyond the screen. Every few seconds you decide what Okupa does next "
+    "from what it notices. Reply with JSON only, no prose: "
     "{\"activity\": one of [\"look\",\"scratch\",\"stretch\",\"hop\",\"peek\",\"wander\",\"sigh\",\"wave\",\"eat\","
     "\"play\",\"sleep\",\"go_outside\",\"go_inside\"], \"mood\": one of [\"happy\",\"hungry\",\"sleepy\",\"bored\","
-    "\"lonely\",\"curious\"], \"line\": what Okupa says out loud in English, at most 40 characters, or \"\" to stay "
-    "quiet}. Stay quiet most of the time. Speak when the player does or says something, when Okupa sees something "
-    "or when its needs change. Never repeat a recent line. Keep to its needs: hungry means eat, tired means sleep. "
-    "go_outside only from the attic, go_inside only from the garden.";
+    "\"lonely\",\"curious\"], \"line\": what Okupa says out loud in English, at most 40 characters, or \"\", "
+    "\"thought\": what Okupa thinks but does not say, at most 60 characters, or \"\", \"ask\": a question for the "
+    "player, at most 60 characters, or \"\", \"remember\": a new fact about the player worth keeping forever "
+    "(their name, what they like, what happened between you), at most 60 characters, or \"\": never the time, the "
+    "weather, the room or anything already in known}. Speak when the player does or says something, when Okupa sees something or when its "
+    "needs change; otherwise stay quiet or just think. Ask rarely, only to learn something about the player (their "
+    "name, what they like, where they are, how their day was), never while a question is waiting, and use what you "
+    "know. When the player answers, react to it and remember what matters. Never repeat a recent line. Keep to its "
+    "needs: hungry means eat, tired means sleep. go_outside only from the attic, go_inside only from the garden.";
 
 const char *ok_mind_activity_name(int a) { return a >= 0 && a < OK_ACTIVITIES ? activities[a] : "?"; }
 const char *ok_mind_mood_name(int m) { return m >= 0 && m < OK_FEELINGS ? moods[m] : "?"; }
@@ -80,7 +86,7 @@ static int text(char *out, size_t cap, size_t *o, const char *s, size_t max)
 
 ok_result ok_mind_request(const char *model, const ok_mind_obs *obs, char *out, size_t cap, size_t *len)
 {
-    char user[1536], head[256];
+    char user[3072], head[256];
     const ok_pet *p;
     size_t o = 0, u = 0;
     int i, k;
@@ -102,6 +108,20 @@ ok_result ok_mind_request(const char *model, const ok_mind_obs *obs, char *out, 
     if (obs->saw && (!raw(user, sizeof user, &u, ",\"okupa_sees\":") ||
                      !text(user, sizeof user, &u, obs->saw, OK_MIND_TEXT)))
         return OK_RANGE;
+    if (obs->asked && (!raw(user, sizeof user, &u, ",\"waiting_for_answer_to\":") ||
+                       !text(user, sizeof user, &u, obs->asked, OK_MIND_NOTE)))
+        return OK_RANGE;
+    if (obs->city && (!raw(user, sizeof user, &u, ",\"city\":") || !text(user, sizeof user, &u, obs->city, 40)))
+        return OK_RANGE;
+    if (obs->wifi && (!raw(user, sizeof user, &u, ",\"wifi_network\":") || !text(user, sizeof user, &u, obs->wifi, 32)))
+        return OK_RANGE;
+    if (obs->known_count) {
+        if (!raw(user, sizeof user, &u, ",\"known\":[")) return OK_RANGE;
+        for (i = 0; i < obs->known_count && i < OK_MIND_KNOWN; i++)
+            if ((i && !raw(user, sizeof user, &u, ",")) || !text(user, sizeof user, &u, obs->known[i], OK_MIND_NOTE))
+                return OK_RANGE;
+        if (!raw(user, sizeof user, &u, "]")) return OK_RANGE;
+    }
     if (!raw(user, sizeof user, &u, ",\"recent\":[")) return OK_RANGE;
     for (i = 0; i < obs->recent_count && i < OK_MIND_RECENT; i++)
         if ((i && !raw(user, sizeof user, &u, ",")) || !text(user, sizeof user, &u, obs->recent[i], 64)) return OK_RANGE;
@@ -111,7 +131,7 @@ ok_result ok_mind_request(const char *model, const ok_mind_obs *obs, char *out, 
     /* Keys sorted and no spaces, as Go re-encodes it: the bytes the TEE hashes
      * are then ours, with only the model renamed to the upstream id. Thinking
      * off: a reasoning model would otherwise spend the tokens before answering. */
-    if (!raw(out, cap, &o, "{\"chat_template_kwargs\":{\"enable_thinking\":false},\"max_tokens\":120,"
+    if (!raw(out, cap, &o, "{\"chat_template_kwargs\":{\"enable_thinking\":false},\"max_tokens\":200,"
                            "\"messages\":[{\"content\":") ||
         !quote(out, cap, &o, SYSTEM) || !raw(out, cap, &o, ",\"role\":\"system\"},{\"content\":") ||
         !quote(out, cap, &o, user) || !raw(out, cap, &o, ",\"role\":\"user\"}],\"model\":") ||
@@ -142,6 +162,19 @@ static int pick(const ok_json *obj, const char *key, const char *const *set, int
     return -1;
 }
 
+/* An optional short note: absent, not a string or empty all mean none. */
+static void note(const ok_json *obj, const char *key, char out[OK_MIND_NOTE + 1])
+{
+    char s[256];
+    ok_json v;
+    size_t n, i, o = 0;
+    out[0] = 0;
+    if (ok_json_member(obj, key, &v) != OK_OK || ok_json_string(&v, s, sizeof s, &n) != OK_OK) return;
+    for (i = 0; i < n && o < OK_MIND_NOTE; i++)
+        if ((unsigned char)s[i] >= 0x20 && (unsigned char)s[i] < 0x7f) out[o++] = s[i];
+    out[o] = 0;
+}
+
 ok_result ok_mind_parse(const char *body, size_t n, ok_mind *d)
 {
     static char content[1024];
@@ -150,6 +183,7 @@ ok_result ok_mind_parse(const char *body, size_t n, ok_mind *d)
     const char *open, *close;
     size_t len, i, o = 0;
     if (!body || !d) return OK_ARGUMENT;
+    memset(d, 0, sizeof *d);
     if (ok_json_parse(body, n, &root) != OK_OK || ok_json_member(&root, "choices", &v) != OK_OK ||
         ok_json_index(&v, 0, &choice) != OK_OK || ok_json_member(&choice, "message", &msg) != OK_OK ||
         ok_json_member(&msg, "content", &v) != OK_OK || ok_json_string(&v, content, sizeof content, &len) != OK_OK)
@@ -167,5 +201,8 @@ ok_result ok_mind_parse(const char *body, size_t n, ok_mind *d)
     for (i = 0; i < len && o < OK_MIND_LINE; i++)
         if ((unsigned char)line[i] >= 0x20 && (unsigned char)line[i] < 0x7f) d->line[o++] = line[i];
     d->line[o] = 0;
+    note(&obj, "thought", d->thought);
+    note(&obj, "ask", d->ask);
+    note(&obj, "remember", d->remember);
     return OK_OK; /* an empty line is fine: it stays quiet */
 }
