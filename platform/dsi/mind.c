@@ -256,6 +256,9 @@ static int wait_for(int fd, short events, int ms)
         struct pollfd p = {fd, events, 0};
         int rc = poll(&p, 1, 0);
         stir();
+        /* Even when data is already there, let the game run first: a long
+         * 0G reply keeps the socket readable for the whole transfer. */
+        cothread_yield();
         if (rc > 0) return (p.revents & events) != 0;
         if (rc < 0) return 0;
         cothread_yield_irq(IRQ_VBLANK);
@@ -266,8 +269,7 @@ static int wait_for(int fd, short events, int ms)
 static int sock_read(void *ctx, unsigned char *buf, size_t len)
 {
     int fd = *(int *)ctx, n;
-    cothread_yield(); /* between TLS records: let the game draw */
-    if (!wait_for(fd, POLLIN, 60000)) return -1; /* inference can take a while */
+    if (!wait_for(fd, POLLIN, 60000)) return -1; /* yields every time, data or not */ /* inference can take a while */
     n = recv(fd, buf, len, 0);
     return n > 0 ? n : -1;
 }
@@ -275,7 +277,6 @@ static int sock_read(void *ctx, unsigned char *buf, size_t len)
 static int sock_write(void *ctx, const unsigned char *buf, size_t len)
 {
     int fd = *(int *)ctx, n;
-    cothread_yield();
     if (!wait_for(fd, POLLOUT, 10000)) return -1;
     n = send(fd, buf, len, 0);
     return n > 0 ? n : -1;
