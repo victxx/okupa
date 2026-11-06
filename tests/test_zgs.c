@@ -8,7 +8,7 @@
 static void hex(const uint8_t *p, size_t n, char *out)
 {
     size_t i;
-    for (i = 0; i < n; i++) sprintf(out + 2 * i, "%02x", p[i]);
+    for (i = 0; i < n; i++) snprintf(out + 2 * i, 3, "%02x", p[i]);
 }
 
 int main(void)
