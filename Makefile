@@ -4,7 +4,7 @@ SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror -fsanitize=add
 CPPFLAGS += -Icore/include -Igame/include -Ithird_party/tiny_sha3 -Ithird_party/secp256k1/include -Ithird_party/bearssl/inc -Ithird_party/font8x8
 BUILD ?= build
 
-CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c core/src/session.c core/src/discv4.c core/src/tls.c core/src/tls_anchors.c game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c third_party/tiny_sha3/sha3.c
+CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c core/src/session.c core/src/discv4.c core/src/tls.c core/src/tls_anchors.c game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c third_party/tiny_sha3/sha3.c
 TESTS = core keccak rlp secp keys tx act sha256 ecdh aes ecies rlpx snappy p2p eth enr dnsdisc dns zerog json http tls discv4 pet ui checks save mind
 
 # libsecp256k1 is built as upstream ships it, with its own warning level, plus
@@ -23,7 +23,7 @@ BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 .PHONY: all test sanitize clean peer preview
 # Keep library objects between builds.
 .SECONDARY:
-all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https
+all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https
 
 # The host peer: sockets and entropy around the same core.
 $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
@@ -57,11 +57,17 @@ $(BUILD)/okupa-monkey: tools/monkey.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
-preview: $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey
+# The attic through the day; `make film` also writes the frames of a short film.
+$(BUILD)/okupa-house: tools/house.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
+
+preview: $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house
 	@mkdir -p build/preview
 	./$(BUILD)/okupa-preview build/preview
 	./$(BUILD)/okupa-directions build/preview
 	./$(BUILD)/okupa-monkey build/preview
+	./$(BUILD)/okupa-house build/preview
 
 $(BUILD)/secp/%.o: $(SECP)/src/%.c
 	@mkdir -p $(dir $@)
