@@ -4,8 +4,8 @@ SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror -fsanitize=add
 CPPFLAGS += -Icore/include -Igame/include -Ithird_party/tiny_sha3 -Ithird_party/secp256k1/include -Ithird_party/bearssl/inc -Ithird_party/font8x8
 BUILD ?= build
 
-CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c game/src/pet.c game/src/ui.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c third_party/tiny_sha3/sha3.c
-TESTS = core keccak rlp secp keys tx act sha256 ecdh aes ecies rlpx snappy p2p eth enr dnsdisc dns zerog json http pet ui checks save mind
+CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c core/src/tls.c core/src/tls_anchors.c game/src/pet.c game/src/ui.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c third_party/tiny_sha3/sha3.c
+TESTS = core keccak rlp secp keys tx act sha256 ecdh aes ecies rlpx snappy p2p eth enr dnsdisc dns zerog json http tls pet ui checks save mind
 
 # libsecp256k1 is built as upstream ships it, with its own warning level, plus
 # the modules we need: recoverable signatures and ECDH (for RLPx).
@@ -16,13 +16,14 @@ SECP_OBJ = $(patsubst $(SECP)/src/%.c,$(BUILD)/secp/%.o,$(SECP_SRC))
 
 # BearSSL: only the primitives we use, compiled as upstream ships them.
 BEAR = third_party/bearssl
-BEAR_SRC = $(BEAR)/src/hash/sha2small.c $(BEAR)/src/mac/hmac.c \
-  $(BEAR)/src/symcipher/aes_ct.c $(BEAR)/src/symcipher/aes_ct_enc.c $(BEAR)/src/symcipher/aes_ct_cbcenc.c \
-  $(BEAR)/src/codec/dec32be.c $(BEAR)/src/codec/enc32be.c $(BEAR)/src/codec/dec32le.c $(BEAR)/src/codec/enc32le.c
+# All of BearSSL: TLS pulls in most of it; the linker keeps only what is used.
+BEAR_SRC = $(shell find $(BEAR)/src -name '*.c')
 BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 
 .PHONY: all test sanitize clean peer preview
-all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-dnswalk
+# Keep library objects between builds.
+.SECONDARY:
+all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https
 
 # The host peer: sockets and entropy around the same core.
 $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
@@ -30,6 +31,11 @@ $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard cor
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
 peer: $(BUILD)/okupa-peer
+
+# HTTPS with the core's TLS and HTTP.
+$(BUILD)/okupa-https: tools/https.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
 # Finds nodes in the EIP-1459 DNS tree with the core alone.
 $(BUILD)/okupa-dnswalk: tools/dnswalk.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h)
