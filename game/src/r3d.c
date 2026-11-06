@@ -32,6 +32,7 @@ static const int16_t quarter[257] = {
 typedef struct {
     ok_fx m[3][3]; /* rows */
     ok_v3 t;
+    int scaled;    /* normals need normalising */
 } xform;
 
 typedef struct {
@@ -62,6 +63,12 @@ static int triangles;
 static const uint16_t *tex;
 static int tex_stride, uv_x, uv_y, uv_w = 1, uv_h = 1;
 static uint8_t lut[4][3][32]; /* channel value under each tone */
+/* A kept frame (ok_r3d_keep), and the rectangle drawn since it was kept. */
+static uint16_t keep_fb[W * H];
+static int32_t keep_z[W * H];
+static uint8_t keep_ids[W * H], keep_edge_on[256];
+static uint16_t keep_edge_colour[256];
+static int dirty_x0, dirty_y0, dirty_x1, dirty_y1;
 
 ok_fx ok_fx_mul(ok_fx a, ok_fx b)
 {
@@ -88,6 +95,21 @@ ok_fx ok_r3d_sin(int angle)
 ok_fx ok_r3d_cos(int angle)
 {
     return ok_r3d_sin(angle + OK_TURN / 4);
+}
+
+/* Within about 0.3 degrees: atan on [-1, 1] by a short polynomial, then the octant. */
+int ok_r3d_atan2(int32_t y, int32_t x)
+{
+    int64_t ax = x < 0 ? -(int64_t)x : x, ay = y < 0 ? -(int64_t)y : y, r;
+    int a;
+    if (!ax && !ay) return 0;
+    r = ax >= ay ? ay * 4096 / ax : ax * 4096 / ay; /* 0..1, Q12 */
+    /* turns: r/8 - r(r-1)(0.2447 + 0.0663 r)/(2 pi) */
+    a = (int)(r / 8 + r * (4096 - r) / 4096 * (1002 + 272 * r / 4096) / 25736);
+    if (ay > ax) a = 1024 - a;
+    if (x < 0) a = 2048 - a;
+    if (y < 0) a = -a;
+    return a & (OK_TURN - 1);
 }
 
 static uint32_t isqrt64(uint64_t v)
@@ -153,6 +175,9 @@ void ok_r3d_begin(uint16_t *frame, uint16_t background)
     sp = 0;
     stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;
     triangles = 0;
+    dirty_x0 = dirty_y0 = 0;
+    dirty_x1 = W - 1;
+    dirty_y1 = H - 1;
     ok_r3d_light(ok_v3_make(0, 4096, 0), ok_v3_make(4096, 4096, 4096), ok_v3_make(1024, 1024, 1024));
     ok_r3d_material(0xffff, 1, 0);
 }
@@ -251,6 +276,17 @@ static void mul_rot(const ok_fx r[3][3])
     memcpy(stack[sp].m, o, sizeof o);
 }
 
+void ok_r3d_scale(ok_fx sx, ok_fx sy, ok_fx sz)
+{
+    int i;
+    for (i = 0; i < 3; i++) {
+        stack[sp].m[i][0] = ok_fx_mul(stack[sp].m[i][0], sx);
+        stack[sp].m[i][1] = ok_fx_mul(stack[sp].m[i][1], sy);
+        stack[sp].m[i][2] = ok_fx_mul(stack[sp].m[i][2], sz);
+    }
+    stack[sp].scaled = 1;
+}
+
 void ok_r3d_rotate_x(int a)
 {
     ok_fx s = ok_r3d_sin(a), c = ok_r3d_cos(a);
@@ -281,6 +317,7 @@ static void put(int k, ok_v3 p, ok_v3 n)
     int64_t sx, sy;
     v->w = add(rot(&stack[sp], p), stack[sp].t);
     v->n = rot(&stack[sp], n);
+    if (stack[sp].scaled) v->n = norm(v->n);
     d = sub(v->w, cam.eye);
     vx = dot(d, cam.r);
     vy = dot(d, cam.u);
@@ -347,6 +384,10 @@ static void raster(const vert *a, const vert *b, const vert *c)
     if (y1 > H - 1) y1 = H - 1;
     if (x0 > x1 || y0 > y1) return;
     triangles++;
+    if (x0 < dirty_x0) dirty_x0 = x0;
+    if (y0 < dirty_y0) dirty_y0 = y0;
+    if (x1 > dirty_x1) dirty_x1 = x1;
+    if (y1 > dirty_y1) dirty_y1 = y1;
     /* Edge functions at the first pixel centre and their steps. */
     {
         int64_t px = (int64_t)x0 * 16 + 8, py = (int64_t)y0 * 16 + 8;
@@ -430,6 +471,8 @@ void ok_r3d_quad(ok_v3 a, ok_v3 b, ok_v3 c, ok_v3 d)
     put(1, b, n);
     put(2, c, n);
     put(3, d, n);
+    vb[1].u = vb[2].u = uv_w * 16;
+    vb[0].v = vb[1].v = uv_h * 16;
     quad_idx(0, 1, 2, 3);
 }
 
@@ -544,11 +587,47 @@ void ok_r3d_disc(ok_v3 c, ok_fx rx, ok_fx rz, int slices)
     for (j = 0; j < slices; j++) tri(slices + 1, j, j + 1);
 }
 
+void ok_r3d_keep(void)
+{
+    memcpy(keep_fb, fb, sizeof keep_fb);
+    memcpy(keep_z, zbuf, sizeof keep_z);
+    memcpy(keep_ids, ids, sizeof keep_ids);
+    memcpy(keep_edge_on, edge_on, sizeof keep_edge_on);
+    memcpy(keep_edge_colour, edge_colour, sizeof keep_edge_colour);
+    dirty_x0 = dirty_y0 = W;
+    dirty_x1 = dirty_y1 = -1;
+}
+
+/* The colours come back whole (the caller may have drawn over any of them);
+ * depth and objects only where something was drawn since. */
+void ok_r3d_restore(uint16_t *frame)
+{
+    int y;
+    fb = frame;
+    memcpy(fb, keep_fb, sizeof keep_fb);
+    for (y = dirty_y0; y <= dirty_y1; y++) {
+        memcpy(zbuf + y * W + dirty_x0, keep_z + y * W + dirty_x0, (size_t)(dirty_x1 - dirty_x0 + 1) * sizeof *zbuf);
+        memcpy(ids + y * W + dirty_x0, keep_ids + y * W + dirty_x0, (size_t)(dirty_x1 - dirty_x0 + 1));
+    }
+    memcpy(edge_on, keep_edge_on, sizeof edge_on);
+    memcpy(edge_colour, keep_edge_colour, sizeof edge_colour);
+    dirty_x0 = dirty_y0 = W;
+    dirty_x1 = dirty_y1 = -1;
+    memset(stack, 0, sizeof stack);
+    sp = 0;
+    stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;
+    triangles = 0;
+}
+
 void ok_r3d_finish(void)
 {
-    int x, y;
-    for (y = 0; y < H; y++)
-        for (x = 0; x < W; x++) {
+    int x, y, x0 = dirty_x0 - 1, y0 = dirty_y0 - 1, x1 = dirty_x1 + 1, y1 = dirty_y1 + 1;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > W - 1) x1 = W - 1;
+    if (y1 > H - 1) y1 = H - 1;
+    for (y = y0; y <= y1; y++)
+        for (x = x0; x <= x1; x++) {
             int i = y * W + x, id = ids[i];
             int32_t z = zbuf[i], gap = z >> 4;
             if (!edge_on[id]) continue;

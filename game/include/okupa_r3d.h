@@ -63,6 +63,9 @@ void ok_r3d_translate(ok_v3 t);
 void ok_r3d_rotate_x(int angle);
 void ok_r3d_rotate_y(int angle);
 void ok_r3d_rotate_z(int angle);
+void ok_r3d_scale(ok_fx sx, ok_fx sy, ok_fx sz);
+/* atan2(y, x) in 1/4096 turns. */
+int ok_r3d_atan2(int32_t y, int32_t x);
 
 void ok_r3d_box(ok_v3 lo, ok_v3 hi);
 void ok_r3d_ellipsoid(ok_v3 centre, ok_v3 radius, int slices, int stacks);
@@ -71,11 +74,16 @@ void ok_r3d_capsule(ok_v3 a, ok_v3 b, ok_fx radius, int slices);
 void ok_r3d_cylinder(ok_v3 base, ok_fx radius, ok_fx height, int slices);
 /* A flat ellipse facing up (shadows, rugs). */
 void ok_r3d_disc(ok_v3 centre, ok_fx rx, ok_fx rz, int slices);
-/* A flat quad, corners in order. */
+/* A flat quad, corners counterclockwise as seen from its front; textured,
+ * a..d take the uv rectangle's corners from its bottom left. */
 void ok_r3d_quad(ok_v3 a, ok_v3 b, ok_v3 c, ok_v3 d);
 
-/* Draws the outlines; the frame is then complete. */
+/* Draws the outlines of what was drawn; the frame is then complete. */
 void ok_r3d_finish(void);
+/* Keeps the frame drawn so far (colours, depth, objects), and starts a new
+ * frame from it: a still room is drawn once, then only what moves. */
+void ok_r3d_keep(void);
+void ok_r3d_restore(uint16_t *frame);
 /* Where a point (in the current transform) lands on screen; 0 if behind the
  * camera. depth (may be NULL) is comparable with ok_r3d_depth_at. */
 int ok_r3d_project(ok_v3 p, int *x, int *y, int32_t *depth);
