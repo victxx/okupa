@@ -426,9 +426,9 @@ static void stopped(const char *fmt, ...)
 /* One HTTPS round trip for the shared core, on the connection the last one
  * left open when the server keeps it; a stale one is reopened once. */
 static int fd = -1;
+volatile const char *ok_dsi_mind_where = "not started";
 static int resumed; /* the open connection offered to resume a session */
 static char open_host[96]; /* the host the open connection goes to */
-volatile const char *ok_dsi_mind_where = "not started";
 
 static void hang_up(void)
 {
@@ -452,8 +452,8 @@ static int dial(const char *host)
         return -2;
     }
     line(2, "TCP %s:443", inet_ntoa(addr.sin_addr));
-    feed("TCP %s:443 ...", inet_ntoa(addr.sin_addr));
     ok_dsi_mind_where = "tcp connect";
+    feed("TCP %s:443 ...", inet_ntoa(addr.sin_addr));
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -3;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 8000) ||

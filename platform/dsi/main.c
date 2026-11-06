@@ -286,38 +286,6 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
 }
 
-/* The day of the last letter the okupa sent, from letters.txt. */
-static void last_letter_day(char out[11])
-{
-    char line[256];
-    FILE *f;
-    out[0] = 0;
-    if (!letters_path[0] || !(f = fopen(letters_path, "r"))) return;
-    while (fgets(line, sizeof line, f))
-        if (strlen(line) > 10) snprintf(out, 11, "%.10s", line);
-    fclose(f);
-}
-
-/* A letter its mind wrote, signed and handed to the network with capped
- * fees (account.c: at most 40 000 gas x 2 gwei); one a day. */
-static int send_letter(const char *text, char sent_day[11], const char *today)
-{
-    uint8_t tx[400], hash[32];
-    size_t len;
-    FILE *f;
-    if (ok_dsi_net_pending(hash)) return 0; /* one at a time */
-    if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), text, tx, sizeof tx, &len, hash)) return 0;
-    ok_dsi_net_send(tx, len, hash);
-    ok_facts_log(ok_dsi_uptime(), 'E', "signed letter %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
-    if ((f = fopen(letters_path, "a"))) {
-        fprintf(f, "%s %02x%02x%02x%02x%02x%02x%02x%02x %s\n", today, hash[0], hash[1], hash[2], hash[3], hash[4], hash[5],
-                hash[6], hash[7], text);
-        fclose(f);
-    }
-    snprintf(sent_day, 11, "%s", today);
-    return 1;
-}
-
 /* ---- Watchdog: if the game loop stops for 2 s, the vertical blank
  * interrupt (which still runs) writes on the bottom screen where the
  * network and the mind threads are, so a freeze explains itself. ----------- */
@@ -352,6 +320,38 @@ static void watchdog(void)
     }
 }
 
+/* The day of the last letter the okupa sent, from letters.txt. */
+static void last_letter_day(char out[11])
+{
+    char line[256];
+    FILE *f;
+    out[0] = 0;
+    if (!letters_path[0] || !(f = fopen(letters_path, "r"))) return;
+    while (fgets(line, sizeof line, f))
+        if (strlen(line) > 10) snprintf(out, 11, "%.10s", line);
+    fclose(f);
+}
+
+/* A letter its mind wrote, signed and handed to the network with capped
+ * fees (account.c: at most 40 000 gas x 2 gwei); one a day. */
+static int send_letter(const char *text, char sent_day[11], const char *today)
+{
+    uint8_t tx[400], hash[32];
+    size_t len;
+    FILE *f;
+    if (ok_dsi_net_pending(hash)) return 0; /* one at a time */
+    if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), text, tx, sizeof tx, &len, hash)) return 0;
+    ok_dsi_net_send(tx, len, hash);
+    ok_facts_log(ok_dsi_uptime(), 'E', "signed letter %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+    if ((f = fopen(letters_path, "a"))) {
+        fprintf(f, "%s %02x%02x%02x%02x%02x%02x%02x%02x %s\n", today, hash[0], hash[1], hash[2], hash[3], hash[4], hash[5],
+                hash[6], hash[7], text);
+        fclose(f);
+    }
+    snprintf(sent_day, 11, "%s", today);
+    return 1;
+}
+
 int main(void)
 {
     int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0, threads_on = 0;
@@ -364,10 +364,10 @@ int main(void)
      * game's state (the wall alone is 3 KB) plus a deep render could reach
      * past it. */
     static ok_mind thought; /* the mind's latest decision */
-    static uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     int listening = 0; /* a clip is with 0G */
     int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0; /* Pictionary */
-    static char game_guess[OK_MIND_TEXT + 1];
+    char game_guess[OK_MIND_TEXT + 1] = "";
+    static uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
     static ok_pet pet;
@@ -647,11 +647,21 @@ int main(void)
             ok_object obj;
             int w, h;
             strftime(today, sizeof today, "%Y-%m-%d", localtime(&now));
+            static int letters_allowed;
             if (!letter_day_read && storage) {
+                char on_path[48];
+                FILE *f;
                 last_letter_day(letter_day);
                 letter_day_read = 1;
+                /* The mind may post a letter to mainnet by itself (real gas)
+                 * only if the player opted in: sd:/okupa/letters-on.txt. */
+                snprintf(on_path, sizeof on_path, "%.30sletters-on.txt", net_dir);
+                if ((f = fopen(on_path, "r"))) {
+                    letters_allowed = 1;
+                    fclose(f);
+                }
             }
-            ok_dsi_mind_letters(storage && strcmp(letter_day, today) && !ok_dsi_net_pending(hash));
+            ok_dsi_mind_letters(letters_allowed && storage && strcmp(letter_day, today) && !ok_dsi_net_pending(hash));
             if (ok_dsi_mind_take_object(&obj)) {
                 /* Its colour names onto the house's palette. */
                 static const uint8_t to_palette[OK_MAKE_COLOURS] = {2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 10, 11, 15, 1, 13, 0};
