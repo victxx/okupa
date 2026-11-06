@@ -350,14 +350,14 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 #define TAB_W 62
 #define TAB_H 20
 /* Out to the terrace and back, beside the closet. */
-#define OUT_X 140
+#define OUT_X 100
 #define OUT_Y 8
-#define OUT_W 42
+#define OUT_W 72
 #define OUT_H 20
 /* The closet, top right, clear of the buttons. */
-#define CLOSET_X 186
+#define CLOSET_X 176
 #define CLOSET_Y 8
-#define CLOSET_W 62
+#define CLOSET_W 72
 #define CLOSET_H 20
 
 static void button(frame f, const uint8_t (*font)[8], int i, const char *label, int pressed, const ok_pet *p)
@@ -395,18 +395,16 @@ static void mood_chip(frame f, const uint8_t (*font)[8], const ok_pet *p, int x,
                                    RGB(12, 14, 26)};
     int m = ok_pet_mood(p), w;
     m = m < 0 || m > 5 ? 0 : m;
-    w = width(word[m], 1) + 20;
-    round_box(f, x, y, w, 16, 7, RGB(14, 13, 12));
-    disc(f, x + 8, y + 8, 3, dot[m]);
-    text(f, font, x + 14, y + 5, word[m], RGB(29, 28, 26), 1);
+    w = width(word[m], 2) + 24;
+    round_box(f, x, y, w, 20, 7, RGB(14, 13, 12));
+    disc(f, x + 10, y + 10, 4, dot[m]);
+    text(f, font, x + 18, y + 7, word[m], RGB(29, 28, 26), 2);
 }
 
 static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p)
 {
     int i;
-    text(f, font, 11, 12, "OKUPA", RGB(4, 3, 2), 2); /* a shadow under the name */
-    text(f, font, 10, 11, "OKUPA", RGB(31, 26, 3), 2);
-    mood_chip(f, font, p, 62, 9);
+    mood_chip(f, font, p, 8, 8);
     for (i = 0; i < BUTTONS; i++)
         if (i / PER_PAGE == u->page)
             button(f, font, i, i == B_SLEEP && p->asleep ? "Wake" : labels[i], u->pressed == i + 1 && u->pressed_ticks > 0, p);
@@ -424,12 +422,13 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, cons
     }
     round_box(f, CLOSET_X, CLOSET_Y + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), CLOSET_W, CLOSET_H, 7,
               u->pressed == 100 && u->pressed_ticks ? RGB(22, 20, 12) : RGB(31, 26, 3));
-    ok_icons_draw(OK_ICON_WEAR, f, CLOSET_X + 13, CLOSET_Y + 10, 16);
-    text(f, font, CLOSET_X + 25, CLOSET_Y + 7, "Wear", INK, 2);
+    ok_icons_draw(OK_ICON_WEAR, f, CLOSET_X + 16, CLOSET_Y + 10 + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), 16);
+    centred(f, font, CLOSET_X + 44, CLOSET_Y + 7 + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), "Wear", INK, 2);
     round_box(f, OUT_X, OUT_Y + (u->pressed == 101 && u->pressed_ticks ? 1 : 0), OUT_W, OUT_H, 7,
               u->pressed == 101 && u->pressed_ticks ? RGB(12, 18, 12) : RGB(17, 26, 15));
-    ok_icons_draw(OK_ICON_HOME, f, OUT_X + 11, OUT_Y + 10, 16);
-    text(f, font, OUT_X + 21, OUT_Y + 7, ok_house_where() == OK_PLACE_GARDEN ? "In" : "Out", INK, 2);
+    ok_icons_draw(OK_ICON_HOME, f, OUT_X + 16, OUT_Y + 10 + (u->pressed == 101 && u->pressed_ticks ? 1 : 0), 16);
+    centred(f, font, OUT_X + 44, OUT_Y + 7 + (u->pressed == 101 && u->pressed_ticks ? 1 : 0),
+            ok_house_where() == OK_PLACE_GARDEN ? "In" : "Out", INK, 2);
     /* Every few seconds, a pointer to the technical side for anyone watching. */
     centred(f, font, 128, 178,
             u->ticks / 300 % 3 == 2 ? "SELECT: how it all works"
