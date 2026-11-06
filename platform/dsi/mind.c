@@ -308,7 +308,9 @@ static int resolve(const char *host, struct in_addr *out)
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
+    ok_dsi_mind_where = "getaddrinfo";
     if (getaddrinfo(host, "443", &hints, &ai) || !ai) return 0;
+    ok_dsi_mind_where = "resolved";
     *out = ((struct sockaddr_in *)ai->ai_addr)->sin_addr;
     freeaddrinfo(ai);
     return 1;
@@ -426,6 +428,7 @@ static void stopped(const char *fmt, ...)
 static int fd = -1;
 static int resumed; /* the open connection offered to resume a session */
 static char open_host[96]; /* the host the open connection goes to */
+volatile const char *ok_dsi_mind_where = "not started";
 
 static void hang_up(void)
 {
@@ -450,6 +453,7 @@ static int dial(const char *host)
     }
     line(2, "TCP %s:443", inet_ntoa(addr.sin_addr));
     feed("TCP %s:443 ...", inet_ntoa(addr.sin_addr));
+    ok_dsi_mind_where = "tcp connect";
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -3;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 8000) ||
@@ -1183,7 +1187,9 @@ static int thinker(void *arg)
         draw(nonce, sizeof nonce);
         feed("asking %.24s...", cfg.model);
         t0 = cpuGetTiming();
+        ok_dsi_mind_where = "thinking (TLS)";
         r = ok_think_run(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
+        ok_dsi_mind_where = "after thinking";
         ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
         count++;
         if (r != OK_OK) {
@@ -1401,7 +1407,7 @@ static int thinker(void *arg)
 void ok_dsi_mind_start(const char *dir)
 {
     if (started) return;
-    started = 1;
+   started = 1;
     snprintf(dir_path, sizeof dir_path, "%s", dir ? dir : "");
     if (cothread_create(thinker, NULL, 64 * 1024, COTHREAD_DETACHED) < 0) line(0, "0G mind: no thread");
 }

@@ -69,6 +69,7 @@ static struct {
 } known[MAX_KNOWN];
 static int known_count;
 static time_t boot_time;
+volatile const char *ok_dsi_net_where = "not started";
 
 uint32_t ok_dsi_uptime(void)
 {
@@ -84,6 +85,7 @@ static void next_frame(void)
 
 static void pause_seconds(int seconds)
 {
+    ok_dsi_net_where = "pause";
     int frames;
     for (frames = 0; frames < seconds * 60; frames++) next_frame();
 }
@@ -101,12 +103,15 @@ static time_t log_flushed;
 static void flush_log(void)
 {
     FILE *f;
+    volatile const char *was = ok_dsi_net_where;
+    ok_dsi_net_where = "SD log write";
     if (log_len && log_path[0] && (f = fopen(log_path, "a"))) {
         fwrite(log_buf, 1, log_len, f);
         fclose(f);
     }
     log_len = 0;
     log_flushed = time(NULL);
+    ok_dsi_net_where = was;
 }
 
 static void line(int i, const char *fmt, ...)
@@ -278,7 +283,9 @@ static void draw_key(uint8_t key[32])
 static int wifi_init(void)
 {
     static int initialised;
+    ok_dsi_net_where = "Wifi_InitDefault";
     if (!initialised) initialised = Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE);
+    ok_dsi_net_where = "after Wifi init";
     return initialised;
 }
 
@@ -358,6 +365,7 @@ static Wifi_AccessPoint found_ap[24];
 static int scan(void)
 {
     int frames, n, i;
+    ok_dsi_net_where = "scan";
     Wifi_EnableWifi();
     Wifi_ScanMode();
     for (frames = 0; frames < 60 * 3; frames++) next_frame();
@@ -398,6 +406,7 @@ static int wifi_up(void)
         line(0, "Wi-Fi: console settings");
         Wifi_AutoConnect();
     }
+    ok_dsi_net_where = "wait_online";
     return wait_online(report_wifi);
 }
 
@@ -502,6 +511,7 @@ static int lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *le
     size_t qn;
     int fd, tries, ok = 0;
     (void)ctx;
+    ok_dsi_net_where = "dns lookup";
     if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) return 0;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     memset(&addr, 0, sizeof addr);
@@ -662,7 +672,9 @@ static void crawl(int seconds, uint8_t fork[4], int seeds_from, int seeds_to)
         ok_v4_crawl_add_node(&c, nodes[i].pub, &at);
     }
     while ((now = time(NULL)) - start < seconds && !ui_wifi) {
+        ok_dsi_net_where = "crawl step";
         ok_v4_crawl_step(&c, (uint32_t)now);
+        ok_dsi_net_where = "crawl wait";
         stir();
         if (frames++ % 30 == 0)
             line(3, "v4 %lds: %d seen %u rx %u ok", (long)(now - start), c.count, c.received, c.found_count);
@@ -687,6 +699,7 @@ static int read_ms = 5000;
 static int sock_read(void *ctx, uint8_t *buf, size_t n)
 {
     int fd = *(int *)ctx, k;
+    ok_dsi_net_where = "session read";
     if (!wait_for(fd, POLLIN, read_ms)) return OK_IO_IDLE;
     k = recv(fd, buf, n, 0);
     if (k > 0) ok_facts_now.bytes_in += (uint32_t)k;
@@ -696,6 +709,7 @@ static int sock_read(void *ctx, uint8_t *buf, size_t n)
 static int sock_write(void *ctx, const uint8_t *buf, size_t n)
 {
     int fd = *(int *)ctx, k;
+    ok_dsi_net_where = "session write";
     if (!wait_for(fd, POLLOUT, 15000)) return 0;
     k = send(fd, buf, n, 0);
     if (k > 0) ok_facts_now.bytes_out += (uint32_t)k;
@@ -855,6 +869,7 @@ static int dial(int i, int row)
 
     line(row, "%u.%u.%u.%u: connecting", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
     begin_peer_fact(i);
+    ok_dsi_net_where = "tcp connect";
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return 0;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     memset(&addr, 0, sizeof addr);
@@ -898,11 +913,14 @@ static int dial(int i, int row)
     current_client[0] = 0;
     admitted = 0;
     read_ms = 5000;
+    ok_dsi_net_where = "session";
     ok_session_dial(&io, priv, nodes[i].pub, &e, net->net, (uint64_t)time(NULL), "okupa/0.1 (DSi)", &rep);
+    ok_dsi_net_where = "closing socket";
     ok_wipe(priv, sizeof priv);
     ok_wipe(&e, sizeof e);
     shutdown(fd, SHUT_WR);
     close(fd);
+    ok_dsi_net_where = "after dial";
     /* A node that reached Status can take a transaction even if it is full
      * (it is handed over before it hangs up): worth remembering. */
     if (rep.status) remember_peer(i);

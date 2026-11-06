@@ -49,10 +49,15 @@ static void fade(uint16_t *f, uint16_t to, int k)
 
 static void disc(uint16_t *f, int cx, int cy, int r2x, uint16_t c) /* r2x: radius in half pixels */
 {
-    int x, y, r = r2x / 2 + 1;
-    for (y = cy - r; y <= cy + r; y++)
-        for (x = cx - r; x <= cx + r; x++)
-            if (x >= 0 && y >= 0 && x < W && y < H && ((x - cx) * (x - cx) + (y - cy) * (y - cy)) * 4 <= r2x * r2x) f[y * W + x] = c;
+    int y, r = r2x / 2 + 1;
+    for (y = cy - r; y <= cy + r; y++) { /* a span a row: the DS is slow per pixel */
+        int dy = y - cy, dx = 0, x0, x1, x;
+        if (y < 0 || y >= H || dy * dy * 4 > r2x * r2x) continue;
+        while ((dx + 1) * (dx + 1) * 4 + dy * dy * 4 <= r2x * r2x) dx++;
+        x0 = cx - dx < 0 ? 0 : cx - dx;
+        x1 = cx + dx >= W ? W - 1 : cx + dx;
+        for (x = x0; x <= x1; x++) f[y * W + x] = c;
+    }
 }
 
 /* Text at an integer scale; dotted draws only every third diagonal, like a
@@ -88,7 +93,6 @@ void ok_intro_splash(uint16_t *top, uint16_t *bottom, uint32_t t)
     char by[16];
     int letters = clamp(((int)t - 118) / 4, 0, 12);
     fill(top, paper);
-    fill(bottom, paper);
     /* A sun of halftone dots behind the name, its rays turning slowly. */
     for (y = 3; y < H; y += 6)
         for (x = 3; x < W; x += 6) {
@@ -113,12 +117,21 @@ void ok_intro_splash(uint16_t *top, uint16_t *bottom, uint32_t t)
     snprintf(by, sizeof by, "%.*s", letters, "by victorxva");
     big_text(top, &ok_sans_bold, 128, 126, by, 1, ink, 0, 99);
     if (t > 118 && letters < 12 && (t / 8) % 2) big_text(top, &ok_sans_bold, 128 + ok_text_width(&ok_sans_bold, by) / 2 + 4, 126, "_", 1, ink, 0, 99);
-    /* Below: a halftone falling into the bottom, and a line to tap. */
-    for (y = 3; y < H; y += 6)
-        for (x = 3; x < W; x += 6) {
-            int k = y * 1000 / H;
-            disc(bottom, x, y, clamp(k * k / 1000 * 6 / 1000, 0, 6), RGB(24, 21, 16));
+    /* Below: a halftone falling into the bottom (drawn once, then copied), and a line to tap. */
+    {
+        static uint16_t below[W * H];
+        static int below_ready;
+        if (!below_ready) {
+            fill(below, paper);
+            for (y = 3; y < H; y += 6)
+                for (x = 3; x < W; x += 6) {
+                    int k = y * 1000 / H;
+                    disc(below, x, y, clamp(k * k / 1000 * 6 / 1000, 0, 6), RGB(24, 21, 16));
+                }
+            below_ready = 1;
         }
+        memcpy(bottom, below, sizeof below);
+    }
     big_text(bottom, &ok_sans_regular, 128, 150, "(c) 2026 victorxva", 1, RGB(12, 10, 8), 0, 99);
     if (t > 200 && (t / 30) % 2) big_text(bottom, &ok_sans_bold, 128, 84, "Touch the screen", 1, ink, 0, 99);
     /* In from black, out to black. */
@@ -169,8 +182,16 @@ void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
     ok_house_outside(top, eye, at, 300, 20, 40, t);
     /* Cinema bars, and the warm glow of the window filling the screen at the end. */
     for (i = 0; i < W * 20; i++) top[i] = top[(H - 20) * W + i] = 0x8000;
-    fade(top, 0x8000, 1000 - ease(t, 0, 50));
-    fade(top, RGB(31, 26, 16), ease(t, 690, OK_FILM_TICKS - 20));
+    if (ok_r3d_on_hardware()) { /* over the hardware's 3D: a solid colour, blended in by the hardware */
+        int in = 1000 - ease(t, 0, 50), out = ease(t, 690, OK_FILM_TICKS - 20);
+        if (in > 0 || out > 0) {
+            fill(top, in > 0 ? 0x8000 : RGB(31, 26, 16));
+            ok_r3d_layer_alpha((in > 0 ? in : out) * 16 / 1000);
+        }
+    } else {
+        fade(top, 0x8000, 1000 - ease(t, 0, 50));
+        fade(top, RGB(31, 26, 16), ease(t, 690, OK_FILM_TICKS - 20));
+    }
     fill(bottom, RGB(2, 2, 3));
     for (i = 0; i < (int)(sizeof captions / sizeof captions[0]); i++) {
         int in = ease(t, captions[i].from, captions[i].from + 40), out = ease(t, captions[i].to - 40, captions[i].to);

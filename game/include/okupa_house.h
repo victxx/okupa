@@ -21,6 +21,13 @@ enum { OK_OUT_TILES, OK_OUT_MOSS_TILES, OK_OUT_GRASS, OK_OUT_FLOWERS, OK_OUT_EAR
        OK_OUT_SIDING, OK_OUT_DOOR, OK_OUT_BARK, OK_OUT_LEAVES, OK_OUT_DECK, OK_OUT_STONE, OK_OUT_BRICK, OK_OUT_IVY,
        OK_OUT_CLOUD };
 extern const uint16_t ok_outside_skin[128 * 128];
+/* The four skies outside, 360 degree panoramas of 512x256 palette indices
+ * (game/src/sky_art.c). */
+enum { OK_SKY_DAWN, OK_SKY_DAY, OK_SKY_DUSK, OK_SKY_NIGHT };
+extern const uint16_t ok_sky_palette[4][256];
+extern const uint8_t ok_sky_art[4][512 * 256];
+/* Two plant sprites of 32x32, side by side, 0 = see-through (game/src/plant_art.c). */
+extern const uint16_t ok_plant_art[2 * 32 * 32];
 /* Six hanging ivy sprites of 32x64, side by side, 0 = see-through (game/src/ivy_art.c). */
 extern const uint16_t ok_ivy_art[6 * 32 * 64];
 
@@ -35,6 +42,14 @@ void ok_house_room(ok_monkey_room *room);
  * on easels. Empty frames stay up, waiting. */
 #define OK_HOUSE_FRAMES 12
 void ok_house_frame(int slot, const uint8_t *pixels);
+/* The okupa's own drawing hangs in this slot, in a gilt frame (-1: none). */
+void ok_house_own_frame(int slot);
+/* Something the okupa's mind made: up to 16 boxes {x, y, z, w, h, d,
+ * colour} on a 16-cube grid (y up, from the floor; colour 0..15), standing
+ * on the floor of a place (OK_PLACE_*) at x, z (hundredths). n 0 clears it. */
+void ok_house_object(const uint8_t (*boxes)[7], int n, int where, int32_t x, int32_t z);
+/* Where a thing to look at (OK_GAZE_*) is in the current place (hundredths). */
+void ok_house_gaze_point(int gaze, int32_t out[3]);
 /* A new picture arriving in an attic slot (0-5): t ticks into its hanging
  * (drop, bump, swing, settle, about 2.5 s; slot -1 when none). */
 #define OK_HOUSE_HANG_TICKS 170
@@ -55,5 +70,17 @@ void ok_house_outside(uint16_t *frame, ok_v3 eye, ok_v3 target, int focal, int h
  * hung nothing there (NULL: the frame stays empty). */
 void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const uint8_t *drawing, const ok_look *look,
                    const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face);
+
+/* Where the time goes, for the console's own measurement: the platform
+ * sets the clock (microseconds); each slot is a smoothed section time.
+ * Outside: 0 set-up, 1 sky, 2 scene, 3 fireflies, 4 haze. Attic: 5 the
+ * kept room back, 6 the okupa, 7 outlines. */
+#define OK_HOUSE_PROF 8
+extern uint32_t (*ok_house_clock)(void);
+/* If the platform sets it, the sky is handed to it instead of drawn: where
+ * the camera looks (turn and pitch in 1/4096 turn), its focal length, and
+ * the moods (OK_SKY_*) with k/256 of next over mood. */
+extern void (*ok_house_sky_layer)(int cam_az, int pitch, int focal, int mood, int next, int k);
+extern uint32_t ok_house_prof[OK_HOUSE_PROF];
 
 #endif

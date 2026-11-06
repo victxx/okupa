@@ -1,5 +1,8 @@
 #include "okupa_r3d.h"
 #include <string.h>
+#ifdef OK_R3D_GL
+#include <nds.h>
+#endif
 
 #define W OK_R3D_W
 #define H OK_R3D_H
@@ -42,6 +45,7 @@ typedef struct {
     int32_t u, v;  /* texel, 1/16 */
     int ok;
     ok_v3 w, n;    /* world position and normal */
+    int32_t cx, cy, cz; /* camera space, Q12 (for the DS's 3D hardware) */
 } vert;
 
 static uint16_t *fb;
@@ -63,12 +67,70 @@ static int triangles;
 static const uint16_t *tex;
 static int tex_stride, uv_x, uv_y, uv_w = 1, uv_h = 1, tile, flatten, avg_r, avg_g, avg_b;
 static uint8_t lut[4][3][32]; /* channel value under each tone */
+static int lut_stale = 1;    /* the light changed since lut was made */
 /* A kept frame (ok_r3d_keep), and the rectangle drawn since it was kept. */
 static uint16_t keep_fb[W * H];
+#ifdef OK_R3D_GL /* the hardware keeps no depth or objects; the software renderer here only draws icons, unkept */
+static int32_t keep_z[1];
+static uint8_t keep_ids[1], keep_edge_on[256];
+#else
 static int32_t keep_z[W * H];
 static uint8_t keep_ids[W * H], keep_edge_on[256];
+#endif
 static uint16_t keep_edge_colour[256];
 static int dirty_x0, dirty_y0, dirty_x1, dirty_y1;
+static int projecting; /* ok_r3d_project wants the screen position even on the hardware */
+#ifdef OK_R3D_GL
+/* Everything drawn after ok_r3d_begin is recorded as GPU commands; a kept
+ * frame's list is replayed by DMA each frame (cheap), and what is drawn
+ * after ok_r3d_restore goes to the GPU directly. */
+#define GX_WORDS 40000
+#ifndef GL_CULL_SIDE
+#define GL_CULL_SIDE POLY_CULL_BACK /* which side is the back, for the triangles tri() orients */
+#endif
+static uint32_t gx_rec[GX_WORDS + 1], gx_kept[GX_WORDS + 1];
+static int gx_n, gx_recording, gx_kept_ok, gx_kept_polys, gx_kept_alpha = 31;
+static uint16_t gx_kept_clear = 0x8000;
+static void gx(uint32_t cmd, int n, uint32_t p1, uint32_t p2)
+{
+    uint32_t pack = cmd; /* one command a packet; the rest of the packet is NOPs */
+    if (gx_recording) {
+        if (gx_n + 3 > GX_WORDS) return;
+        gx_rec[1 + gx_n++] = pack;
+        if (n > 0) gx_rec[1 + gx_n++] = p1;
+        if (n > 1) gx_rec[1 + gx_n++] = p2;
+        return;
+    }
+    GFX_FIFO = pack;
+    if (n > 0) GFX_FIFO = p1;
+    if (n > 1) GFX_FIFO = p2;
+}
+static void gx_matrix(const int32_t m[12])
+{
+    int i;
+    if (gx_recording) {
+        if (gx_n + 13 > GX_WORDS) return;
+        gx_rec[1 + gx_n++] = 0x17; /* MTX_LOAD_4x3 */
+        for (i = 0; i < 12; i++) gx_rec[1 + gx_n++] = (uint32_t)m[i];
+        return;
+    }
+    GFX_FIFO = 0x17;
+    for (i = 0; i < 12; i++) GFX_FIFO = (uint32_t)m[i];
+}
+static int gx_world_n, gx_after_camera;
+static void gx_play(uint32_t *list, int n)
+{
+    int i;
+    /* Straight into the FIFO from the CPU (it waits by itself when the FIFO
+     * is full); no DMA, nothing left running behind our back. */
+    for (i = 1; i <= n; i++) GFX_FIFO = list[i];
+}
+static int gl_on; /* off until the platform turns it on: icons are drawn in software first */
+static int gl_cpu_cull = 1; /* drop what this camera cannot see before it reaches the hardware */
+static int32_t gl_kx, gl_ky;
+static int gl_dirty = 1, gl_open, gl_polys, gl_clear_alpha = 31;
+static uint16_t gl_clear = 0x8000;
+#endif
 
 /* Divisions: the DSi's CPU has no divide instruction, so a 64-bit one in C
  * costs hundreds of cycles. The platform can hand in its hardware divider. */
@@ -201,7 +263,7 @@ static ok_v3 rot(const xform *x, ok_v3 v)
                       dot(ok_v3_make(x->m[2][0], x->m[2][1], x->m[2][2]), v));
 }
 
-static uint16_t rgb(int r, int g, int b)
+static uint16_t col555(int r, int g, int b)
 {
     r = r < 0 ? 0 : r > 31 ? 31 : r;
     g = g < 0 ? 0 : g > 31 ? 31 : g;
@@ -213,7 +275,19 @@ void ok_r3d_begin(uint16_t *frame, uint16_t background)
 {
     int i;
     fb = frame;
-    for (i = 0; i < W * H; i++) fb[i] = background;
+#ifdef OK_R3D_GL
+    if (gl_on) {
+        memset(fb, 0, W * H * 2); /* the 2D layer above the 3D: see-through */
+        gl_clear = background;
+        gl_clear_alpha = 31;
+        gl_dirty = 1;
+        gl_open = 0;
+        gx_n = 0;
+        gx_recording = 1;
+        gl_polys = 0;
+    } else
+#endif
+        for (i = 0; i < W * H; i++) fb[i] = background;
     memset(zbuf, 0, sizeof zbuf);
     memset(ids, 0, sizeof ids);
     memset(edge_on, 0, sizeof edge_on);
@@ -237,10 +311,33 @@ void ok_r3d_camera(ok_v3 eye, ok_v3 target, int focal_px)
     cam.r = norm(ok_v3_make(-cam.f.z, 0, cam.f.x));
     cam.u = cross(cam.r, cam.f);
     cam.focal = focal_px;
+#ifdef OK_R3D_GL
+    /* Vertices come in camera space, x and y already scaled by the focal
+     * length, a 64th of the size: a plain 90 degree frustum does the rest. */
+    gl_kx = focal_px * 8;            /* focal / 128 / 64, times 65536 */
+    gl_ky = focal_px * 65536 / 6144; /* focal / 96 / 64 */
+    if (gl_on) { /* the camera as the hardware's matrix: world (a 16th) to the fixed frustum */
+        int32_t m[12], sx = focal_px * 4096 / 128, sy = focal_px * 4096 / 96;
+        m[0] = (int32_t)((int64_t)cam.r.x * sx >> 12), m[1] = (int32_t)((int64_t)cam.u.x * sy >> 12), m[2] = -cam.f.x;
+        m[3] = (int32_t)((int64_t)cam.r.y * sx >> 12), m[4] = (int32_t)((int64_t)cam.u.y * sy >> 12), m[5] = -cam.f.y;
+        m[6] = (int32_t)((int64_t)cam.r.z * sx >> 12), m[7] = (int32_t)((int64_t)cam.u.z * sy >> 12), m[8] = -cam.f.z;
+        m[9] = (int32_t)(-((int64_t)dot(cam.r, eye) >> 4) * sx >> 12);
+        m[10] = (int32_t)(-((int64_t)dot(cam.u, eye) >> 4) * sy >> 12);
+        m[11] = (int32_t)((int64_t)dot(cam.f, eye) >> 4);
+        if (gl_open) gx(FIFO_END, 0, 0, 0);
+        gl_open = 0;
+        gl_dirty = 1;
+        gx_matrix(m);
+        gx_after_camera = gx_n;
+    }
+#endif
 }
 
 void ok_r3d_light(ok_v3 light_dir, ok_v3 light, ok_v3 ambient)
 {
+    if (light.x != light_rgb.x || light.y != light_rgb.y || light.z != light_rgb.z || ambient.x != ambient_rgb.x ||
+        ambient.y != ambient_rgb.y || ambient.z != ambient_rgb.z)
+        lut_stale = 1;
     to_light = norm(light_dir);
     light_rgb = light;
     ambient_rgb = ambient;
@@ -255,11 +352,11 @@ void ok_r3d_material(uint16_t colour, int id, int flags)
             tone[k] = colour | 0x8000;
             continue;
         }
-        tone[k] = rgb((int)((int64_t)r * (ambient_rgb.x + light_rgb.x * k / 3) / 4096),
+        tone[k] = col555((int)((int64_t)r * (ambient_rgb.x + light_rgb.x * k / 3) / 4096),
                       (int)((int64_t)g * (ambient_rgb.y + light_rgb.y * k / 3) / 4096),
                       (int)((int64_t)b * (ambient_rgb.z + light_rgb.z * k / 3) / 4096));
     }
-    for (k = 0; k < 4 && (flags & OK_R3D_TEXTURED); k++) {
+    for (k = 0; k < 4 && (flags & OK_R3D_TEXTURED) && lut_stale; k++) { /* the same for every texture under one light */
         int c, i;
         for (c = 0; c < 3; c++) {
             ok_fx f = c == 0 ? ambient_rgb.x + light_rgb.x * k / 3 : c == 1 ? ambient_rgb.y + light_rgb.y * k / 3
@@ -270,7 +367,11 @@ void ok_r3d_material(uint16_t colour, int id, int flags)
             }
         }
     }
+    if (flags & OK_R3D_TEXTURED) lut_stale = 0;
     if ((flags & OK_R3D_TEXTURED) && !tex) flags &= ~OK_R3D_TEXTURED;
+#ifdef OK_R3D_GL
+    gl_dirty = 1;
+#endif
     cur_id = id & 255;
     cur_flags = flags;
     if (flags & OK_R3D_SHADOW) { /* shadows: the colour's red is how dark (k/32), the id picks the layer */
@@ -280,7 +381,7 @@ void ok_r3d_material(uint16_t colour, int id, int flags)
     if (flags & OK_R3D_EDGE) {
         uint16_t t = tone[0];
         edge_on[cur_id] = 1;
-        edge_colour[cur_id] = rgb((t & 31) * 9 / 20, (t >> 5 & 31) * 9 / 20, (t >> 10 & 31) * 9 / 20 + 1);
+        edge_colour[cur_id] = col555((t & 31) * 9 / 20, (t >> 5 & 31) * 9 / 20, (t >> 10 & 31) * 9 / 20 + 1);
     }
 }
 
@@ -288,10 +389,16 @@ void ok_r3d_texture(const uint16_t *texels, int stride)
 {
     tex = texels;
     tex_stride = stride;
+#ifdef OK_R3D_GL
+    gl_dirty = 1;
+#endif
 }
 
 void ok_r3d_uv(int x, int y, int w, int h)
 {
+#ifdef OK_R3D_GL
+    gl_dirty = 1;
+#endif
     uv_x = x;
     uv_y = y;
     uv_w = w > 0 ? w : 1;
@@ -395,12 +502,24 @@ static void put(int k, ok_v3 p, ok_v3 n)
         ok_fx k = (3 * 4096 - dot(v->n, v->n)) / 2;
         v->n = scale(v->n, k);
     }
+#ifdef OK_R3D_GL
+    if (gl_on && !projecting && !gl_cpu_cull) { /* a scene for other cameras: world position, normal and light are all it needs */
+        v->l = light_of(v->n);
+        v->u = v->v = 0;
+        v->ok = 1;
+        STAT(OK_R3D_STAT_VERTS, 1);
+        return;
+    }
+#endif
     d = sub(v->w, cam.eye);
     vx = dot(d, cam.r);
     vy = dot(d, cam.u);
     vz = dot(d, cam.f);
     v->ok = 0;
     v->u = v->v = 0;
+    v->cx = vx;
+    v->cy = vy;
+    v->cz = vz;
     if (vz < NEAR) return;
     inv = divide((int64_t)1 << 40, vz);
     STAT(OK_R3D_STAT_VERTS, 1);
@@ -428,8 +547,343 @@ static uint16_t shade_by(uint16_t c, int k)
     return (uint16_t)(0x8000u | r | g << 5 | b << 10);
 }
 
+#ifdef OK_R3D_GL
+/* ---- The DS's own 3D hardware ----------------------------------------------
+ * The shapes are built and lit here exactly as for the software renderer,
+ * then each triangle goes to the GPU in camera space with its tone as the
+ * vertex colour. Textures are the uv rectangles, uploaded once each, small. */
+typedef struct {
+    const uint16_t *src;
+    int x, y, w, h, flat, tiled, name, tw, th;
+} gl_texe;
+#define GL_TEXES 96
+static gl_texe texes[GL_TEXES];
+static int ntex, gl_tex_cur = -1;
+static uint16_t gl_buf[32 * 64];
+
+static int pow2_at_most(int v, int cap)
+{
+    int p = 8;
+    while (p * 2 <= v && p * 2 <= cap) p *= 2;
+    return p;
+}
+
+/* The texture for the current rectangle, uploaded on first use. */
+static int gl_texture(void)
+{
+    int i, x, y, cap = tile ? 16 : 32;
+    gl_texe *e;
+    for (i = 0; i < ntex; i++) {
+        e = &texes[i];
+        if (e->src == tex && e->x == uv_x && e->y == uv_y && e->w == uv_w && e->h == uv_h && e->flat == flatten &&
+            e->tiled == (tile != 0))
+            return e->name >= 0 ? i : -1;
+    }
+    if (ntex == GL_TEXES) return -1;
+    e = &texes[ntex++];
+    e->src = tex, e->x = uv_x, e->y = uv_y, e->w = uv_w, e->h = uv_h, e->flat = flatten, e->tiled = tile != 0;
+    e->tw = pow2_at_most(uv_w, cap);
+    e->th = pow2_at_most(uv_h, (cur_flags & OK_R3D_CUTOUT) ? 64 : cap);
+    for (y = 0; y < e->th; y++)
+        for (x = 0; x < e->tw; x++) {
+            uint16_t t = tex[(uv_y + y * uv_h / e->th) * tex_stride + uv_x + x * uv_w / e->tw];
+            if (flatten && (t & 0x8000u))
+                t = (uint16_t)(0x8000u | (((t & 31) * (256 - flatten) + avg_r * flatten) >> 8) |
+                               ((((t >> 5 & 31) * (256 - flatten) + avg_g * flatten) >> 8) << 5) |
+                               ((((t >> 10 & 31) * (256 - flatten) + avg_b * flatten) >> 8) << 10));
+            gl_buf[y * e->tw + x] = t;
+        }
+    DC_FlushRange(gl_buf, sizeof gl_buf);
+    if (!glGenTextures(1, &e->name)) {
+        e->name = -1;
+        return -1;
+    }
+    glBindTexture(0, e->name);
+    if (!glTexImage2D(0, 0, GL_RGBA, e->tw, e->th, 0, TEXGEN_OFF | GL_TEXTURE_WRAP_S | (e->tiled ? GL_TEXTURE_WRAP_T : 0),
+                      gl_buf)) {
+        glDeleteTextures(1, &e->name);
+        e->name = -1;
+        return -1;
+    }
+    return ntex - 1;
+}
+
+void ok_r3d_texture_changed(const uint16_t *texels)
+{
+    int i, j = 0;
+    for (i = 0; i < ntex; i++) {
+        if (texes[i].src == texels) {
+            if (texes[i].name >= 0) glDeleteTextures(1, &texes[i].name);
+            continue;
+        }
+        texes[j++] = texes[i];
+    }
+    ntex = j;
+    gl_dirty = 1;
+}
+
+static void gl_state(void)
+{
+    int textured = cur_flags & OK_R3D_TEXTURED;
+    if (gl_open) gx(FIFO_END, 0, 0, 0);
+    gl_tex_cur = textured ? gl_texture() : -1;
+    if (gl_tex_cur >= 0) {
+        glBindTexture(0, texes[gl_tex_cur].name);
+        gx(FIFO_TEX_FORMAT, 1, glGetTexParameter(), 0);
+    } else {
+        gx(FIFO_TEX_FORMAT, 1, 0, 0);
+    }
+    gx(FIFO_POLY_FORMAT, 1,
+       POLY_ALPHA((cur_flags & OK_R3D_SHADOW) ? (uint32_t)(shadow_k < 31 ? shadow_k : 30) : 31) |
+           POLY_ID((cur_flags & OK_R3D_EDGE) ? 1 + (uint32_t)(cur_id % 62) : 0) |
+           ((cur_flags & OK_R3D_BOTH) ? POLY_CULL_NONE : GL_CULL_SIDE) | POLY_RENDER_FAR_POLYS |
+           POLY_RENDER_1DOT_POLYS,
+       0);
+    gx(FIFO_BEGIN, 1, GL_TRIANGLES, 0);
+    gl_open = 1;
+    gl_dirty = 0;
+}
+
+void ok_r3d_cpu_cull(int on)
+{
+    gl_cpu_cull = on;
+}
+
+static void gl_tri(const vert *a, const vert *b, const vert *c)
+{
+    const vert *v[3];
+    int i, textured;
+    if (gl_cpu_cull) {
+        /* Under this camera, as the software renderer would: facing away, off
+         * the screen or smaller than a pixel, it is dropped here; on the
+         * hardware it would still take room in its 2048 polygons. */
+        int64_t area = (int64_t)(b->x - a->x) * (c->y - a->y) - (int64_t)(b->y - a->y) * (c->x - a->x);
+        int32_t minx = a->x < b->x ? (a->x < c->x ? a->x : c->x) : (b->x < c->x ? b->x : c->x);
+        int32_t maxx = a->x > b->x ? (a->x > c->x ? a->x : c->x) : (b->x > c->x ? b->x : c->x);
+        int32_t miny = a->y < b->y ? (a->y < c->y ? a->y : c->y) : (b->y < c->y ? b->y : c->y);
+        int32_t maxy = a->y > b->y ? (a->y > c->y ? a->y : c->y) : (b->y > c->y ? b->y : c->y);
+        int32_t x0 = (minx - 8 + 15) >> 4, x1 = (maxx - 8) >> 4, y0 = (miny - 8 + 15) >> 4, y1 = (maxy - 8) >> 4;
+        if (area == 0 || (area > 0 && !(cur_flags & OK_R3D_BOTH))) return;
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > W - 1) x1 = W - 1;
+        if (y1 > H - 1) y1 = H - 1;
+        if (x0 > x1 || y0 > y1) return;
+    }
+    v[0] = a, v[1] = b, v[2] = c;
+    for (i = 0; i < 3; i++) { /* world space, a 16th (fine depth, up to 128 units): it must fit 16 bits */
+        int32_t x = v[i]->w.x >> 4, y = v[i]->w.y >> 4, z = v[i]->w.z >> 4;
+        if (x > 32767 || x < -32767 || y > 32767 || y < -32767 || z > 32767 || z < -32767) return;
+    }
+    if (gl_dirty) gl_state();
+    textured = (cur_flags & OK_R3D_TEXTURED) && gl_tex_cur >= 0;
+    triangles++;
+    for (i = 0; i < 3; i++) {
+        const vert *p = v[i];
+        int k = tone_of(p->l);
+        uint32_t colour = (cur_flags & OK_R3D_SHADOW) ? 0
+                          : textured ? (uint32_t)RGB15(lut[k][0][31], lut[k][1][31], lut[k][2][31])
+                                     : (uint32_t)(tone[k] & 0x7fff);
+        /* One packet a vertex: colour, texture coordinate, position. */
+        {
+            uint32_t w[5], xy = ((uint32_t)(uint16_t)(p->w.y >> 4) << 16) | (uint16_t)(p->w.x >> 4), zz = (uint32_t)(uint16_t)(p->w.z >> 4);
+            int n = 0, j;
+            if (textured) {
+                const gl_texe *e = &texes[gl_tex_cur];
+                int32_t tu = (int32_t)(p->u * e->tw / e->w), tv = (int32_t)(p->v * e->th / e->h);
+                w[n++] = FIFO_COMMAND_PACK(FIFO_COLOR, FIFO_TEX_COORD, FIFO_VERTEX16, FIFO_NOP);
+                w[n++] = colour;
+                w[n++] = TEXTURE_PACK((t16)tu, (t16)tv);
+            } else {
+                w[n++] = FIFO_COMMAND_PACK(FIFO_COLOR, FIFO_VERTEX16, FIFO_NOP, FIFO_NOP);
+                w[n++] = colour;
+            }
+            w[n++] = xy;
+            w[n++] = zz;
+            if (gx_recording) {
+                if (gx_n + n <= GX_WORDS)
+                    for (j = 0; j < n; j++) gx_rec[1 + gx_n++] = w[j];
+            } else {
+                for (j = 0; j < n; j++) GFX_FIFO = w[j];
+            }
+        }
+    }
+}
+
+/* The scene since the camera was set, kept to be drawn again under other
+ * cameras (the opening film flies round a scene that does not change). */
+void ok_r3d_world_keep(void)
+{
+    if (!gl_on) return;
+    if (gl_open) gx(FIFO_END, 0, 0, 0);
+    gl_open = 0;
+    gl_dirty = 1;
+    gx_world_n = gx_n - gx_after_camera;
+    if (gx_world_n < 0) gx_world_n = 0;
+    /* in the kept frame's buffer: the film and a kept room never share a frame */
+    memcpy(gx_kept + 1, gx_rec + 1 + gx_after_camera, (size_t)gx_world_n * 4);
+    gx_kept_ok = 0;
+}
+
+int ok_r3d_world_again(void)
+{
+    if (!gl_on || !gx_world_n || !gx_recording || gx_n + gx_world_n > GX_WORDS) return 0;
+    if (gl_open) gx(FIFO_END, 0, 0, 0);
+    gl_open = 0;
+    gl_dirty = 1;
+    memcpy(gx_rec + 1 + gx_n, gx_kept + 1, (size_t)gx_world_n * 4);
+    gx_n += gx_world_n;
+    return 1;
+}
+
+void ok_r3d_world_forget(void)
+{
+    gx_world_n = 0;
+}
+
+void ok_r3d_hardware(int on)
+{
+    gl_on = on;
+    if (on) { /* vertices come pre-projected: one fixed frustum for good */
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glFrustumf32(-256, 256, -256, 256, 256, 65536); /* world in 16ths: near 1 unit, far 256 */
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+    }
+}
+
+int ok_r3d_on_hardware(void)
+{
+    return gl_on;
+}
+
+int ok_r3d_kept_triangles(void)
+{
+    return gx_kept_polys;
+}
+
+int ok_r3d_textures(int *failed)
+{
+    int i, bad = 0;
+    for (i = 0; i < ntex; i++) bad += texes[i].name < 0;
+    if (failed) *failed = bad + (ntex == GL_TEXES);
+    return ntex;
+}
+
+int ok_r3d_retains(void)
+{
+    return 1;
+}
+
+void ok_r3d_see_through(void)
+{
+    gl_clear_alpha = 0;
+}
+
+/* The 2D layer laid over the 3D and the sky at k/16, by the hardware's
+ * blending (fades over the 3D, with no work per pixel). */
+static int gl_blend_set;
+void ok_r3d_layer_alpha(int k16)
+{
+    k16 = k16 < 0 ? 0 : k16 > 16 ? 16 : k16;
+    REG_BLDCNT = BLEND_ALPHA | BLEND_SRC_BG3 | BLEND_DST_BG0 | BLEND_DST_BG2 | BLEND_DST_BACKDROP;
+    REG_BLDALPHA = (uint16_t)(k16 | (16 - k16) << 8);
+    gl_blend_set = 1;
+}
+
+void ok_r3d_swap(void)
+{
+    if (!gl_on) return;
+    if (!gl_blend_set) REG_BLDCNT = 0; /* no fade this frame: the 2D layer as it is */
+    gl_blend_set = 0;
+    if (gl_open) gx(FIFO_END, 0, 0, 0);
+    if (gx_recording) { /* drawn since ok_r3d_begin and not kept: show it now */
+        gx_recording = 0;
+        gx_play(gx_rec, gx_n);
+    }
+    gl_open = 0;
+    gl_dirty = 1;
+    glClearColor(gl_clear & 31, gl_clear >> 5 & 31, gl_clear >> 10 & 31, (uint8_t)gl_clear_alpha);
+    glFlush(GL_WBUFFERING);
+    gl_polys = 0;
+}
+#else
+void ok_r3d_layer_alpha(int k16)
+{
+    (void)k16;
+}
+
+void ok_r3d_cpu_cull(int on)
+{
+    (void)on;
+}
+
+void ok_r3d_world_keep(void)
+{
+}
+
+int ok_r3d_world_again(void)
+{
+    return 0;
+}
+
+void ok_r3d_world_forget(void)
+{
+}
+
+void ok_r3d_hardware(int on)
+{
+    (void)on;
+}
+
+int ok_r3d_on_hardware(void)
+{
+    return 0;
+}
+
+int ok_r3d_kept_triangles(void)
+{
+    return 0;
+}
+
+int ok_r3d_textures(int *failed)
+{
+    if (failed) *failed = 0;
+    return 0;
+}
+
+int ok_r3d_retains(void)
+{
+#ifdef OK_R3D_SIM_HARDWARE /* host counts of what the hardware gets: everything every frame */
+    return 0;
+#else
+    return 1;
+#endif
+}
+
+void ok_r3d_see_through(void)
+{
+}
+
+void ok_r3d_swap(void)
+{
+}
+
+void ok_r3d_texture_changed(const uint16_t *texels)
+{
+    (void)texels;
+}
+#endif
+
 static void raster(const vert *a, const vert *b, const vert *c)
 {
+#ifdef OK_R3D_GL
+    if (gl_on) {
+        gl_tri(a, b, c);
+        return;
+    }
+#endif
     int64_t area = (int64_t)(b->x - a->x) * (c->y - a->y) - (int64_t)(b->y - a->y) * (c->x - a->x);
     int32_t minx, maxx, miny, maxy, x, y, x0, x1, y0, y1;
     int64_t dax, dbx, dcx, day, dby, dcy, wa0, wb0, wc0;
@@ -618,6 +1072,9 @@ static void quad_idx(int a, int b, int c, int d)
 
 void ok_r3d_tile(int texels_per_unit)
 {
+#ifdef OK_R3D_GL
+    gl_dirty = 1;
+#endif
     tile = texels_per_unit;
 }
 
@@ -880,6 +1337,21 @@ void ok_r3d_disc(ok_v3 c, ok_fx rx, ok_fx rz, int slices)
 
 void ok_r3d_keep(void)
 {
+#ifdef OK_R3D_GL
+    if (gl_on) { /* the 2D layer, and the commands recorded since ok_r3d_begin */
+        if (gl_open) gx(FIFO_END, 0, 0, 0);
+        gl_open = 0;
+        gl_dirty = 1;
+        memcpy(gx_kept + 1, gx_rec + 1, (size_t)gx_n * 4);
+        gx_kept_ok = gx_n;
+        gx_world_n = 0; /* the buffer is the kept frame's now */
+        gx_kept_polys = triangles;
+        gx_kept_clear = gl_clear;
+        gx_kept_alpha = gl_clear_alpha;
+        gx_recording = 0;
+        return;
+    }
+#endif
     memcpy(keep_fb, fb, sizeof keep_fb);
     memcpy(keep_z, zbuf, sizeof keep_z);
     memcpy(keep_ids, ids, sizeof keep_ids);
@@ -895,6 +1367,26 @@ void ok_r3d_restore(uint16_t *frame)
 {
     int y;
     fb = frame;
+#ifdef OK_R3D_GL
+    if (gl_on) { /* the 2D layer see-through again, and the kept commands replayed; then live */
+        memset(fb, 0, sizeof keep_fb);
+        if (gl_open) gx(FIFO_END, 0, 0, 0);
+        gl_open = 0;
+        gl_dirty = 1;
+        gx_recording = 0;
+        gx_play(gx_kept, gx_kept_ok);
+        gl_polys = gx_kept_polys;
+        gl_clear = gx_kept_clear;
+        gl_clear_alpha = gx_kept_alpha;
+        triangles = 0;
+        memset(stack, 0, sizeof stack);
+        sp = 0;
+        stack[0].m[0][0] = stack[0].m[1][1] = stack[0].m[2][2] = 4096;
+        tile = 0;
+        flatten = 0;
+        return;
+    }
+#endif
     memcpy(fb, keep_fb, sizeof keep_fb);
     for (y = dirty_y0; y <= dirty_y1; y++) {
         memcpy(zbuf + y * W + dirty_x0, keep_z + y * W + dirty_x0, (size_t)(dirty_x1 - dirty_x0 + 1) * sizeof *zbuf);
@@ -915,6 +1407,9 @@ void ok_r3d_restore(uint16_t *frame)
 void ok_r3d_finish(void)
 {
     int x, y, x0 = dirty_x0 - 1, y0 = dirty_y0 - 1, x1 = dirty_x1 + 1, y1 = dirty_y1 + 1;
+#ifdef OK_R3D_GL
+    if (gl_on) return; /* the hardware marks the edges */
+#endif
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x1 > W - 1) x1 = W - 1;
@@ -932,7 +1427,9 @@ void ok_r3d_finish(void)
 
 int ok_r3d_project(ok_v3 p, int *x, int *y, int32_t *depth)
 {
+    projecting = 1;
     put(0, p, ok_v3_make(0, 4096, 0));
+    projecting = 0;
     if (!vb[0].ok) return 0;
     *x = vb[0].x >> 4;
     *y = vb[0].y >> 4;
@@ -942,12 +1439,18 @@ int ok_r3d_project(ok_v3 p, int *x, int *y, int32_t *depth)
 
 int32_t ok_r3d_depth_at(int x, int y)
 {
+#ifdef OK_R3D_GL
+    if (gl_on) return 0;
+#endif
     if (x < 0 || y < 0 || x >= W || y >= H) return 0;
     return zbuf[y * W + x];
 }
 
 int ok_r3d_id_at(int x, int y)
 {
+#ifdef OK_R3D_GL
+    if (gl_on) return 0;
+#endif
     if (x < 0 || y < 0 || x >= W || y >= H) return 0;
     return ids[y * W + x] >= 250 ? 0 : ids[y * W + x]; /* shadows are not objects */
 }

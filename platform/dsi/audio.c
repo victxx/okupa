@@ -37,12 +37,17 @@ void ok_dsi_audio_start(void)
     last_ticks = cpuGetTiming();
     rest = played = 0;
     on = 1;
+#ifndef OKUPA_AUDIO_POLL
     timerStart(TIMER, ClockDivider_1024, TIMER_FREQ_1024(120), fill);
+#endif
 }
 
 /* Kept for callers that wait on something long: the interrupt does it all now. */
 void ok_dsi_audio_pump(void)
 {
+#ifdef OKUPA_AUDIO_POLL
+    fill();
+#endif
 }
 
 static void fill(void)

@@ -1,0 +1,7 @@
+Generate an image: a wide landscape panoramic sky for a 360 degree game background, simple low-poly flat-shaded style like a Nintendo DS game: the sky made of big flat triangular facets in a few colours, chunky low-poly clouds made of flat facets, no ground, no land, no islands, no birds, no text. The horizon sits in the lower third; below it a soft sea of low-poly clouds. Mood: {MOOD}. Wide 3:2 landscape image.
+
+Moods used:
+- dawn: lilac and pale peach sky, the low sun glowing pink and gold near the horizon on the left
+- day: clear bright blue sky, white clouds, a small round sun high on the right
+- dusk: warm orange, coral and magenta sky, a big low sun setting near the horizon in the middle
+- night: deep navy blue sky with many small stars and a crescent moon, dim blue-grey clouds
