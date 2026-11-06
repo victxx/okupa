@@ -104,6 +104,8 @@ int ok_r3d_project(ok_v3 p, int *x, int *y, int32_t *depth);
 int32_t ok_r3d_depth_at(int x, int y);
 /* The object drawn at a pixel (0 = background). */
 int ok_r3d_id_at(int x, int y);
+/* The frame being drawn. */
+uint16_t *ok_r3d_frame(void);
 /* Triangles drawn since ok_r3d_begin (the DSi hardware takes about 2048). */
 int ok_r3d_triangles(void);
 

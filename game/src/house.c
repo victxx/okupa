@@ -146,7 +146,7 @@ static void apply(const light *l)
 static uint8_t gallery[OK_HOUSE_FRAMES][OK_DRAWING_BYTES], hung[OK_HOUSE_FRAMES];
 static uint16_t art[OK_HOUSE_FRAMES][64 * 64];
 /* Where each frame hangs (centre x, y, half size, tilt in degrees, wood). */
-static const int16_t spots[OK_HOUSE_FRAMES][5] = {
+static const int16_t spots[6][5] = {
     {-1050, 520, 165, -2, 0}, {-660, 545, 150, 2, 1}, {-270, 560, 140, -1, 2},
     {150, 545, 150, 3, 1},   {-650, 1010, 140, 2, 2}, {650, 1010, 140, -3, 0},
 };
@@ -160,18 +160,19 @@ void ok_house_frame(int slot, const uint8_t *pixels)
 
 /* One frame: wood, a cream mount, and the drawing in ink, or nothing yet
  * (pixels NULL): an empty frame waiting for its picture. */
-static void framed(int slot, const uint8_t *pixels)
+static void framed_at(int slot, const uint8_t *pixels, int fx, int fy, int fz, int h, int tilt, int wood, int yaw, int lean)
 {
     static const uint16_t woods[3] = {RGB(14, 9, 5), RGB(21, 14, 7), RGB(28, 26, 22)};
-    const int16_t *sp = spots[slot];
-    int x, y, h = sp[2], m = h * 82 / 100, d = h * 70 / 100;
+    int x, y, m = h * 82 / 100, d = h * 70 / 100;
     for (y = 0; y < 64 && pixels; y++)
         for (x = 0; x < 64; x++)
             art[slot][y * 64 + x] = ok_drawing_get(pixels, (unsigned)x, (unsigned)y) ? RGB(5, 4, 4) : RGB(30, 29, 26);
     ok_r3d_push();
-    ok_r3d_translate(P(sp[0], sp[1], -1096));
-    ok_r3d_rotate_z(DEG(sp[3]));
-    tex(OK_ROOM_BEAM, 8, woods[sp[4]], OK_R3D_EDGE); /* the frame */
+    ok_r3d_translate(P(fx, fy, fz));
+    ok_r3d_rotate_y(DEG(yaw));
+    ok_r3d_rotate_x(-DEG(lean));
+    ok_r3d_rotate_z(DEG(tilt));
+    tex(OK_ROOM_BEAM, 8, woods[wood], OK_R3D_EDGE); /* the frame */
     box(-h, -h, 0, h, h, 26);
     mat(RGB(29, 27, 23), 0); /* the mount */
     ok_r3d_quad(P(-m, -m, 28), P(m, -m, 28), P(m, m, 28), P(-m, m, 28));
@@ -184,9 +185,17 @@ static void framed(int slot, const uint8_t *pixels)
         mat(RGB(25, 23, 19), 0); /* empty: a bare, slightly shadowed backing */
     }
     ok_r3d_quad(P(-d, -d, 30), P(d, -d, 30), P(d, d, 30), P(-d, d, 30));
-    limb_house(0, h, 2, -h / 2, h + h / 2, -6, 4); /* the string and the nail */
-    limb_house(0, h, 2, h / 2, h + h / 2, -6, 4);
+    if (!lean) {
+        limb_house(0, h, 2, -h / 2, h + h / 2, -6, 4); /* the string and the nail */
+        limb_house(0, h, 2, h / 2, h + h / 2, -6, 4);
+    }
     ok_r3d_pop();
+}
+
+static void framed(int slot, const uint8_t *pixels)
+{
+    const int16_t *sp = spots[slot];
+    framed_at(slot, pixels, sp[0], sp[1], -1096, sp[2], sp[3], sp[4], 0, 0);
 }
 
 static void bulbs(int x0, int y0, int x1, int y1, int z, int n, int on, int out[][2], int *count)
@@ -327,7 +336,7 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     /* The gallery: six frames, empty until a picture is hung in them. */
     {
         int k;
-        for (k = 0; k < OK_HOUSE_FRAMES; k++) framed(k, hung[k] ? gallery[k] : k == 0 ? drawing : NULL);
+        for (k = 0; k < 6; k++) framed(k, hung[k] ? gallery[k] : k == 0 ? drawing : NULL);
     }
     /* A woven rug. */
     tex(OK_ROOM_RUG, 0, RGB(20, 8, 6), 0);
@@ -446,55 +455,286 @@ static void dot(uint16_t *f, int x, int y, uint16_t c)
     if (x >= 0 && y >= 0 && x < W && y < H) f[y * W + x] = c;
 }
 
-void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const uint8_t *drawing, const ok_look *look,
-                   const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
+static int place;
+static void outside_scene(const light *l, int on);
+static void sky(uint16_t *f, const light *l, uint32_t t);
+
+/* The terrace, seen from the garden: kept like the attic, the okupa on top. */
+static void garden_draw(uint16_t *frame, int m, const ok_look *look, const uint16_t *skin, const ok_monkey_anim *a,
+                        ok_monkey_face *face)
 {
-    int mask_on_floor = look->wear != OK_WEAR_SMILEY;
-    int m = (hour % 24) * 60 + minute % 60, key = (m / 5 * 2 + (lights_off != 0)) * 2 + mask_on_floor, i;
-    uint32_t s = sum(drawing), t = a->ticks;
-    for (i = 0; i < OK_HOUSE_FRAMES; i++) s = s * 7 + (hung[i] ? sum(gallery[i]) + 1 : 0);
+    static const int cam[6] = {1300, 1050, 3400, 1300, 380, 0};
+    uint32_t s = 0;
+    int i, key = m / 5 * 4 + 3;
     light l;
-    light_at(m, lights_off, &l);
+    light_at(m, 0, &l);
+    for (i = 6; i < OK_HOUSE_FRAMES; i++) s = s * 7 + (hung[i] ? sum(gallery[i]) + 1 : 0);
     if (!kept.valid || kept.key != key || kept.art_sum != s) {
-        room(frame, &l, lights_off, drawing, mask_on_floor);
+        next_id = 0;
+        ok_r3d_begin(frame, CHARCOAL);
+        sky(frame, &l, a->ticks);
+        ok_r3d_camera(P(cam[0], cam[1], cam[2]), P(cam[3], cam[4], cam[5]), 330);
+        apply(&l);
+        outside_scene(&l, l.night || m >= 1140);
+        ok_r3d_keep();
         kept.valid = 1;
         kept.key = key;
         kept.art_sum = s;
+        kept.sun = 0;
+        kept.night = 0;
     }
     ok_r3d_restore(frame);
-    ok_r3d_camera(ok_v3_make(0, U(2100), U(4600)), ok_v3_make(0, U(650), 0), 340);
+    ok_r3d_camera(P(cam[0], cam[1], cam[2]), P(cam[3], cam[4], cam[5]), 330);
     apply(&l);
     ok_monkey_draw(look, skin, a, face);
-    /* In bed, the knitted blanket over it, up to the shoulders. */
-    if (a->s[OK_SPRING_LIE].x / 256 > 55) {
-        tex(OK_ROOM_KNIT, 0, RGB(5, 8, 16), OK_R3D_EDGE);
-        ok_r3d_ellipsoid(P(a->room.bed_x + 90, 318 + (int)((int64_t)ok_r3d_sin((int)(a->ticks * 10u)) * 6 / 4096), a->room.bed_z + 20),
-                         P(300, 132, 250), 12, 7);
-        ok_r3d_tile(0);
-    }
     ok_r3d_finish();
-    if (kept.sun) beam(frame, kept.beam_x, kept.beam_y, kept.beam_add, 1); /* standing in the sun, it is lit too */
     ok_monkey_face_draw(frame, face);
-    /* Small living things. */
-    if (kept.night)
-        for (i = 0; i < 6; i++)
-            if ((t / 20 + (uint32_t)i * 7) % 11 && ok_r3d_id_at(kept.stars[i][0], kept.stars[i][1]) < 100)
-                dot(frame, kept.stars[i][0], kept.stars[i][1], RGB(28, 28, 22));
-    /* The flame only where nothing stands in front of the candle. */
-    if (kept.night && !kept.lights_off && ok_r3d_id_at(kept.candle_x, kept.candle_y + 2) != 0 &&
-        ok_r3d_id_at(kept.candle_x, kept.candle_y + 2) < 100 && ok_r3d_id_at(kept.candle_x, kept.candle_y - 3) < 100) {
-        int fl = (int)((t / 5 + t / 13) % 3) - 1;
-        dot(frame, kept.candle_x + fl / 2, kept.candle_y - 2, RGB(31, 30, 20));
-        dot(frame, kept.candle_x, kept.candle_y - 1, RGB(31, 26, 8));
-        dot(frame, kept.candle_x + fl, kept.candle_y - 3, RGB(31, 22, 6));
-        dot(frame, kept.candle_x, kept.candle_y, RGB(31, 18, 4));
+}
+
+void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const uint8_t *drawing, const ok_look *look,
+                   const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
+{
+    if (place == OK_PLACE_GARDEN) {
+        garden_draw(frame, (hour % 24) * 60 + minute % 60, look, skin, a, face);
+        return;
     }
-    if (kept.day) /* dust drifting in the sunbeam */
-        for (i = 0; i < 10; i++) {
-            int u = (int)((t / 3 + (uint32_t)i * 97) % 600), v = (int)((t / 5 + (uint32_t)i * 53) % 400);
-            int x = kept.beam_x[0] + (kept.beam_x[3] - kept.beam_x[0]) * v / 400 +
-                    ((kept.beam_x[1] - kept.beam_x[0]) + ((kept.beam_x[2] - kept.beam_x[3]) - (kept.beam_x[1] - kept.beam_x[0])) * v / 400) * u / 600;
-            int y = kept.beam_y[0] + (kept.beam_y[3] - kept.beam_y[0]) * v / 400 + (int)(ok_r3d_sin((int)(t * 9 + (uint32_t)i * 400)) * 2 / 4096);
-            if (ok_r3d_id_at(x, y) < 100) dot(frame, x, y, RGB(31, 30, 24));
+    {
+        int mask_on_floor = look->wear != OK_WEAR_SMILEY;
+        int m = (hour % 24) * 60 + minute % 60, key = ((m / 5 * 2 + (lights_off != 0)) * 2 + mask_on_floor) * 4, i;
+        uint32_t s = sum(drawing), t = a->ticks;
+        for (i = 0; i < OK_HOUSE_FRAMES; i++) s = s * 7 + (hung[i] ? sum(gallery[i]) + 1 : 0);
+        light l;
+        light_at(m, lights_off, &l);
+        if (!kept.valid || kept.key != key || kept.art_sum != s) {
+            room(frame, &l, lights_off, drawing, mask_on_floor);
+            kept.valid = 1;
+            kept.key = key;
+            kept.art_sum = s;
         }
+        ok_r3d_restore(frame);
+        ok_r3d_camera(ok_v3_make(0, U(2100), U(4600)), ok_v3_make(0, U(650), 0), 340);
+        apply(&l);
+        ok_monkey_draw(look, skin, a, face);
+        /* In bed, the knitted blanket over it, up to the shoulders. */
+        if (a->s[OK_SPRING_LIE].x / 256 > 55) {
+            tex(OK_ROOM_KNIT, 0, RGB(5, 8, 16), OK_R3D_EDGE);
+            ok_r3d_ellipsoid(P(a->room.bed_x + 90, 318 + (int)((int64_t)ok_r3d_sin((int)(a->ticks * 10u)) * 6 / 4096), a->room.bed_z + 20),
+                             P(300, 132, 250), 12, 7);
+            ok_r3d_tile(0);
+        }
+        ok_r3d_finish();
+        if (kept.sun) beam(frame, kept.beam_x, kept.beam_y, kept.beam_add, 1); /* standing in the sun, it is lit too */
+        ok_monkey_face_draw(frame, face);
+        /* Small living things. */
+        if (kept.night)
+            for (i = 0; i < 6; i++)
+                if ((t / 20 + (uint32_t)i * 7) % 11 && ok_r3d_id_at(kept.stars[i][0], kept.stars[i][1]) < 100)
+                    dot(frame, kept.stars[i][0], kept.stars[i][1], RGB(28, 28, 22));
+        /* The flame only where nothing stands in front of the candle. */
+        if (kept.night && !kept.lights_off && ok_r3d_id_at(kept.candle_x, kept.candle_y + 2) != 0 &&
+            ok_r3d_id_at(kept.candle_x, kept.candle_y + 2) < 100 && ok_r3d_id_at(kept.candle_x, kept.candle_y - 3) < 100) {
+            int fl = (int)((t / 5 + t / 13) % 3) - 1;
+            dot(frame, kept.candle_x + fl / 2, kept.candle_y - 2, RGB(31, 30, 20));
+            dot(frame, kept.candle_x, kept.candle_y - 1, RGB(31, 26, 8));
+            dot(frame, kept.candle_x + fl, kept.candle_y - 3, RGB(31, 22, 6));
+            dot(frame, kept.candle_x, kept.candle_y, RGB(31, 18, 4));
+        }
+        if (kept.day) /* dust drifting in the sunbeam */
+            for (i = 0; i < 10; i++) {
+                int u = (int)((t / 3 + (uint32_t)i * 97) % 600), v = (int)((t / 5 + (uint32_t)i * 53) % 400);
+                int x = kept.beam_x[0] + (kept.beam_x[3] - kept.beam_x[0]) * v / 400 +
+                        ((kept.beam_x[1] - kept.beam_x[0]) + ((kept.beam_x[2] - kept.beam_x[3]) - (kept.beam_x[1] - kept.beam_x[0])) * v / 400) * u / 600;
+                int y = kept.beam_y[0] + (kept.beam_y[3] - kept.beam_y[0]) * v / 400 + (int)(ok_r3d_sin((int)(t * 9 + (uint32_t)i * 400)) * 2 / 4096);
+                if (ok_r3d_id_at(x, y) < 100) dot(frame, x, y, RGB(31, 30, 24));
+            }
+    }
+}
+
+/* ------------------------------------------------------------- outside */
+
+/* The house from outside: a little island floating in the dark, the house
+ * with its tiled roof and round attic window, a tree, a path, a lamp, and
+ * the terrace with its gallery (frames 6-11). Coordinates: the island's
+ * centre at the origin, the house's front facing +z. */
+
+/* The sky as a gradient (and stars, and the moon at night) behind it all. */
+static void sky(uint16_t *f, const light *l, uint32_t t)
+{
+    int x, y, r = l->sky & 31, g = l->sky >> 5 & 31, b = l->sky >> 10 & 31;
+    for (y = 0; y < H; y++) {
+        int k = y * 100 / H; /* deeper overhead, paler towards the horizon */
+        int R = r * (70 + k * 30 / 100) / 100 + (31 - r) * k / 400, G = g * (70 + k * 30 / 100) / 100 + (31 - g) * k / 400,
+            B = b * (70 + k * 30 / 100) / 100 + (31 - b) * k / 400;
+        uint16_t c = RGB(R > 31 ? 31 : R, G > 31 ? 31 : G, B > 31 ? 31 : B);
+        for (x = 0; x < W; x++) f[y * W + x] = c;
+    }
+    if (l->night)
+        for (x = 0; x < 70; x++) {
+            uint32_t h = (uint32_t)x * 2654435761u;
+            int sx = (int)(h % W), sy = (int)(h / W % (H * 2 / 3));
+            if ((t / 16 + (uint32_t)x) % 9) dot(f, sx, sy, (h >> 7) % 3 ? RGB(22, 22, 26) : RGB(31, 31, 26));
+        }
+}
+
+static void tree(int x, int z, int s)
+{
+    tex(OK_ROOM_BEAM, 6, RGB(9, 5, 3), OK_R3D_EDGE);
+    ok_r3d_cone(P(x, 0, z), U(120 * s / 100), U(80 * s / 100), U(800 * s / 100), 7);
+    tex(OK_ROOM_LEAVES, 0, RGB(3, 9, 4), OK_R3D_EDGE);
+    blob(x, 1050 * s / 100, z, 520 * s / 100, 420 * s / 100, 520 * s / 100);
+    blob(x - 300 * s / 100, 850 * s / 100, z + 150, 330 * s / 100, 280 * s / 100, 330 * s / 100);
+    blob(x + 280 * s / 100, 900 * s / 100, z - 100, 300 * s / 100, 260 * s / 100, 300 * s / 100);
+    ok_r3d_tile(0);
+}
+
+static void easel(int slot, int x, int z, int yaw)
+{
+    ok_r3d_push();
+    ok_r3d_translate(P(x, 0, z));
+    ok_r3d_rotate_y(DEG(yaw));
+    tex(OK_ROOM_CRATE, 8, RGB(18, 12, 6), OK_R3D_EDGE);
+    limb_house(-120, 0, 60, -40, 760, -10, 14);
+    limb_house(120, 0, 60, 40, 760, -10, 14);
+    limb_house(0, 0, -200, 0, 720, -30, 12);
+    box(-150, 300, 30, 150, 330, 90);
+    ok_r3d_pop();
+    framed_at(slot, hung[slot] ? gallery[slot] : NULL, x, 520, z + 40, 150, 0, slot % 3, yaw, 12);
+}
+
+static void outside_scene(const light *l, int on)
+{
+    int i, lit[24][2], lights = 0;
+    /* The island: grass on top, earth and stone below. */
+    tex(OK_ROOM_CLAY, 4, RGB(10, 5, 2), 0);
+    ok_r3d_cone(P(0, -900, 0), U(1600), U(2700), U(880), 14);
+    mat(RGB(11, 19, 7), OK_R3D_FLAT);
+    ok_r3d_cylinder(P(0, -30, 0), U(2700), U(30), 14);
+    /* The house. */
+    tex(OK_ROOM_PLASTER, 4, RGB(22, 19, 15), OK_R3D_EDGE);
+    box(-1500, 0, -1100, 300, 1000, 500);
+    tex(OK_ROOM_BRICK, 6, RGB(16, 7, 5), OK_R3D_EDGE);
+    box(-1520, 0, -1120, 320, 140, 520);
+    {
+        static const int16_t gable[3][2] = {{-1500, 1000}, {300, 1000}, {-600, 1700}};
+        ok_r3d_push();
+        ok_r3d_translate(P(0, 0, 490));
+        tex(OK_ROOM_PLASTER, 4, RGB(22, 19, 15), OK_R3D_EDGE);
+        ok_r3d_extrude(gable, 3, U(10), -600, 1200);
+        ok_r3d_pop();
+        ok_r3d_push();
+        ok_r3d_translate(P(0, 0, -1090));
+        ok_r3d_extrude(gable, 3, U(10), -600, 1200);
+        ok_r3d_pop();
+    }
+    /* The tiled roof, its two slopes and a ridge. */
+    tex(OK_ROOM_CLAY, 7, RGB(14, 5, 3), OK_R3D_EDGE | OK_R3D_FLAT);
+    for (i = -1; i <= 1; i += 2) {
+        ok_r3d_push();
+        ok_r3d_translate(P(-600 + i * 520, 1365, -300));
+        ok_r3d_rotate_z(-i * DEG(35));
+        box(-680, -40, -880, 680, 40, 880);
+        ok_r3d_pop();
+    }
+    tex(OK_ROOM_BRICK, 7, RGB(16, 7, 5), OK_R3D_EDGE);
+    box(-100, 1350, -820, 120, 1950, -600); /* the chimney */
+    /* The round attic window, glowing at night, and the ground-floor ones. */
+    ok_r3d_push();
+    ok_r3d_translate(P(-600, 1260, 512));
+    ok_r3d_rotate_x(OK_TURN / 4);
+    tex(OK_ROOM_FRAME, 0, RGB(22, 21, 19), OK_R3D_EDGE);
+    ok_r3d_disc(P(0, 0, 0), U(250), U(250), 16);
+    mat(on ? RGB(31, 24, 11) : RGB(12, 16, 22), on ? OK_R3D_UNLIT : 0);
+    ok_r3d_disc(P(0, 6, 0), U(205), U(205), 16);
+    tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), 0);
+    box(-205, 8, -16, 205, 20, 16);
+    box(-16, 8, -205, 16, 20, 205);
+    ok_r3d_pop();
+    for (i = 0; i < 2; i++) {
+        int x = i ? -60 : -1260;
+        tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), OK_R3D_EDGE);
+        box(x - 20, 430, 500, x + 280, 760, 530);
+        mat(on ? RGB(31, 23, 10) : RGB(11, 15, 21), on ? OK_R3D_UNLIT : 0);
+        box(x, 450, 531, x + 260, 740, 536);
+        tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), 0);
+        box(x + 120, 450, 536, x + 140, 740, 542);
+    }
+    tex(OK_ROOM_CRATE, 6, RGB(12, 7, 3), OK_R3D_EDGE); /* the door */
+    box(-780, 0, 500, -470, 440, 530);
+    mat(RGB(29, 24, 8), 0);
+    blob(-510, 220, 538, 16, 16, 12);
+    tex(OK_ROOM_BRICK, 7, RGB(16, 7, 5), OK_R3D_EDGE);
+    box(-830, 0, 500, -420, 50, 640); /* the step */
+    /* The path, the lamp, a tree. */
+    mat(RGB(20, 19, 17), OK_R3D_EDGE | OK_R3D_FLAT);
+    for (i = 0; i < 5; i++) ok_r3d_disc(P(-630 + (i % 2) * 70, 2, 800 + i * 380), U(150), U(110), 7);
+    mat(RGB(5, 5, 6), OK_R3D_EDGE);
+    ok_r3d_cylinder(P(250, 0, 1500), U(30), U(900), 6);
+    mat(on ? RGB(31, 28, 16) : RGB(26, 26, 24), on ? OK_R3D_UNLIT : OK_R3D_EDGE);
+    ok_r3d_ellipsoid(P(250, 960, 1500), P(85, 85, 85), 8, 6);
+    tree(-2000, 600, 100);
+    tree(-1900, -1500, 75);
+    /* The terrace: a deck, a brick wall with three frames, three easels. */
+    tex(OK_ROOM_PLANKS, 4, RGB(19, 12, 7), 0);
+    quad_grid(P(450, 1, 1000), P(2150, 1, 1000), P(2150, 1, -800), P(450, 1, -800), 6, 6);
+    tex(OK_ROOM_BRICK, 6, RGB(16, 7, 5), OK_R3D_EDGE);
+    box(450, 0, -800, 2150, 950, -700);
+    for (i = 0; i < 3; i++) framed_at(6 + i, hung[6 + i] ? gallery[6 + i] : NULL, 760 + i * 540, 560 + (i % 2) * 30, -690, 160, (i - 1) * 2, i, 0, 0);
+    easel(9, 680, 120, 28);
+    easel(10, 1930, 120, -28);
+    easel(11, 760, 760, 40);
+    tex(OK_ROOM_BEAM, 6, RGB(12, 7, 4), OK_R3D_EDGE); /* posts and a rail */
+    for (i = 0; i < 4; i++) box(2100, 0, -760 + i * 580, 2160, 520, -700 + i * 580);
+    limb_house(2130, 500, -760, 2130, 500, 1000, 18);
+    bulbs(450, 950, 2130, 520, -760, 8, on, lit, &lights);
+    mat(RGB(20, 22, 24), OK_R3D_EDGE);
+    ok_r3d_cylinder(P(560, 0, 850), U(90), U(160), 8);
+    tex(OK_ROOM_LEAVES, 0, RGB(3, 9, 4), OK_R3D_EDGE);
+    blob(560, 300, 850, 150, 160, 150);
+    ok_r3d_tile(0);
+    ok_r3d_finish();
+    for (i = 0; i < lights; i++) glow(ok_r3d_frame(), lit[i][0], lit[i][1], 9, 4, 3, 1);
+    (void)l;
+}
+
+void ok_house_outside(uint16_t *frame, ok_v3 eye, ok_v3 target, int focal, int hour, int minute, uint32_t ticks)
+{
+    int m = (hour % 24) * 60 + minute % 60, i;
+    light l;
+    light_at(m, 0, &l);
+    next_id = 0;
+    ok_r3d_begin(frame, CHARCOAL);
+    sky(frame, &l, ticks);
+    ok_r3d_camera(eye, target, focal);
+    apply(&l);
+    outside_scene(&l, l.night || m >= 1140);
+    /* Smoke from the chimney. */
+    for (i = 0; i < 4; i++) {
+        int k = (int)((ticks / 2 + (uint32_t)i * 60) % 240), x, y;
+        if (ok_r3d_project(P(10 + k / 3 + (int)((int64_t)ok_r3d_sin((int)ticks * 8 + i * 900) * 30 / 4096), 2000 + k * 4, -710), &x, &y, NULL))
+            glow(frame, x, y, 2 + k / 40, 2, 2, 2);
+    }
+    kept.valid = 0; /* the attic's kept frame is gone */
+}
+
+void ok_house_place(int where)
+{
+    if (where != place) kept.valid = 0;
+    place = where;
+}
+
+int ok_house_where(void)
+{
+    return place;
+}
+
+void ok_house_garden(ok_monkey_room *room)
+{
+    memset(room, 0, sizeof *room);
+    room->home_x = 1300;
+    room->home_z = 420;
+    room->bed_x = 1300; /* no bed out here: it goes in to sleep */
+    room->bed_z = 0;
+    room->spot_x[0] = 800, room->spot_z[0] = -350; /* looking at the wall's pictures */
+    room->spot_x[1] = 1750, room->spot_z[1] = -350;
+    room->spot_x[2] = 1650, room->spot_z[2] = 700;
 }

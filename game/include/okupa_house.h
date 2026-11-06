@@ -20,12 +20,25 @@ extern const uint16_t ok_room_skin[128 * 128];
 /* Where the okupa lives, wanders and sleeps. */
 void ok_house_room(ok_monkey_room *room);
 
-/* The gallery on the gable wall: six frames. ok_house_frame hangs a 64x64
- * one-bit picture (OK_DRAWING_BYTES, as okupa_act.h packs it) in a slot, or
- * takes it down with NULL; the picture is copied. Slots 0-3 run along the
- * wall over the bed and the crate, 4 and 5 sit either side of the window. */
-#define OK_HOUSE_FRAMES 6
+/* The gallery: twelve frames. ok_house_frame hangs a 64x64 one-bit picture
+ * (OK_DRAWING_BYTES, as okupa_act.h packs it) in a slot, or takes it down
+ * with NULL; the picture is copied. In the attic, slots 0-3 run along the
+ * wall over the bed and the crate, 4 and 5 sit either side of the window;
+ * in the garden, 6-8 hang on the brick wall of the terrace and 9-11 stand
+ * on easels. Empty frames stay up, waiting. */
+#define OK_HOUSE_FRAMES 12
 void ok_house_frame(int slot, const uint8_t *pixels);
+
+/* Where the okupa is: in the attic, or out on the terrace with the garden
+ * gallery. ok_house_garden gives the terrace's places, for ok_monkey_init. */
+enum { OK_PLACE_ATTIC, OK_PLACE_GARDEN };
+void ok_house_place(int where);
+int ok_house_where(void);
+void ok_house_garden(ok_monkey_room *room);
+
+/* The house from outside, for the intro: the island, the house, the tree,
+ * the terrace, under the sky of that hour, seen from eye towards target. */
+void ok_house_outside(uint16_t *frame, ok_v3 eye, ok_v3 target, int focal, int hour, int minute, uint32_t ticks);
 
 /* The top screen. drawing is a picture for frame 0 while ok_house_frame has
  * hung nothing there (NULL: the frame stays empty). */

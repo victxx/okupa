@@ -815,6 +815,11 @@ int ok_r3d_id_at(int x, int y)
     return ids[y * W + x] >= 250 ? 0 : ids[y * W + x]; /* shadows are not objects */
 }
 
+uint16_t *ok_r3d_frame(void)
+{
+    return fb;
+}
+
 int ok_r3d_triangles(void)
 {
     return triangles;
