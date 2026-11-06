@@ -4,8 +4,8 @@ SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror -fsanitize=add
 CPPFLAGS += -Icore/include -Ithird_party/tiny_sha3 -Ithird_party/secp256k1/include -Ithird_party/bearssl/inc
 BUILD ?= build
 
-CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c third_party/tiny_sha3/sha3.c
-TESTS = core keccak rlp secp keys tx act sha256 ecdh
+CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c core/src/aes.c third_party/tiny_sha3/sha3.c
+TESTS = core keccak rlp secp keys tx act sha256 ecdh aes
 
 # libsecp256k1 is built as upstream ships it, with its own warning level, plus
 # the modules we need: recoverable signatures and ECDH (for RLPx).
@@ -16,7 +16,9 @@ SECP_OBJ = $(patsubst $(SECP)/src/%.c,$(BUILD)/secp/%.o,$(SECP_SRC))
 
 # BearSSL: only the primitives we use, compiled as upstream ships them.
 BEAR = third_party/bearssl
-BEAR_SRC = $(BEAR)/src/hash/sha2small.c $(BEAR)/src/codec/dec32be.c $(BEAR)/src/codec/enc32be.c
+BEAR_SRC = $(BEAR)/src/hash/sha2small.c $(BEAR)/src/mac/hmac.c \
+  $(BEAR)/src/symcipher/aes_ct.c $(BEAR)/src/symcipher/aes_ct_enc.c $(BEAR)/src/symcipher/aes_ct_cbcenc.c \
+  $(BEAR)/src/codec/dec32be.c $(BEAR)/src/codec/enc32be.c $(BEAR)/src/codec/dec32le.c $(BEAR)/src/codec/enc32le.c
 BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 
 .PHONY: all test sanitize clean
