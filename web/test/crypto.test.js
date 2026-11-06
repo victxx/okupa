@@ -55,3 +55,10 @@ test('calldata: same family as the DSi', () => {
   assert.equal(okupa.decode(new Uint8Array([0x4f, 0x4b, 0x50, 0x41, 1, 1, 0])), null);
   assert.equal(okupa.decode(new Uint8Array([0x4f, 0x4b, 0x50, 0x41, 1, 9])), null);
 });
+
+test('gas: the EIP-7623 floor, same figures as the console', async () => {
+  const { actGas } = await import('../src/chain.js');
+  assert.equal(actGas(okupa.hello()), 21210n + 2000n);
+  assert.equal(actGas(okupa.drawing(new Uint8Array(okupa.DRAWING_BYTES).fill(0xff))), 41720n + 2000n);
+  assert.equal(actGas(okupa.drawing(new Uint8Array(okupa.DRAWING_BYTES))), 21000n + 10n * (24n + 512n) + 2000n);
+});

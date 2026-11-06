@@ -3,7 +3,7 @@
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { privateKeyToAccount } from 'viem/accounts';
-import { formatEther, createPublicClient, http } from 'viem';
+import { formatEther, formatGwei, createPublicClient, http } from 'viem';
 import { NETWORKS } from './config.js';
 import { bytesToHex, hexToBytes, equal } from './bytes.js';
 import * as okupa from './okupa.js';
@@ -11,7 +11,7 @@ import { publicKey } from './ecies.js';
 import { seal, open, checkPicture } from './seal.js';
 import * as swarm from './swarm.js';
 import * as arkiv from './arkiv.js';
-import { clients, sendAct, waitIncluded, verifiedAct } from './chain.js';
+import { clients, sendAct, quoteAct, waitIncluded, verifiedAct } from './chain.js';
 import { ANON, anonFetch } from './anon.js';
 
 const $ = (id) => document.getElementById(id);
@@ -148,10 +148,23 @@ async function busy(btn, fn) {
   try { await fn(); } catch (e) { log(`✗ ${e.shortMessage || e.message}`, 'bad'); console.error(e); } finally { all.forEach((b) => (b.disabled = false)); refreshBalance(); }
 }
 
+// On a network with real money, say what the act costs and ask before anything is spent.
+// The quote is an upper bound: the limit assumes every calldata byte is non-zero.
+async function quoteOrAsk(n, size, what) {
+  const q = await quoteAct(n, me, new Uint8Array(size).fill(0xff));
+  if (n.confirmSpend) {
+    const msg = `${what} on ${n.name} (real money).\n\nGas limit ${q.gas}, base fee ${formatGwei(q.base)} gwei, tip ${formatGwei(q.tip)} gwei.\nExpected about ${formatEther(q.expectedWei)} ETH, at most ${formatEther(q.maxWei)} ETH.\n\nSign and send?`;
+    if (!confirm(msg)) throw new Error('not sent: you said no');
+    log(`${n.name}: you approved up to ${formatEther(q.maxWei)} ETH for this act.`, 'dim');
+  }
+  return q;
+}
+
 async function sendSwarmGift() {
   const n = net(), friend = parseFriend($('to').value);
   if (!friend.pub) throw new Error('a Swarm gift needs the full friend code (address and public key)');
   const picture = okupa.photo(pixels);
+  const q = await quoteOrAsk(n, 6 + okupa.SEALED_REF_BYTES, 'A Swarm gift: one transaction');
   log(`Picture: 64×64, four tones, ${picture.length} B (OKPA 01 02).`, 'dim');
   const batch = await swarm.postageBatch(n.bee);
   const ref = await swarm.uploadEncrypted(n.bee, picture, batch);
@@ -159,7 +172,7 @@ async function sendSwarmGift() {
   const sealed = seal(friend.pub, friend.address, ref, picture);
   const data = okupa.giftSwarm(sealed);
   log(`Sealed the reference to ${friend.address.slice(0, 10)}… with ECIES: ${sealed.length} B. Calldata ${data.length} B (OKPA 01 05).`, 'dim');
-  const { hash, nonce } = await sendAct(n, priv, friend.address, data);
+  const { hash, nonce } = await sendAct(n, priv, friend.address, data, q);
   log(`Ethereum: signed here, sent through RPC. tx ${hash} (nonce ${nonce}).`, 'ok');
   const { block, status } = await waitIncluded(n, hash);
   log(`Ethereum: included in block ${block} (${status}), as the RPC reports it.`, status === 'success' ? 'ok' : 'bad');
@@ -173,7 +186,8 @@ async function sendInlineGift() {
   const drawing = okupa.toDrawing(pixels);
   const data = okupa.giftPicture(drawing);
   log(`Inline gift: 64×64 one-bit drawing in the calldata, ${data.length} B (OKPA 01 03), the DSi's own format.`, 'dim');
-  const { hash, nonce } = await sendAct(n, priv, friend.address, data);
+  const q = await quoteOrAsk(n, data.length, 'An inline gift: one transaction');
+  const { hash, nonce } = await sendAct(n, priv, friend.address, data, q);
   log(`Ethereum: tx ${hash} (nonce ${nonce}).`, 'ok');
   const { block, status } = await waitIncluded(n, hash);
   log(`Ethereum: included in block ${block} (${status}).`, status === 'success' ? 'ok' : 'bad');

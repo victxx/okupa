@@ -18,9 +18,11 @@ export const NETWORKS = {
     arkiv: { name: 'Rabdi', chainId: 7794095, rpc: 'https://rpc.rabdi.db-chain.testnet.arkiv.network', symbol: 'tGLM', days: 7 },
   },
   mainnet: {
-    name: 'Ethereum', readOnly: true,
-    label: 'Ethereum mainnet through a public RPC. Visits only: this page sends nothing here.',
-    chainId: 1, rpc: 'https://ethereum-rpc.publicnode.com',
+    name: 'Ethereum',
+    label: 'Ethereum mainnet: every act costs real ETH and asks first. Reads and sends through a public RPC; Swarm through your own Bee node (Gnosis); Arkiv mailbox on its testnet Rabdi.',
+    chainId: 1, rpc: 'https://ethereum-rpc.publicnode.com', tip: 20_000_000n, confirmSpend: true,
     explorer: 'https://etherscan.io', blockscout: 'https://eth.blockscout.com',
+    bee: 'http://127.0.0.1:1633',
+    arkiv: { name: 'Rabdi', chainId: 7794095, rpc: 'https://rpc.rabdi.db-chain.testnet.arkiv.network', symbol: 'tGLM', days: 7 },
   },
 };

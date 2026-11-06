@@ -21,25 +21,41 @@ export function clients(net, privHex, fetchFn) {
   return { pub, wallet };
 }
 
-// One act = one zero-value type-2 transaction. Same limits as the console (gas 30 000 for a
-// hello; more for bigger calldata).
-export async function sendAct(net, privHex, to, calldata) {
-  const { pub, wallet } = clients(net, privHex);
-  const account = wallet.account;
-  const gas = 21000n + 16n * BigInt(calldata.length) + 10000n;
+// Gas for an act. Since Prague (EIP-7623) a transaction with calldata pays at least
+// 21000 + 10 per token (zero byte = 1 token, any other byte = 4); for a plain transfer to an
+// account that floor is the whole cost. Same rule as the console's figures (hello 21 210,
+// fully inked drawing 41 720). A small margin; unused gas is not charged.
+export function actGas(calldata) {
+  let tokens = 0n;
+  for (const b of calldata) tokens += b ? 4n : 1n;
+  return 21000n + 10n * tokens + 2000n;
+}
+
+// What an act will cost before it is signed: the exact limit and fees, nothing hidden.
+export async function quoteAct(net, from, calldata) {
+  const { pub } = clients(net);
   const [nonce, block] = await Promise.all([
-    pub.getTransactionCount({ address: account.address, blockTag: 'pending' }),
+    pub.getTransactionCount({ address: from, blockTag: 'pending' }),
     pub.getBlock({ blockTag: 'latest' }),
   ]);
-  const tip = 100_000_000n; // 0.1 gwei
+  const gas = actGas(calldata), base = block.baseFeePerGas ?? 0n;
+  const tip = net.tip ?? 100_000_000n; // 0.1 gwei unless the network says otherwise
+  const maxFee = base * 2n + tip;
+  return { nonce, gas, tip, maxFee, base, expectedWei: gas * (base + tip), maxWei: gas * maxFee };
+}
+
+// One act = one zero-value type-2 transaction, signed here with the monkey's key.
+export async function sendAct(net, privHex, to, calldata, quote) {
+  const { pub, wallet } = clients(net, privHex);
+  const account = wallet.account;
+  const q = quote ?? await quoteAct(net, account.address, calldata);
   const tx = {
-    type: 'eip1559', chainId: net.chainId, nonce, to, value: 0n, gas,
-    maxPriorityFeePerGas: tip, maxFeePerGas: (block.baseFeePerGas ?? 0n) * 2n + tip,
-    data: '0x' + bytesToHex(calldata),
+    type: 'eip1559', chainId: net.chainId, nonce: q.nonce, to, value: 0n, gas: q.gas,
+    maxPriorityFeePerGas: q.tip, maxFeePerGas: q.maxFee, data: '0x' + bytesToHex(calldata),
   };
   const raw = await account.signTransaction(tx);
   const hash = await pub.sendRawTransaction({ serializedTransaction: raw });
-  return { hash, raw, nonce };
+  return { hash, raw, nonce: q.nonce, gas: q.gas };
 }
 
 export async function waitIncluded(net, hash, timeoutMs = 120000) {
