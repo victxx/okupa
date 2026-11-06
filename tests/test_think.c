@@ -1,5 +1,6 @@
 #include "okupa_json.h"
 #include "okupa_keys.h"
+#include "okupa_sha256.h"
 #include "okupa_think.h"
 #include "okupa_zerog.h"
 #include <assert.h>
@@ -12,24 +13,55 @@ static struct {
     int fail_net, status, tamper, no_id;
     const char *upstream; /* model id the broker forwards, NULL = unchanged */
     const char *content;
-    char req_body[8192];
+    char req_body[200000];
     size_t req_len;
     char resp_body[4096];
     size_t resp_len;
     uint8_t tee[32];
     int calls;
     char last_auth[1024];
+    uint8_t image[64]; /* the picture an image model made, when it did */
+    size_t image_len;
 } fake;
 
-static int fetch(void *ctx, const char *host, const char *req, size_t n, char *resp, size_t cap, size_t *got)
+static int fetch(void *ctx, const char *host, const char *head, size_t head_len, const char *payload,
+                 size_t payload_len, char *resp, size_t cap, size_t *got)
 {
-    const char *body = strstr(req, "\r\n\r\n");
+    static char req[200000];
+    const char *body;
+    size_t n = head_len + payload_len;
     int k;
     (void)ctx;
+    assert(n < sizeof req);
+    memcpy(req, head, head_len);
+    if (payload_len) memcpy(req + head_len, payload, payload_len);
+    req[n] = 0;
+    body = strstr(req, "\r\n\r\n");
     assert(!strcmp(host, "tee.example"));
     fake.calls++;
     if (fake.fail_net) return 62;
-    if (!strncmp(req, "POST /v1/proxy/chat/completions ", 32)) {
+    if (!strncmp(req, "POST /v1/proxy/images/generations ", 34)) {
+        /* An image model: the picture is base64 in the JSON (with an escaped
+         * slash), and it is the picture's bytes the TEE hashes. */
+        assert(body);
+        fake.req_len = n - (size_t)(body + 4 - req);
+        memcpy(fake.req_body, body + 4, fake.req_len);
+        fake.resp_len = (size_t)snprintf(fake.resp_body, sizeof fake.resp_body,
+                                         "{\"data\":[{\"b64_json\":\"iVBORw0KGgo\\/AA==\"}],\"usage\":{}}");
+        memcpy(fake.image, "\x89PNG\r\n\x1a\n\x3f\x00", 10);
+        fake.image_len = 10;
+        k = snprintf(resp, cap, "HTTP/1.1 200 OK\r\nZG-Res-Key: chat-abc_1\r\nContent-Length: %lu\r\n\r\n%s",
+                     (unsigned long)fake.resp_len, fake.resp_body);
+    } else if (!strncmp(req, "POST /v1/proxy/audio/transcriptions ", 36)) {
+        /* Whisper: the multipart body is hashed as is, and the answer has no model. */
+        assert(body && strstr(req, "Content-Type: multipart/form-data; boundary="));
+        fake.req_len = n - (size_t)(body + 4 - req);
+        memcpy(fake.req_body, body + 4, fake.req_len);
+        fake.resp_len = (size_t)snprintf(fake.resp_body, sizeof fake.resp_body,
+                                         "{\"text\":\" Hola, me llamo V\xc3\xad" "ctor.\",\"usage\":{\"seconds\":2}}");
+        k = snprintf(resp, cap, "HTTP/1.1 200 OK\r\nZG-Res-Key: chat-abc_1\r\nContent-Length: %lu\r\n\r\n%s",
+                     (unsigned long)fake.resp_len, fake.resp_body);
+    } else if (!strncmp(req, "POST /v1/proxy/chat/completions ", 32)) {
         const char *a = strstr(req, "Authorization: Bearer app-sk-");
         assert(a && body);
         snprintf(fake.last_auth, sizeof fake.last_auth, "%.*s", (int)(strstr(a, "\r\n") - a), a);
@@ -55,9 +87,13 @@ static int fetch(void *ctx, const char *host, const char *req, size_t n, char *r
         uint8_t sig[65];
         int i;
         assert(!strncmp(req, "GET /v1/proxy/signature/", 24) && strstr(req, "?model=0GM-1.0 HTTP/1.1\r\n"));
+        assert(!payload_len);
         if (fake.tamper) fake.resp_body[0] = ' ';
-        ok_zerog_text((const uint8_t *)fake.req_body, fake.req_len, (const uint8_t *)fake.resp_body, fake.resp_len,
-                      text);
+        if (fake.image_len)
+            ok_zerog_text((const uint8_t *)fake.req_body, fake.req_len, fake.image, fake.image_len, text);
+        else
+            ok_zerog_text((const uint8_t *)fake.req_body, fake.req_len, (const uint8_t *)fake.resp_body, fake.resp_len,
+                          text);
         assert(ok_personal_sign(text, OK_ZEROG_TEXT, fake.tee, sig) == OK_OK);
         for (i = 0; i < 65; i++) snprintf(sig_hex + 2 * i, 3, "%02x", sig[i]);
         snprintf(json, sizeof json, "{\"text\":\"%s\",\"signature\":\"0x%s\"}", text, sig_hex);
@@ -133,7 +169,11 @@ int main(void)
     fake.upstream = "0GM-1.0-0427";
     run(&p, good);
     assert(t.stage == OK_THINK_DECIDED && !strcmp(t.upstream_model, "0GM-1.0-0427"));
-    assert(strstr(t.forwarded, "\"model\":\"0GM-1.0-0427\"") && t.forwarded_len == t.request_len + 5);
+    {
+        uint8_t h[32];
+        ok_sha256(fake.req_body, fake.req_len, h); /* the renamed request, as the TEE hashed it */
+        assert(!memcmp(h, t.req_sha, 32) && fake.req_len == t.request_len + 5);
+    }
     assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
     assert(strstr(episode, "\"upstream_model\":\"0GM-1.0-0427\""));
     fake.upstream = NULL;
@@ -174,6 +214,99 @@ int main(void)
     /* Hosts and models that would break the URL are refused up front. */
     p.model = "a b";
     assert(run(&p, good) == OK_ARGUMENT && t.stage == OK_THINK_SETUP && fake.calls == 0);
+
+    /* Hearing: Whisper's transcript, verified over our exact multipart bytes;
+     * accents dropped for the small screen. */
+    p.model = "0GM-1.0";
+    {
+        static char buf[4096];
+        static const uint8_t wav[44] = {'R', 'I', 'F', 'F'};
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {4};
+        assert(ok_think_hear(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.heard, "Hola, me llamo Vctor.") && !t.body_json);
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
+        assert(strstr(episode, "\"kind\":\"hearing\"") && strstr(episode, "\"request_b64\":\"LS1va3Vw"));
+        assert(ok_think_hear(&t, &p, device, 1, nonce, wav, sizeof wav, buf, 100, fetch, NULL) == OK_RANGE);
+
+        /* Sight: one sentence from a vision answer, the image inside a
+         * canonical request. */
+        fake.content = "A person with glasses is smiling at the camera.";
+        assert(ok_think_see(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "A person with glasses is smiling at the camera."));
+        assert(strstr(fake.req_body, "\"url\":\"data:image/png;base64,UklGR"));
+        assert(!strncmp(fake.req_body, "{\"chat_template_kwargs\":", 24));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"sight\""));
+    }
+
+    /* Pictionary: the guess is one to three words, lower case. */
+    {
+        static char buf[4096];
+        static const uint8_t png[8] = {0x89, 'P', 'N', 'G'};
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {5};
+        fake.content = "A House.";
+        assert(ok_think_guess(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "a house"));
+        assert(strstr(fake.req_body, "Pictionary") && strstr(fake.req_body, "\"max_tokens\":16"));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"guess\":\"a house\""));
+        fake.content = "I think this might be a small cottage";
+        assert(ok_think_guess(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_ANSWER); /* not a guess: a sentence */
+    }
+
+    /* The slow mind and the diary: verified like any call, read from JSON. */
+    p.model = "0GM-1.0";
+    fake.content = "{\\\"goal\\\":\\\"Learn the player's name\\\",\\\"plan\\\":\\\"Wave, then ask\\\",\\\"feeling\\\":\\\"Hopeful\\\"}";
+    {
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {6};
+        ok_mind_obs obs;
+        ok_pet pet;
+        ok_pet_init(&pet, 1800000000);
+        memset(&obs, 0, sizeof obs);
+        obs.pet = &pet;
+        obs.goal = "Explore the garden";
+        assert(ok_think_plan(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.plan.goal, "Learn the player's name"));
+        assert(!strcmp(t.plan.plan, "Wave, then ask") && strstr(fake.req_body, "slow mind"));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"plan\""));
+        fake.content = "{\\\"entry\\\":\\\"Today a giant eye said hello. I waved. I think it likes me.\\\"}";
+        obs.today[0] = "said: Hi!";
+        obs.today[1] = "heard: hello okupa";
+        obs.today_count = 2;
+        obs.date = "2026-11-07";
+        assert(ok_think_diary(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strncmp(t.diary, "Today a giant eye", 17));
+        assert(strstr(fake.req_body, "\\\"today\\\":[\\\"said: Hi!\\\",\\\"heard: hello okupa\\\"]"));
+        assert(strstr(fake.req_body, "\\\"date\\\":\\\"2026-11-07\\\""));
+        fake.content = "no json here";
+        assert(ok_think_plan(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK && t.stage == OK_THINK_ANSWER);
+    }
+
+    /* A dream: the image model's picture, verified over its own bytes. */
+    {
+        static char buf[2048];
+        static uint8_t image[64];
+        static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+                                           7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+        static const uint8_t nonce[16] = {8};
+        assert(ok_think_dream(&t, &p, device, 1800000000000ull, nonce, "a monkey flying over Mumbai", image, sizeof image,
+                              buf, sizeof buf, fetch, NULL) == OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && t.image_len == 10 && !memcmp(image, "\x89PNG\r\n\x1a\n\x3f\x00", 10));
+        assert(!strncmp(fake.req_body, "{\"model\":\"0GM-1.0\",\"n\":1,\"output_format\":\"png\"", 46));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"dream\""));
+        assert(ok_think_dream(&t, &p, device, 1, nonce, "a \"quoted\" dream", image, sizeof image, buf, sizeof buf, fetch,
+                              NULL) == OK_ARGUMENT);
+        fake.image_len = 0;
+    }
 
     /* Keep-alive: the connection stays unless the server says it closes. */
     assert(ok_think_keeps_open("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", 38));

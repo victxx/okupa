@@ -40,6 +40,23 @@ int main(void)
     assert(ok_act_decode(out, 3, &act) == OK_FORMAT);
     assert(ok_act_drawing(pixels, out, 517, &len) == OK_RANGE);
     assert(ok_act_hello(out, 5, &len) == OK_RANGE);
-    puts("act: hello and drawing encode/decode, pixel order, strict shapes");
+    /* A letter: plain text, 1..140 bytes. */
+    assert(ok_act_letter("Dear Victor, I saw lanterns in my dream.", out, sizeof out, &len) == OK_OK && len == 6 + 40);
+    assert(out[5] == 2 && ok_act_decode(out, len, &act) == OK_OK && act.kind == OK_ACT_LETTER);
+    assert(act.text_len == 40 && !memcmp(act.text, "Dear Victor", 11) && !act.drawing);
+    assert(ok_act_letter("", out, sizeof out, &len) == OK_ARGUMENT);
+    assert(ok_act_letter("caf\xc3\xa9", out, sizeof out, &len) == OK_ARGUMENT);
+    {
+        char longer[142];
+        memset(longer, 'a', 141);
+        longer[141] = 0;
+        assert(ok_act_letter(longer, out, sizeof out, &len) == OK_ARGUMENT);
+        longer[140] = 0;
+        assert(ok_act_letter(longer, out, sizeof out, &len) == OK_OK && len == 146);
+    }
+    out[10] = 7; /* a control byte in the text */
+    assert(ok_act_decode(out, len, &act) == OK_FORMAT);
+    assert(ok_act_decode(out, 6, &act) == OK_FORMAT); /* an empty letter is not one */
+    puts("act: hello, drawing and letter encode/decode, pixel order, strict shapes");
     return 0;
 }

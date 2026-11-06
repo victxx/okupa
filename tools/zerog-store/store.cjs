@@ -9,8 +9,8 @@ const { tmpdir } = require("node:os");
 const { Indexer, MemData } = require("@0gfoundation/0g-storage-ts-sdk");
 const { ethers } = require("ethers");
 
-const RPC = "https://evmrpc-testnet.0g.ai";
-const INDEXER = "https://indexer-storage-testnet-turbo.0g.ai";
+const RPC = process.env.ZG_RPC || "https://evmrpc-testnet.0g.ai";
+const INDEXER = process.env.ZG_INDEXER || "https://indexer-storage-testnet-turbo.0g.ai";
 
 (async () => {
   const [file, keyFile] = process.argv.slice(2);

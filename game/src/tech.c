@@ -463,6 +463,8 @@ static void page_data(frame f, const uint8_t (*font)[8], const ok_tech *t, const
     case OK_TECH_0G:
         if (!fa->og_model[0]) {
             text(f, font, 4, y, "No 0G decision yet", DIM, 1);
+            if (fa->og_clock[0]) kv(f, font, y + 22, "Clock", fa->og_clock, TEXT);
+            if (fa->og_error[0]) kv(f, font, y + 33, "Stopped", fa->og_error, BAD);
             break;
         }
         kv(f, font, y, "Host", fa->og_host, TEXT);
@@ -476,6 +478,8 @@ static void page_data(frame f, const uint8_t (*font)[8], const ok_tech *t, const
         hash2(f, font, y + 100, fa->og_resp_sha, TEXT);
         snprintf(v, sizeof v, "%s, %lu ms", fa->og_decision, (unsigned long)fa->og_ms);
         kv(f, font, y + 122, "Chose", v, TEXT);
+        if (fa->og_clock[0]) kv(f, font, y + 133, "Clock", fa->og_clock, TEXT);
+        if (fa->og_error[0]) kv(f, font, y + 144, "Stopped", fa->og_error, BAD);
         break;
     default:
         kv(f, font, y, "CPU", fa->dsi_mode ? "ARM9 133 MHz" : "ARM9 67 MHz", TEXT);

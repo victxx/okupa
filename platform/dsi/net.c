@@ -739,7 +739,9 @@ static int hold(void *ctx)
         say(text);
         line(LINES - 1, "%s", text);
     }
-    return !ui_wifi && online();
+    /* Stay only while there is a letter to see into a block: a held mainnet
+     * peer gossips non-stop, and that costs the game frames for nothing. */
+    return !ui_wifi && online() && pending_len;
 }
 
 /* ---- What the technical screens show ------------------------------------------ */
@@ -1000,6 +1002,23 @@ static void let_others_run(void)
     cothread_yield();
 }
 
+/* Rests up to seconds, but wakes at once when a new letter is waiting. */
+static void rest(int seconds)
+{
+    int k;
+    for (k = 0; k < seconds; k++) {
+        if (pending_len && !handed) return;
+        pause_seconds(1);
+    }
+}
+
+/* After a node let us in: with a letter still on its way, try again soon;
+ * with nothing to send, rest so the game keeps the CPU. */
+static void after_admission(void)
+{
+    rest(pending_len ? 5 : 300);
+}
+
 static int postman(void *arg)
 {
     static ok_dnsdisc_walk w;
@@ -1040,7 +1059,18 @@ static int postman(void *arg)
         node_count = 0;
         ready_peers = load_peers();
         line(2, "%s, known peers: %d", net->name, ready_peers);
-        if (try_nodes(0, node_count)) continue;
+        if (!pending_len && ready_peers >= 3) { /* enough nodes known to take letters: no need to look now */
+            char text[48];
+            snprintf(text, sizeof text, "Ready: %d nodes take letters", ready_peers);
+            say(text);
+            line(LINES - 1, "Resting: nothing to send");
+            rest(300);
+            continue;
+        }
+        if (try_nodes(0, node_count)) {
+            after_admission();
+            continue;
+        }
 
         /* 2. The signed DNS list: its nodes are the busiest, so they seed the
          * crawl and are only tried last. */
@@ -1067,8 +1097,10 @@ static int postman(void *arg)
         say("Searching for nodes");
         crawl(45, fork, dns_from, dns_to);
         ok_facts_now.candidates = node_count;
-        if (try_nodes(from, node_count)) continue;
-        if (try_nodes(dns_from, dns_to)) continue;
+        if (try_nodes(from, node_count) || try_nodes(dns_from, dns_to)) {
+            after_admission();
+            continue;
+        }
 
         if (ready_peers) {
             char text[48];
@@ -1077,8 +1109,13 @@ static int postman(void *arg)
         } else {
             say(pending_len && handed ? "Letter out, nodes full: again" : "All nodes full, trying more");
         }
-        line(LINES - 1, "All busy, again in 20 s");
-        pause_seconds(20);
+        /* Nothing to send and a few nodes known to take letters: rest, so
+         * the game gets the CPU. A new letter wakes the postman early. */
+        {
+            int wait = pending_len || ready_peers < 3 ? 20 : 300;
+            line(LINES - 1, "Again in %d s", wait);
+            rest(wait);
+        }
     }
     return 0;
 }
