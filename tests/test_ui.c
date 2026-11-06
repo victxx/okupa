@@ -17,7 +17,7 @@ int main(void)
     ok_pet_init(&p, t);
     ok_ui_init(&u);
 
-    /* Buttons (button centres from the layout: columns at 8 + 62 i, rows at 36 and 102). */
+    /* Buttons (button centres from the layout: columns at 8 + 62 i, rows at 34 and 92; tabs Care 95,160 and More 161,160). */
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && p.need[OK_NEED_HUNGER] == 100);
     assert(!strcmp(u.say, "Yum! Thank you."));
     assert(ok_ui_touch(&u, &p, 35, 60, 1, t) == OK_UI_NOTHING); /* holding is not a second tap */
@@ -29,7 +29,13 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && p.asleep);
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Zzz... (it's sleeping)"));
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && !p.asleep);
-    assert(ok_ui_touch(&u, &p, 159, 130, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME); /* Mail: soon */
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK && u.scene == OK_UI_HOME); /* a hint, the platform listens */
+    assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_CHANGED && u.page == 1);  /* More */
+    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_MAIL && p.need[OK_NEED_HUNGER] == 100);
+    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_FRIEND);
+    assert(ok_ui_touch(&u, &p, 159, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "No dreams yet. Let me sleep on it!"));
+    assert(ok_ui_touch(&u, &p, 35, 118, 0, t) == OK_UI_NOTHING);                 /* the hints card */
+    assert(ok_ui_touch(&u, &p, 95, 160, 0, t) == OK_UI_CHANGED && u.page == 0);   /* Care */
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 
     /* The line goes back to the mood line after three seconds. */
@@ -37,7 +43,7 @@ int main(void)
     assert(u.say == NULL);
 
     /* Sketchbook: a stroke leaves no gaps, the eraser removes it, Done goes home. */
-    assert(ok_ui_touch(&u, &p, 35, 130, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_SKETCH);
+    assert(ok_ui_touch(&u, &p, 35, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_SKETCH);
     assert(ok_ui_touch(&u, &p, 8, 100, 0, t) == OK_UI_CHANGED);
     assert(ok_ui_touch(&u, &p, 134, 100, 1, t) == OK_UI_CHANGED);
     ok_ui_release(&u);
@@ -59,13 +65,14 @@ int main(void)
     u.drawing_sent = 0;
     u.scene = OK_UI_HOME;
 
-    /* Dev asks the platform to run the checks; Back returns. */
-    assert(ok_ui_touch(&u, &p, 221, 130, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
+    /* Dev (on the second menu) asks the platform to run the checks; Back returns. */
+    assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_CHANGED && u.page == 1);
+    assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Wi-Fi from Dev: search, pick a secured network, type its password. */
-    assert(ok_ui_touch(&u, &p, 221, 130, 0, t) == OK_UI_RUN_CHECKS);
+    assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_RUN_CHECKS);
     assert(ok_ui_touch(&u, &p, 90, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
     u.ap_count = 2;
     strcpy(u.aps[0].ssid, "iPhone de Okupa");

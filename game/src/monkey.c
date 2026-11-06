@@ -182,6 +182,7 @@ static void start(ok_monkey_anim *a, int move)
 void ok_monkey_init(ok_monkey_anim *a, const ok_monkey_room *room, int asleep, uint32_t seed)
 {
     memset(a, 0, sizeof *a);
+    a->energy = 50;
     a->room = *room;
     a->seed = seed | 1;
     a->x = a->goal_x = room->home_x;
@@ -222,6 +223,11 @@ void ok_monkey_direct(ok_monkey_anim *a, int move)
 
 static void pick(ok_monkey_anim *a, int wear)
 {
+    if (a->go_pending) { /* somewhere to be first */
+        a->go_pending = 0;
+        start(a, OK_MOVE_GO);
+        return;
+    }
     if (a->directed) {
         start(a, a->directed - 1);
         a->directed = 0;
@@ -262,7 +268,7 @@ static int walk(ok_monkey_anim *a, int32_t gx, int32_t gz)
          * planted foot stays where it was put. */
         int ang = ok_r3d_atan2(dx, dz), yaw = (int)((int64_t)a->s[OK_SPRING_YAW].x * OK_TURN / (360 * Q));
         int off = ((ang - yaw) & (OK_TURN - 1)) > OK_TURN / 2 ? OK_TURN - ((ang - yaw) & (OK_TURN - 1)) : (ang - yaw) & (OK_TURN - 1);
-        int32_t blend = a->s[OK_SPRING_WALK].x / Q, speed = 6 * (blend < 0 ? 0 : blend > 100 ? 100 : blend) / 100;
+        int32_t blend = a->s[OK_SPRING_WALK].x / Q, speed = 6 * (blend < 0 ? 0 : blend > 100 ? 100 : blend) * (a->energy + 50) / 10000;
         if (off > OK_TURN / 6) speed = speed / 3; /* mostly turning on the spot */
         if (d < 40 && speed > 2) speed = 2;     /* arriving */
         a->x += (int32_t)((int64_t)ok_r3d_sin(ang) * speed / 4096);
@@ -279,9 +285,21 @@ static int walk(ok_monkey_anim *a, int32_t gx, int32_t gz)
 static void done(ok_monkey_anim *a, int min, int range)
 {
     start(a, OK_MOVE_IDLE);
-    a->next_idle = a->directed ? 20 : 240 + 2 * (min + below(a, range)); /* a move asked for goes next */
+    a->next_idle = a->directed ? 20 : (240 + 2 * (min + below(a, range))) * 100 / (a->energy + 50); /* a move asked for goes next; lively, sooner */
 }
 
+
+void ok_monkey_body(ok_monkey_anim *a, int go, int32_t x, int32_t z, int gaze, const int32_t at[3], int energy)
+{
+    if (go) {
+        a->room.home_x = x;
+        a->room.home_z = z;
+        a->go_pending = 1;
+    }
+    a->gaze_mode = gaze >= 0 && gaze < OK_GAZES ? gaze + 1 : 0;
+    if (a->gaze_mode) a->gaze_at[0] = at[0], a->gaze_at[1] = at[1], a->gaze_at[2] = at[2];
+    a->energy = energy < 0 ? 50 : energy > 100 ? 100 : energy;
+}
 
 /* ----------------------------------------------------------------- tail */
 
@@ -423,7 +441,16 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
 
     /* Glances: every second or three it looks somewhere else, quickly, the way
      * eyes jump, and the head follows on its spring. */
-    if (--a->gaze_t <= 0) {
+    if (a->gaze_mode) { /* looking at something it was told to: the head turns to it, within reach */
+        int32_t dx = a->gaze_at[0] - a->x, dy = a->gaze_at[1] - 600, dz = a->gaze_at[2] - a->z, flat;
+        int yaw = ok_r3d_atan2(dx, dz) * 360 / OK_TURN, body = a->s[OK_SPRING_YAW].x / Q, d;
+        flat = isqrt(dx / 4 * (dx / 4) + dz / 4 * (dz / 4)) * 4;
+        d = ((yaw - body) % 360 + 540) % 360 - 180;
+        a->gaze_turn = d > 30 ? 30 : d < -30 ? -30 : d;
+        d = -(ok_r3d_atan2(dy, flat > 0 ? flat : 1) * 360 / OK_TURN);
+        if (d < -180) d += 360;
+        a->gaze_nod = d > 20 ? 20 : d < -20 ? -20 : d;
+    } else if (--a->gaze_t <= 0) {
         a->gaze_turn = below(a, 29) - 14;
         a->gaze_nod = below(a, 11) - 5;
         a->gaze_t = 50 + below(a, 160);
@@ -672,6 +699,13 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         a->x = a->room.bed_x;
         a->z = a->room.bed_z + 420;
         break;
+    case OK_MOVE_GO:
+        yaw_free = 0;
+        if (walk(a, a->room.home_x, a->room.home_z)) {
+            start(a, OK_MOVE_IDLE);
+            a->next_idle = a->directed ? 10 : 60;
+        }
+        break;
     case OK_MOVE_TO_DOOR:
         yaw_free = 0;
         if (!a->at_door && walk(a, a->room.door_x, a->room.door_z)) a->at_door = 1;
@@ -749,7 +783,10 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
             a->eased[i] += (goal - a->eased[i]) / 7;
             goal = a->eased[i];
         }
-        s->v += (goal - s->x) * stiff[i] / 2048 - s->v * damp[i] / 256;
+        {
+            int k = eases(i) ? stiff[i] * (a->energy + 50) / 100 : stiff[i]; /* energy: quicker or lazier poses */
+            s->v += (goal - s->x) * (k > 255 ? 255 : k) / 2048 - s->v * damp[i] / 256;
+        }
         s->x += s->v;
     }
 
@@ -1077,8 +1114,12 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
             solid(INK3);
             ok_r3d_ellipsoid(P(x, y - 6, 197 + hz), P(34, 46, 24), 6, 4); /* sunk in, so it never stands out in profile */
             ok_r3d_material(WHITE, ++next_id, OK_R3D_UNLIT);
-            ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 218), P(11, 12, 4), 4, 3);
-            ok_r3d_ellipsoid(P(x + 9, y - 20, 216 + hz), P(5, 5, 3), 4, 2); /* a second, small glint */
+            if (hz) { /* on the hardware a glint smaller than a pixel is dropped: one bigger, coarser */
+                ok_r3d_ellipsoid(P(x - 9, y + 10 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 234 + hz), P(17, 18, 4), 4, 2);
+            } else {
+                ok_r3d_ellipsoid(P(x - 10, y + 12 + (f->eyes == 'u' ? 6 : f->eyes == 'd' ? -8 : 0), 218), P(11, 12, 4), 4, 3);
+                ok_r3d_ellipsoid(P(x + 9, y - 20, 216), P(5, 5, 3), 4, 2); /* a second, small glint */
+            }
             if (f->eyes == 'h') { /* heavy lids */
                 part(skin, OK_PART_HEAD, f->head_id);
                 ok_r3d_ellipsoid(P(x, y + 22, 210 + hz), P(36, 26, 24), 6, 3);
