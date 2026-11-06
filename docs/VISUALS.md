@@ -66,12 +66,24 @@ timer share a crystal (2048 ticks per sample), so they never drift apart.
 
 The console opens on a splash: OKUPA stamped over a turning sun of halftone
 dots, "by victorxva" typed in, a shine across the name, and a bell jingle.
-Then a short film plays, the cottage on its floating island at night, with
-clouds and haze, the camera flying in through the round attic window. A
-touch skips either. The outside is the attic seen from outside: the same
-walls, roof, round window, door and side window.
+Then a short film plays, the cottage on its floating island at night, the
+camera flying in through the round attic window. A touch skips either. The
+outside is the attic seen from outside: the same walls, roof, round window,
+door and side window.
+
+The sky outside is a low-poly dome drawn round the camera, like a tiny 360
+degree panorama, so it turns with the camera and the stars stay put. It has
+four moods: dawn, day, dusk and night, blended by the clock. The facets shade
+from the horizon to the zenith, and warm towards the sun at dawn and dusk.
+Flat two-tone clouds drift slowly round it, and a sea of them lies below the
+island. The sun or the moon sits on the dome, and at night there are stars.
+The island is an irregular rock: a lawn, a rounded lip, and cliffs narrowing
+to a point. Small bushes grow on it (no trees), and ivy sprites hang over its
+edge (cut out of a ChatGPT sheet by `tools/ivy.py`, see THIRD_PARTY.md).
 
 "Out" takes the okupa to the terrace, where six more frames hang (three on
 the brick wall, three on easels). Frames stay empty until `ok_house_frame`
-hangs a 64x64 picture in them: they are meant for the drawings the console
-has sent.
+hangs a 64x64 picture in them: they hold `ok_ui.wall`, the drawings the
+console saw included in a block, oldest first. A new one is hung with a
+little show: it drops onto its nail, bumps, swings and settles, with dust and
+glints, while the okupa cheers (it walks in first if it was outside).

@@ -473,19 +473,22 @@ static void raster(const vert *a, const vert *b, const vert *c)
                 irow[x] = (uint8_t)cur_id;
                 continue;
             }
-            zrow[x] = (int32_t)(z >> 8);
-            irow[x] = (uint8_t)cur_id;
             if (textured) {
                 int k = tone_of((int32_t)(l >> 8)), tu = (int)(u >> 12), tv = (int)(v >> 12);
                 uint16_t t;
                 tv = tile ? tv & (uv_h - 1) : tv < 0 ? 0 : tv >= uv_h ? uv_h - 1 : tv;
                 t = tex[(uv_y + tv) * tex_stride + uv_x + (tu & (uv_w - 1))];
+                if (!(t & 0x8000u) && (cur_flags & OK_R3D_CUTOUT)) continue; /* see-through texel */
+                zrow[x] = (int32_t)(z >> 8);
+                irow[x] = (uint8_t)cur_id;
                 if (flatten) /* only a hint of the texture over its own flat colour */
                     t = (uint16_t)(((t & 31) * (256 - flatten) + avg_r * flatten) >> 8 |
                                    (((t >> 5 & 31) * (256 - flatten) + avg_g * flatten) >> 8) << 5 |
                                    (((t >> 10 & 31) * (256 - flatten) + avg_b * flatten) >> 8) << 10);
                 row[x] = (uint16_t)(0x8000u | lut[k][0][t & 31] | lut[k][1][t >> 5 & 31] << 5 | lut[k][2][t >> 10 & 31] << 10);
             } else {
+                zrow[x] = (int32_t)(z >> 8);
+                irow[x] = (uint8_t)cur_id;
                 row[x] = tone[tone_of((int32_t)(l >> 8))];
             }
         }

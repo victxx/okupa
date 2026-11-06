@@ -310,14 +310,14 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     tex(OK_ROOM_BEAM, 6, wood, 0); /* the floor's front edge */
     quad_grid(P(-1400, -100, 1300), P(1400, -100, 1300), P(1400, 0, 1300), P(-1400, 0, 1300), 14, 1);
     tex(OK_ROOM_WALLPAPER, 5, RGB(20, 22, 17), 0);
-    quad_grid(P(-1400, 0, -1100), P(1400, 0, -1100), P(1400, 700, -1100), P(-1400, 700, -1100), 14, 4);
+    quad_grid(P(-1400, 0, -1100), P(1400, 0, -1100), P(1400, 950, -1100), P(-1400, 950, -1100), 14, 5);
     tex(OK_ROOM_PLASTER, 5, RGB(24, 21, 17), 0);
-    quad_grid(P(-1400, 700, -1100), P(1400, 700, -1100), P(0, 2100, -1100), P(0, 2100, -1100), 8, 7);
+    quad_grid(P(-1400, 950, -1100), P(1400, 950, -1100), P(0, 2100, -1100), P(0, 2100, -1100), 8, 6);
     tex(OK_ROOM_BRICK, 7, RGB(18, 8, 6), 0);
     quad_grid(P(380, 120, -1094), P(1150, 120, -1094), P(1250, 560, -1094), P(520, 640, -1094), 4, 3);
     tex(OK_ROOM_BOARDS, 6, RGB(16, 11, 7), OK_R3D_BOTH);
-    quad_grid(P(-1400, 0, -1100), P(-1400, 700, -1100), P(-1400, 700, 1300), P(-1400, 0, 1300), 3, 12);
-    quad_grid(P(1400, 0, -1100), P(1400, 700, -1100), P(1400, 700, 1300), P(1400, 0, 1300), 3, 12);
+    quad_grid(P(-1400, 0, -1100), P(-1400, 950, -1100), P(-1400, 950, 1300), P(-1400, 0, 1300), 4, 12);
+    quad_grid(P(1400, 0, -1100), P(1400, 950, -1100), P(1400, 950, 1300), P(1400, 0, 1300), 4, 12);
     /* The door in the right kneewall (out to the terrace) and a small window in the left one. */
     tex(OK_ROOM_FRAME, 10, RGB(22, 21, 19), OK_R3D_EDGE);
     box(1360, 0, -340, 1400, 600, -300);
@@ -344,13 +344,13 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
         int z = -1040 + i * 700, s;
         for (s = -1; s <= 1; s += 2) {
             ok_r3d_push();
-            ok_r3d_translate(P(s * 700, 1400, z));
-            ok_r3d_rotate_z(-s * OK_TURN / 8);
-            box(-960, -50, -40, 960, 50, 40);
+            ok_r3d_translate(P(s * 700, 1525, z)); /* rafters, from the kneewall's top to the ridge */
+            ok_r3d_rotate_z(-s * (OK_TURN * 395 / 3600));
+            box(-930, -50, -40, 930, 50, 40);
             ok_r3d_pop();
         }
     }
-    box(-1400, 660, -1090, 1400, 740, -1020);
+    box(-1400, 910, -1090, 1400, 990, -1020);
     /* The round window: sky by the hour, the sun crossing it by day, the moon at night. */
     ok_r3d_push();
     ok_r3d_translate(P(0, 1250, -1095));
@@ -373,8 +373,8 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     box(-280, 6, -22, 280, 22, 22);
     box(-22, 6, -280, 22, 22, 280);
     ok_r3d_pop();
-    bulbs(-1300, 720, 0, 1950, -980, 9, on, lit, &lights);
-    bulbs(0, 1950, 1300, 720, -980, 9, on, lit, &lights);
+    bulbs(-1300, 960, 0, 1950, -980, 9, on, lit, &lights);
+    bulbs(0, 1950, 1300, 960, -980, 9, on, lit, &lights);
     /* The gallery: six frames, empty until a picture is hung in them. */
     {
         int k;
@@ -506,8 +506,8 @@ static void dot(uint16_t *f, int x, int y, uint16_t c)
 
 static int place;
 static void outside_scene(const light *l, int on);
-static void sky(uint16_t *f, int minute, int pan, uint32_t t);
-static int sky_pan(ok_v3 eye, ok_v3 target);
+static void sky_dome(ok_v3 eye, int minute, uint32_t t);
+static void sky_stars(uint16_t *f, ok_v3 eye, int minute, uint32_t t);
 static void fireflies(uint16_t *f, uint32_t t, int night);
 static void fog(uint16_t *f, uint16_t haze, int near_units, int far_units);
 
@@ -524,9 +524,9 @@ static void garden_draw(uint16_t *frame, int m, const ok_look *look, const uint1
     if (!kept.valid || kept.key != key || kept.art_sum != s) {
         next_id = 0;
         ok_r3d_begin(frame, CHARCOAL);
-        sky(frame, m, sky_pan(P(cam[0], cam[1], cam[2]), P(cam[3], cam[4], cam[5])), a->ticks);
         ok_r3d_camera(P(cam[0], cam[1], cam[2]), P(cam[3], cam[4], cam[5]), 330);
         apply(&l);
+        sky_dome(P(cam[0], cam[1], cam[2]), m, a->ticks);
         outside_scene(&l, l.night || m >= 1140);
         fog(frame, frame[(H - 30) * W], 45, 150);
         ok_r3d_keep();
@@ -542,6 +542,7 @@ static void garden_draw(uint16_t *frame, int m, const ok_look *look, const uint1
     ok_monkey_draw(look, skin, a, face);
     ok_r3d_finish();
     ok_monkey_face_draw(frame, face);
+    sky_stars(frame, P(cam[0], cam[1], cam[2]), m, a->ticks);
     fireflies(frame, a->ticks, l.night || m >= 1140);
 }
 
@@ -702,69 +703,157 @@ static void sky_colours(int minute, uint16_t out[4])
     }
 }
 
-static void puff(uint16_t *f, int cx, int base, int r, uint16_t light, uint16_t dark)
+/* The sky: a low-poly dome all round the camera, like a tiny 360 degree
+ * panorama. Facets shade from the horizon up to the zenith, warmer on the
+ * side of the sun at dawn and dusk; a few chunky clouds drift round it; the
+ * sun or the moon sits on it, and at night stars. It is drawn around the
+ * eye, so it turns with the camera and never comes nearer. */
+#define SKY_ID 245 /* 250-254 are the shadow layers */
+#define SKY_R 20000 /* hundredths of a unit */
+#define SKY_AZ 28
+#define SKY_EL 9
+
+static uint16_t lerp_c(uint16_t a, uint16_t b, int t, int n)
 {
-    int x, y;
-    for (y = base - r; y < base; y++)
-        for (x = cx - r; x <= cx + r; x++) {
-            int d = (x - cx) * (x - cx) + (y - base + r / 3) * (y - base + r / 3) * 2;
-            if (x < 0 || y < 0 || x >= W || y >= H || d > r * r) continue;
-            f[y * W + x] = y > base - r / 3 ? dark : light;
-        }
+    int k;
+    if (t < 0) t = 0;
+    if (t > n) t = n;
+    k = t * 256 / n;
+    return RGB((a & 31) + (((b & 31) - (a & 31)) * k >> 8), (a >> 5 & 31) + (((b >> 5 & 31) - (a >> 5 & 31)) * k >> 8),
+               (a >> 10 & 31) + (((b >> 10 & 31) - (a >> 10 & 31)) * k >> 8));
 }
 
-static void sky(uint16_t *f, int minute, int pan, uint32_t t)
+static uint32_t hash2(int a, int b)
 {
-    static const int16_t clouds[6][3] = {{30, 70, 16}, {120, 44, 12}, {200, 88, 18}, {300, 60, 14}, {80, 130, 20}, {250, 150, 22}};
-    uint16_t c[4];
-    int x, y, i, night = minute < 380 || minute >= 1220;
-    sky_colours(minute, c);
-    for (y = 0; y < H; y++) {
-        uint16_t row = RGB((c[0] & 31) + ((c[1] & 31) - (c[0] & 31)) * y / H, (c[0] >> 5 & 31) + ((c[1] >> 5 & 31) - (c[0] >> 5 & 31)) * y / H,
-                           (c[0] >> 10 & 31) + ((c[1] >> 10 & 31) - (c[0] >> 10 & 31)) * y / H);
-        for (x = 0; x < W; x++) f[y * W + x] = row;
-    }
-    if (night) {
-        for (i = 0; i < 40; i++) {
-            uint32_t h = (uint32_t)i * 2654435761u;
-            dot(f, (int)(h % W), (int)(h / W % 110), (t / 20 + (uint32_t)i) % 7 ? RGB(24, 24, 26) : RGB(31, 31, 26));
-        }
-        for (y = -9; y <= 9; y++) /* the moon */
-            for (x = -9; x <= 9; x++)
-                if (x * x + y * y <= 81 && (x + 4) * (x + 4) + (y - 2) * (y - 2) > 60) dot(f, 205 + x - pan, 30 + y, RGB(30, 29, 22));
+    uint32_t h = (uint32_t)a * 73856093u ^ (uint32_t)b * 19349663u;
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    return h ^ h >> 15;
+}
+
+/* A direction on the dome (angles in 1/4096 turn), scaled to r hundredths. */
+static ok_v3 sky_dir(int az, int el, int r)
+{
+    int32_t c = ok_r3d_cos(el);
+    return P((int)((int64_t)ok_r3d_sin(az) * c / 4096 * r / 4096), (int)((int64_t)ok_r3d_sin(el) * r / 4096),
+             (int)((int64_t)ok_r3d_cos(az) * c / 4096 * r / 4096));
+}
+
+/* Where the sun (by day) or the moon (by night) is. */
+static void sky_light(int minute, int *az, int *el, int *night)
+{
+    *night = minute < 380 || minute >= 1220;
+    if (*night) {
+        *az = DEG(158);
+        *el = DEG(6);
     } else {
-        int sx = 40 + (minute - 420) * 180 / 750 - pan, sy = 90 - (minute > 420 && minute < 1170 ? 60 - ((minute - 795) * (minute - 795)) / 2400 : 0);
-        for (y = -8; y <= 8; y++)
-            for (x = -8; x <= 8; x++)
-                if (x * x + y * y <= 64) dot(f, sx + x, sy + y, RGB(31, 29, 20));
-    }
-    for (i = 0; i < 6; i++) { /* drifting slowly, a bit of parallax */
-        int cx = ((clouds[i][0] + (int)(t / 12) + pan * (i % 2 ? 2 : 1)) % 340) - 40, cy = clouds[i][1], r = clouds[i][2];
-        puff(f, cx, cy, r, c[2], c[3]);
-        puff(f, cx - r, cy, r * 2 / 3, c[2], c[3]);
-        puff(f, cx + r, cy, r * 3 / 4, c[2], c[3]);
+        int k = minute - 380 > 840 ? 840 : minute - 380;
+        *az = DEG(-100) + k * DEG(200) / 840;
+        *el = DEG(3) + (int)((int64_t)ok_r3d_sin(k * (OK_TURN / 2) / 840) * DEG(26) / 4096);
     }
 }
 
-/* How far the sky slides for a camera looking from eye to target. */
-static int sky_pan(ok_v3 eye, ok_v3 target)
+static int sky_vertex_el(int i, int j)
 {
-    return (int)((int64_t)ok_r3d_sin(ok_r3d_atan2(target.x - eye.x, eye.z - target.z)) * 16 / 4096);
+    static const int16_t rings[SKY_EL + 1] = {-40, -12, 2, 9, 17, 27, 39, 53, 70, 90};
+    int jit = j > 0 && j < SKY_EL ? (int)(hash2(i, j) % 5) - 2 : 0;
+    return DEG(rings[j] + jit);
 }
 
-/* A gnarled little tree: a leaning trunk, two branches, a canopy of clumps. */
-static void tree(int x, int z, int s)
+static int sky_vertex_az(int i, int j)
 {
-    otex(OK_OUT_BARK, 6, RGB(9, 5, 3), OK_R3D_EDGE);
-    ok_r3d_capsule(P(x, 0, z), P(x + 60 * s / 100, 700 * s / 100, z), U(95 * s / 100), 7);
-    ok_r3d_capsule(P(x + 60 * s / 100, 650 * s / 100, z), P(x - 260 * s / 100, 950 * s / 100, z + 60), U(50 * s / 100), 6);
-    ok_r3d_capsule(P(x + 60 * s / 100, 700 * s / 100, z), P(x + 330 * s / 100, 980 * s / 100, z - 60), U(45 * s / 100), 6);
-    otex(OK_OUT_LEAVES, 0, RGB(3, 9, 4), OK_R3D_EDGE);
-    blob(x + 40 * s / 100, 1120 * s / 100, z, 400 * s / 100, 300 * s / 100, 380 * s / 100);
-    blob(x - 300 * s / 100, 980 * s / 100, z + 80, 260 * s / 100, 220 * s / 100, 260 * s / 100);
-    blob(x + 360 * s / 100, 1000 * s / 100, z - 60, 250 * s / 100, 210 * s / 100, 250 * s / 100);
-    blob(x - 60 * s / 100, 1350 * s / 100, z - 40, 250 * s / 100, 200 * s / 100, 250 * s / 100);
-    ok_r3d_tile(0);
+    int jit = j > 0 && j < SKY_EL ? (int)(hash2(j, i + 99) % 7) - 3 : 0;
+    return (i % SKY_AZ) * OK_TURN / SKY_AZ + DEG(jit) + (j % 2) * OK_TURN / SKY_AZ / 2;
+}
+
+/* The colour of a facet looking at az, el. */
+static uint16_t sky_at(const uint16_t c[4], int az, int el, int sun_az, int night, int minute, uint32_t h)
+{
+    int up = el * 1000 / DEG(90), d, warm;
+    uint16_t col = up < 0 ? lerp_c(c[1], c[3], -up, 300) : lerp_c(c[1], c[0], up, 800);
+    /* Towards the sun, low down, the horizon glows at dawn and dusk. */
+    d = (az - sun_az) & (OK_TURN - 1);
+    if (d > OK_TURN / 2) d = OK_TURN - d;
+    warm = !night && (minute < 540 || minute > 1000) ? (OK_TURN / 3 - d) * 600 / (OK_TURN / 3) - (up > 0 ? up : -up) * 2 : 0;
+    if (warm > 0) col = lerp_c(col, c[2], warm, 900);
+    /* Each facet a touch lighter or darker, so the facets show. */
+    if (h % 3 == 0) col = lerp_c(col, RGB(31, 31, 31), 2, 30);
+    if (h % 3 == 1) col = lerp_c(col, RGB(0, 0, 0), 2, 34);
+    return col;
+}
+
+static void sky_dome(ok_v3 eye, int minute, uint32_t t)
+{
+    uint16_t c[4];
+    int i, j, sun_az, sun_el, night;
+    sky_colours(minute, c);
+    sky_light(minute, &sun_az, &sun_el, &night);
+    ok_r3d_push();
+    ok_r3d_translate(eye);
+    for (j = 0; j < SKY_EL; j++)
+        for (i = 0; i < SKY_AZ; i++) {
+            int o = j % 2; /* rings staggered by half a facet: triangles, not boxes */
+            ok_v3 a = sky_dir(sky_vertex_az(i, j), sky_vertex_el(i, j), SKY_R);
+            ok_v3 b = sky_dir(sky_vertex_az(i + 1, j), sky_vertex_el(i + 1, j), SKY_R);
+            ok_v3 e = sky_dir(sky_vertex_az(i + 1 - o, j + 1), sky_vertex_el(i + 1 - o, j + 1), SKY_R);
+            ok_v3 f = sky_dir(sky_vertex_az(i + 2 - o, j + 1), sky_vertex_el(i + 2 - o, j + 1), SKY_R);
+            int mid_el = (sky_vertex_el(i, j) + sky_vertex_el(i, j + 1)) / 2, az = (i * 2 + 1) * OK_TURN / SKY_AZ / 2;
+            ok_r3d_material(sky_at(c, az, mid_el, sun_az, night, minute, hash2(i, j * 2)), SKY_ID, OK_R3D_UNLIT | OK_R3D_BOTH);
+            ok_r3d_quad(a, b, e, e);
+            ok_r3d_material(sky_at(c, az + OK_TURN / SKY_AZ / 2, mid_el + DEG(4), sun_az, night, minute, hash2(i, j * 2 + 1)), SKY_ID,
+                            OK_R3D_UNLIT | OK_R3D_BOTH);
+            ok_r3d_quad(b, f, e, e);
+        }
+    /* The sun, or the moon with a bite out of it. */
+    ok_r3d_material(night ? RGB(30, 29, 22) : RGB(31, 30, 21), SKY_ID - 1, OK_R3D_UNLIT);
+    {
+        ok_v3 at = sky_dir(sun_az, sun_el, SKY_R * 9 / 10);
+        ok_r3d_ellipsoid(at, P(night ? 700 : 900, night ? 700 : 900, night ? 700 : 900), 8, 5);
+        if (night) {
+            ok_r3d_material(sky_at(c, sun_az, sun_el, sun_az, 1, minute, 2), SKY_ID - 1, OK_R3D_UNLIT);
+            ok_r3d_ellipsoid(sky_dir(sun_az + DEG(1), sun_el + DEG(1), SKY_R * 88 / 100), P(600, 600, 600), 8, 5);
+        }
+    }
+    /* Clouds: flattened low-poly lumps drifting slowly round the sky, and
+     * below the island a sea of them, lit by the same light. */
+    for (i = 0; i < 26; i++) {
+        int sea = i >= 12, n = sea ? 14 : 12, j0 = sea ? i - 12 : i, k;
+        int az = j0 * OK_TURN / n + (int)(hash2(i, 7) % (OK_TURN / 24)) + (int)(t / (sea ? 90 : 40)) + (sea ? OK_TURN / 28 : 0);
+        int el = sea ? -DEG(7 + (int)(hash2(i, 8) % 9)) : DEG(1 + (int)(hash2(i, 8) % 8));
+        int sz = (sea ? 2600 : 1500) + (int)(hash2(i, 9) % 1300);
+        for (k = 0; k < 4; k++) { /* a flat shaded base, then three puffs on it */
+            int dz = (k - 2) * DEG(3) * sz / 1800, w = k == 0 ? 15 : k == 2 ? 9 : 6, hgt = k == 0 ? 3 : k == 2 ? 6 : 4;
+            uint16_t body = sea ? lerp_c(c[2], c[3], 1, 3) : c[2];
+            ok_r3d_material(k == 0 ? lerp_c(body, c[3], 2, 3) : body, SKY_ID - 2, OK_R3D_UNLIT);
+            ok_r3d_ellipsoid(sky_dir(az + (k ? dz + DEG(3) * sz / 1800 : 0), el + (k == 0 ? -DEG(1) / 2 : k == 2 ? DEG(1) : DEG(1) / 3), SKY_R * 8 / 10 - k * 20),
+                             P(sz * w / 10, sz * hgt / 10, sz * w / 10), 7, 3);
+        }
+    }
+    ok_r3d_pop();
+}
+
+/* The stars, where they are on the dome, drawn over the sky alone. */
+static void sky_stars(uint16_t *f, ok_v3 eye, int minute, uint32_t t)
+{
+    int i, az, el, night;
+    sky_light(minute, &az, &el, &night);
+    if (!night) return;
+    ok_r3d_push();
+    ok_r3d_translate(eye);
+    for (i = 0; i < 90; i++) {
+        int x, y;
+        uint32_t h = hash2(i, 1234);
+        if (!ok_r3d_project(sky_dir((int)(h % OK_TURN), DEG(4) + (int)(h / OK_TURN % (uint32_t)DEG(80)), SKY_R), &x, &y, NULL)) continue;
+        if (x < 0 || y < 0 || x >= W || y >= H || ok_r3d_id_at(x, y) != SKY_ID) continue;
+        dot(f, x, y, (t / 16 + (uint32_t)i) % 9 ? RGB(22, 23, 27) : RGB(31, 31, 27));
+        if (h % 7 == 0 && (t / 16 + (uint32_t)i) % 9 == 0) { /* a few bright ones twinkle in a cross */
+            dot(f, x + 1, y, RGB(20, 21, 26));
+            dot(f, x - 1, y, RGB(20, 21, 26));
+            dot(f, x, y + 1, RGB(20, 21, 26));
+            dot(f, x, y - 1, RGB(20, 21, 26));
+        }
+    }
+    ok_r3d_pop();
 }
 
 static void easel(int slot, int x, int z, int yaw)
@@ -848,53 +937,115 @@ static void fireflies(uint16_t *f, uint32_t t, int night)
     }
 }
 
+/* The island's outline: a wobbly circle, never closer than the terrace's
+ * corners (radius in hundredths at turn angle a, for an island of size 1000). */
+static int island_r(int a, int seed)
+{
+    static const int16_t ph[3][3] = {{2966, 1369, 228}, {700, 2900, 1800}, {3500, 400, 2600}};
+    return 2900 + (int)(((int64_t)ok_r3d_sin(2 * a + ph[seed][0]) * 260 + (int64_t)ok_r3d_sin(3 * a + ph[seed][1]) * 170 +
+                         (int64_t)ok_r3d_sin(5 * a + ph[seed][2]) * 100) / 4096);
+}
+
+/* An island: a flat lawn, a lip that rounds over, then rocky cliffs
+ * narrowing to a point; size 1000 is the one the house stands on. */
+#define ISLE_N 28
+static void island(int cx, int cy, int cz, int size, int seed)
+{
+    /* Rings from the lawn's edge down: radius (per 1000 of the outline) and height. */
+    static const int16_t ring[][2] = {{1000, 0},    {1028, -40},  {1040, -110}, {1026, -190}, {975, -270}, {890, -520},
+                                      {760, -940}, {590, -1420}, {400, -1920}, {210, -2400}, {70, -2780}, {0, -2950}};
+    enum { RINGS = sizeof ring / sizeof ring[0] };
+    int i, k;
+    for (k = 0; k < RINGS - 1; k++) {
+        if (k == 0) otex(OK_OUT_GRASS, 3, RGB(5, 10, 3), 0);
+        if (k == 3) {
+            ok_r3d_flatten(210);
+            ok_r3d_texture(ok_outside_skin, 128);
+            ok_r3d_uv(OK_OUT_EARTH % 4 * 32, OK_OUT_EARTH / 4 * 32, 32, 32);
+            ok_r3d_tile(3);
+            ok_r3d_material(RGB(11, 7, 3), ++next_id, OK_R3D_TEXTURED | OK_R3D_EDGE | OK_R3D_FLAT);
+        }
+        for (i = 0; i < ISLE_N; i++) {
+            ok_v3 q[4];
+            int n;
+            for (n = 0; n < 4; n++) {
+                int ii = (i + (n == 1 || n == 2)) % ISLE_N, kk = k + (n >= 2), a = ii * OK_TURN / ISLE_N;
+                int r = island_r(a, seed) * ring[kk][0] / 1000, y = ring[kk][1];
+                if (kk >= 5) r = r * (94 + (int)(hash2(ii + seed * 50, kk) % 13)) / 100; /* rocky, not turned */
+                q[n] = P(cx + (int)((int64_t)ok_r3d_cos(a) * r / 4096) * size / 1000, cy + y * size / 1000,
+                         cz + (int)((int64_t)ok_r3d_sin(a) * r / 4096) * size / 1000);
+            }
+            ok_r3d_quad(q[0], q[1], q[2], q[3]);
+        }
+    }
+    otex(OK_OUT_GRASS, 3, RGB(5, 10, 3), 0); /* the lawn on top, as a fan */
+    for (i = 0; i < ISLE_N; i++) {
+        int a0 = i * OK_TURN / ISLE_N, a1 = (i + 1) * OK_TURN / ISLE_N, r0 = island_r(a0, seed), r1 = island_r(a1, seed);
+        ok_v3 c = P(cx, cy, cz), p0 = P(cx + (int)((int64_t)ok_r3d_cos(a0) * r0 / 4096) * size / 1000, cy,
+                                       cz + (int)((int64_t)ok_r3d_sin(a0) * r0 / 4096) * size / 1000);
+        ok_v3 p1 = P(cx + (int)((int64_t)ok_r3d_cos(a1) * r1 / 4096) * size / 1000, cy,
+                     cz + (int)((int64_t)ok_r3d_sin(a1) * r1 / 4096) * size / 1000);
+        ok_r3d_quad(c, p1, p0, p0);
+    }
+    ok_r3d_tile(0);
+}
+
+/* Ivy hanging over an island's lip: n strands at the outline's edge,
+ * each a see-through sprite on a quad facing out. */
+static void ivy(int cx, int cy, int cz, int size, int seed, int n)
+{
+    int v;
+    ok_r3d_flatten(0);
+    ok_r3d_tile(0);
+    ok_r3d_texture(ok_ivy_art, 6 * 32);
+    for (v = 0; v < n; v++) {
+        int a = v * OK_TURN / n + (int)(hash2(v, seed + 40) % (uint32_t)(OK_TURN / n / 2)), sprite = (int)(hash2(v, seed + 41) % 6);
+        int r = island_r(a, seed) * 1046 / 1000, len = (700 + (int)(hash2(v, seed + 42) % 700)) * size / 1000, w = len * 3 / 4;
+        int32_t ca = ok_r3d_cos(a), sa = ok_r3d_sin(a);
+        int px = cx + (int)((int64_t)ca * r / 4096) * size / 1000, pz = cz + (int)((int64_t)sa * r / 4096) * size / 1000, py = cy - 50 * size / 1000;
+        int tx = (int)((int64_t)-sa * w / 2 / 4096), tz = (int)((int64_t)ca * w / 2 / 4096);
+        ok_r3d_uv(sprite * 32, 0, 32, 64);
+        ok_r3d_material(RGB(2, 6, 2), ++next_id, OK_R3D_TEXTURED | OK_R3D_CUTOUT | OK_R3D_BOTH);
+        ok_r3d_quad(P(px + tx, py - len, pz + tz), P(px - tx, py - len, pz - tz), P(px - tx, py, pz - tz), P(px + tx, py, pz + tz));
+    }
+}
+
+/* A small bush: a few low-poly lumps of leaves. */
+static void bush(int x, int z, int s, int seed)
+{
+    int k, n = 3 + (int)(hash2(seed, 1) % 2);
+    otex(OK_OUT_LEAVES, 0, RGB(3, 8, 3), OK_R3D_EDGE | OK_R3D_FLAT);
+    for (k = 0; k < n; k++) {
+        int dx = ((int)(hash2(seed, k + 2) % 300) - 150) * s / 100, dz = ((int)(hash2(seed, k + 9) % 240) - 120) * s / 100;
+        int r = (150 + (int)(hash2(seed, k + 20) % 90)) * s / 100;
+        ok_r3d_ellipsoid(P(x + dx, r * 7 / 10, z + dz), P(r, r * 85 / 100, r), 6, 4);
+    }
+    ok_r3d_tile(0);
+}
+
 static void outside_scene(const light *l, int on)
 {
     int i, k, lit[24][2], lights = 0;
-    /* The island: a lawn with a soft rounded lip, and under it smooth
-     * cliffs narrowing to a point, grooved by rounded columns. */
-    otex(OK_OUT_GRASS, 3, RGB(6, 12, 4), 0);
-    ok_r3d_cylinder(P(0, -40, 0), U(2700), U(40), 20);
-    otex(OK_OUT_GRASS, 0, RGB(5, 10, 3), OK_R3D_EDGE);
-    ok_r3d_ellipsoid(P(0, -70, 0), P(2790, 140, 2790), 20, 6);
-    ok_r3d_flatten(210);
-    ok_r3d_texture(ok_outside_skin, 128);
-    ok_r3d_uv(OK_OUT_EARTH % 4 * 32, OK_OUT_EARTH / 4 * 32, 32, 32);
-    ok_r3d_tile(3);
-    ok_r3d_material(RGB(11, 7, 3), ++next_id, OK_R3D_TEXTURED | OK_R3D_EDGE);
-    ok_r3d_cone(P(0, -600, 0), U(2300), U(2680), U(540), 20);
-    ok_r3d_cone(P(0, -1400, 0), U(1500), U(2300), U(800), 18);
-    ok_r3d_cone(P(0, -2200, 0), U(600), U(1500), U(800), 16);
-    ok_r3d_cone(P(0, -2700, 0), U(60), U(600), U(500), 12);
-    for (i = 0; i < 16; i++) { /* rounded columns down the cliffs */
-        int a = DEG(i * 360 / 16 + 11), r = 2250 - (i * 97) % 300, len = 500 + (i * 313) % 700;
-        int x = (int)((int64_t)ok_r3d_cos(a) * r / 4096), z = (int)((int64_t)ok_r3d_sin(a) * r / 4096);
-        ok_r3d_capsule(P(x, -500, z), P(x * 8 / 10, -900 - len, z * 8 / 10), U(240 - (i % 3) * 40), 8);
-    }
-    for (i = 0; i < 2; i++) { /* two small islets drifting near it */
-        int a = DEG(i * 150 + 60), r = 4000 + i * 500, x = (int)((int64_t)ok_r3d_cos(a) * r / 4096), z = (int)((int64_t)ok_r3d_sin(a) * r / 4096);
-        ok_r3d_cone(P(x, -900 - i * 300, z), U(40), U(300 - i * 60), U(420), 10);
-        otex(OK_OUT_GRASS, 0, RGB(5, 10, 3), OK_R3D_EDGE);
-        ok_r3d_ellipsoid(P(x, -470 - i * 300, z), P(320 - i * 60, 50, 320 - i * 60), 12, 4);
-        ok_r3d_flatten(210);
-        ok_r3d_texture(ok_outside_skin, 128);
-        ok_r3d_uv(OK_OUT_EARTH % 4 * 32, OK_OUT_EARTH / 4 * 32, 32, 32);
-        ok_r3d_tile(3);
-        ok_r3d_material(RGB(11, 7, 3), ++next_id, OK_R3D_TEXTURED | OK_R3D_EDGE);
-    }
+    /* The island and two little islets, each an irregular low-poly rock. */
+    island(0, 0, 0, 1000, 0);
+    island(-2600, -600, 3300, 105, 1);
+    island(3900, -900, -1500, 90, 2);
+    ivy(0, 0, 0, 1000, 0, 18);
+    ivy(-2600, -600, 3300, 105, 1, 4);
+    ivy(3900, -900, -1500, 90, 2, 4);
     /* The house: the attic itself, seen from outside. Built in the attic's
      * own coordinates (walls at x +-14, the round window in the gable at
      * z -11, the door in the right kneewall), mirrored in z so the round
      * window faces the front, and shrunk to fit the island. A stone footing,
      * a timber frame, mossy tiles, ivy: a cottage from the country. */
     {
-        static const int16_t gable[5][2] = {{-1420, 0}, {1420, 0}, {1420, 700}, {0, 2120}, {-1420, 700}};
+        static const int16_t gable[5][2] = {{-1420, 0}, {1420, 0}, {1420, 950}, {0, 2120}, {-1420, 950}};
         ok_r3d_push();
         ok_r3d_translate(P(0, 0, 700)); /* in front, the temple behind it */
         ok_r3d_scale(U(62), U(62), -U(62));
         otex(OK_OUT_STUCCO, 4, RGB(22, 19, 15), OK_R3D_EDGE);
-        box(-1420, 0, -1100, -1380, 700, 1300); /* kneewalls */
-        box(1380, 0, -1100, 1420, 700, 1300);
+        box(-1420, 0, -1100, -1380, 950, 1300); /* kneewalls */
+        box(1380, 0, -1100, 1420, 950, 1300);
         for (i = 0; i < 2; i++) {
             ok_r3d_push();
             ok_r3d_translate(P(0, 0, i ? 1300 : -1120));
@@ -906,26 +1057,27 @@ static void outside_scene(const light *l, int on)
         otex(OK_OUT_BARK, 8, RGB(6, 4, 2), OK_R3D_EDGE); /* the timber frame on the gables */
         for (i = 0; i < 2; i++) {
             int z = i ? 1322 : -1142;
-            box(-1440, 680, z - 12, 1440, 740, z + 12);
-            box(-40, 740, z - 12, 40, 2080, z + 12);
+            box(-1440, 920, z - 12, 1440, 980, z + 12);
+            box(-40, 980, z - 12, 40, 2080, z + 12);
             ok_r3d_push();
-            ok_r3d_translate(P(-700, 1060, z));
+            ok_r3d_translate(P(-620, 1300, z));
             ok_r3d_rotate_z(OK_TURN / 8);
-            box(-30, -480, -12, 30, 480, 12);
+            box(-30, -380, -12, 30, 380, 12);
             ok_r3d_pop();
             ok_r3d_push();
-            ok_r3d_translate(P(700, 1060, z));
+            ok_r3d_translate(P(620, 1300, z));
             ok_r3d_rotate_z(-OK_TURN / 8);
-            box(-30, -480, -12, 30, 480, 12);
+            box(-30, -380, -12, 30, 380, 12);
             ok_r3d_pop();
         }
-        /* The roof: two 45 degree slopes, mossy, a chimney. */
+        /* The roof: two slopes from the kneewalls to the ridge, mossy, with
+         * a short overhang all round, and a chimney. */
         otex(OK_OUT_MOSS_TILES, 6, RGB(10, 6, 3), OK_R3D_EDGE | OK_R3D_FLAT);
         for (k = -1; k <= 1; k += 2) {
             ok_r3d_push();
-            ok_r3d_translate(P(k * 700, 1440, 100));
-            ok_r3d_rotate_z(-k * OK_TURN / 8);
-            box(-1180, -45, -1300, 1180, 45, 1300);
+            ok_r3d_translate(P(k * 735, 1575, 90));
+            ok_r3d_rotate_z(-k * (OK_TURN * 395 / 3600));
+            box(-990, -32, -1250, 990, 32, 1250);
             ok_r3d_pop();
         }
         otex(OK_OUT_STONE, 6, RGB(12, 11, 9), OK_R3D_EDGE);
@@ -986,9 +1138,14 @@ static void outside_scene(const light *l, int on)
         blob(-1440, 500, -900, 60, 420, 180);
         ok_r3d_pop();
     }
-    /* Trees, well clear of the house. */
-    tree(-1950, 900, 90);
-    tree(1850, -1150, 75);
+    /* Small bushes here and there, no trees. */
+    bush(-1950, 900, 100, 1);
+    bush(-2300, -300, 80, 2);
+    bush(1950, 1500, 90, 3);
+    bush(2100, -600, 75, 4);
+    bush(-700, 2200, 70, 5);
+    bush(1700, -1700, 85, 6);
+    bush(-1800, -1600, 70, 7);
     /* A path from the door round to the back, where the deck is: the art
      * temple, three easels, a rail with fairy lights, a plant. */
     otex(OK_OUT_COBBLE, 6, RGB(10, 10, 9), OK_R3D_EDGE | OK_R3D_FLAT);
@@ -1028,7 +1185,7 @@ static void fog(uint16_t *f, uint16_t haze, int near_units, int far_units)
         for (x = 0; x < W; x++) {
             int32_t d = ok_r3d_depth_at(x, y), k;
             uint16_t c = f[y * W + x];
-            if (!d || d >= zn) continue;
+            if (!d || d >= zn || (ok_r3d_id_at(x, y) >= SKY_ID - 2 && ok_r3d_id_at(x, y) <= SKY_ID)) continue;
             k = (int32_t)((int64_t)(zn - d) * inv >> 12) * 6 / 10; /* 0..153 of 256: never all the way */
             if (k > 154) k = 154;
             f[y * W + x] = RGB((c & 31) + (((haze & 31) - (c & 31)) * k >> 8), (c >> 5 & 31) + (((haze >> 5 & 31) - (c >> 5 & 31)) * k >> 8),
@@ -1043,10 +1200,11 @@ void ok_house_outside(uint16_t *frame, ok_v3 eye, ok_v3 target, int focal, int h
     light_at(m, 0, &l);
     next_id = 0;
     ok_r3d_begin(frame, CHARCOAL);
-    sky(frame, m, sky_pan(eye, target), ticks);
     ok_r3d_camera(eye, target, focal);
     apply(&l);
+    sky_dome(eye, m, ticks);
     outside_scene(&l, l.night || m >= 1140);
+    sky_stars(frame, eye, m, ticks);
     fireflies(frame, ticks, l.night || m >= 1140);
     fog(frame, frame[(H - 30) * W], 70, 220);
     /* Smoke from the chimney. */

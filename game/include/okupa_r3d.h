@@ -27,6 +27,7 @@ typedef struct {
 #define OK_R3D_BOTH 8   /* both sides visible */
 #define OK_R3D_TEXTURED 16 /* colours from the texture, lit like the rest */
 #define OK_R3D_FLAT 32 /* one light per triangle: low-poly facets */
+#define OK_R3D_CUTOUT 64 /* textured: texels without bit 15 are see-through */
 
 static inline ok_v3 ok_v3_make(ok_fx x, ok_fx y, ok_fx z)
 {
