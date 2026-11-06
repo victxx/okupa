@@ -35,6 +35,10 @@ typedef struct {
     int x, z;   /* where it walks first, 0..100 across the floor (left to right, back to front) */
     int gaze;   /* OK_LOOK_* */
     int energy; /* 0 sluggish .. 100 bouncy; 50 when not given */
+    /* Things it decides to make, rarely; empty = none. */
+    char make[41];   /* an object to build out of boxes */
+    char draw[41];   /* something to draw on its own sketchbook */
+    char letter[141]; /* a letter to the player, sent on Ethereum (printable ASCII) */
 } ok_mind;
 
 /* What the okupa notices right now. Strings may be NULL; non-ASCII bytes
@@ -59,6 +63,7 @@ typedef struct {
     const char *today[24];              /* for the diary: what happened today, oldest first */
     int today_count;
     const char *date;                   /* for the diary: "2026-11-07" */
+    int can_write_letter;               /* it may send one letter today */
 } ok_mind_obs;
 
 /* The slow mind, every few minutes: what it wants and how it will go about it. */

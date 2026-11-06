@@ -23,7 +23,11 @@ static const char SYSTEM[] =
     "weather, the room or anything already in known, \"x\": 0 to 100, where it walks first, left to right across "
     "the floor, or -1 to stay, \"z\": 0 to 100, back to front, or -1, \"gaze\": one of [\"player\",\"window\","
     "\"door\",\"frames\",\"floor\",\"sky\"], what it looks at, \"energy\": 0 to 100, how lively it moves "
-    "(tired and sad low, excited high)}. You move its whole body: choose where it goes, where it looks and how it "
+    "(tired and sad low, excited high), \"make\": a small object Okupa builds now out of boxes, a few words, or "
+    "\"\", \"draw\": something Okupa draws now on its own sketchbook, a few words, or \"\", \"letter\": a short "
+    "letter to the player, at most 140 characters, sent for ever on Ethereum, or \"\"}. Make and draw rarely, "
+    "when inspired or when the player asks. Write a letter only for something that matters, only when "
+    "can_write_letter is true, at most once a day. You move its whole body: choose where it goes, where it looks and how it "
     "moves so each decision plays out like a little scene. Speak when the player does or says something, when Okupa sees something or when its "
     "needs change; otherwise stay quiet or just think. Ask rarely, only to learn something about the player (their "
     "name, what they like, where they are, how their day was), never while a question is waiting, and use what you "
@@ -171,6 +175,8 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
                 return OK_RANGE;
         if (!raw(user, sizeof user, &u, "]")) return OK_RANGE;
     }
+    if (!diary && !raw(user, sizeof user, &u, obs->can_write_letter ? ",\"can_write_letter\":true" : ",\"can_write_letter\":false"))
+        return OK_RANGE;
     if (obs->goal && (!raw(user, sizeof user, &u, ",\"goal\":") || !text(user, sizeof user, &u, obs->goal, OK_MIND_NOTE)))
         return OK_RANGE;
     if (obs->plan && (!raw(user, sizeof user, &u, ",\"plan\":") || !text(user, sizeof user, &u, obs->plan, OK_MIND_NOTE)))
@@ -284,6 +290,25 @@ ok_result ok_mind_parse(const char *body, size_t n, ok_mind *d)
     if (d->energy < 0) d->energy = 50;
     d->gaze = pick(&obj, "gaze", gazes, OK_LOOKS);
     note(&obj, "thought", d->thought);
+    {
+        char s[256];
+        ok_json v;
+        size_t n, i, o;
+        static const char *keys[3] = {"make", "draw", "letter"};
+        char *outs[3];
+        size_t caps[3];
+        int k;
+        outs[0] = d->make, caps[0] = sizeof d->make;
+        outs[1] = d->draw, caps[1] = sizeof d->draw;
+        outs[2] = d->letter, caps[2] = sizeof d->letter;
+        for (k = 0; k < 3; k++) {
+            outs[k][0] = 0;
+            if (ok_json_member(&obj, keys[k], &v) != OK_OK || ok_json_string(&v, s, sizeof s, &n) != OK_OK) continue;
+            for (i = 0, o = 0; i < n && o + 1 < caps[k]; i++)
+                if ((unsigned char)s[i] >= 0x20 && (unsigned char)s[i] < 0x7f) outs[k][o++] = s[i];
+            outs[k][o] = 0;
+        }
+    }
     note(&obj, "ask", d->ask);
     note(&obj, "remember", d->remember);
     return OK_OK; /* an empty line is fine: it stays quiet */

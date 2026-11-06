@@ -84,6 +84,11 @@ int main(void)
     assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
                  "\\\"x\\\":-1,\\\"gaze\\\":\\\"moon\\\"}", &d) == OK_OK);
     assert(d.x == -1 && d.gaze == -1 && !strcmp(ok_mind_gaze_name(d.gaze), "-"));
+    assert(!d.make[0] && !d.draw[0] && !d.letter[0]);
+    assert(parse("{\\\"activity\\\":\\\"play\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
+                 "\\\"make\\\":\\\"a paper boat\\\",\\\"draw\\\":\\\"the moon\\\","
+                 "\\\"letter\\\":\\\"Dear Victor, thank you.\\\"}", &d) == OK_OK);
+    assert(!strcmp(d.make, "a paper boat") && !strcmp(d.draw, "the moon") && !strcmp(d.letter, "Dear Victor, thank you."));
     assert(parse("{\\\"activity\\\":\\\"go_outside\\\",\\\"mood\\\":\\\"bored\\\",\\\"line\\\":\\\"\\\"}", &d) == OK_OK);
     assert(d.activity == OK_MIND_GO_OUTSIDE && !d.line[0]); /* quiet is allowed */
     ok_mind_memory(&d, memory);
