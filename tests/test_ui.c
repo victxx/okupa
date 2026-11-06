@@ -55,6 +55,35 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
+    /* Wi-Fi from Dev: search, pick a secured network, type its password. */
+    assert(ok_ui_touch(&u, &p, 221, 130, 0, t) == OK_UI_RUN_CHECKS);
+    assert(ok_ui_touch(&u, &p, 130, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
+    u.ap_count = 2;
+    strcpy(u.aps[0].ssid, "iPhone de Okupa");
+    u.aps[0].secure = 1;
+    u.aps[0].strength = 3;
+    strcpy(u.aps[1].ssid, "Cafe libre");
+    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_WIFI_SCAN);
+    assert(ok_ui_touch(&u, &p, 100, 30, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_PASSWORD && u.ap_selected == 0);
+    assert(ok_ui_touch(&u, &p, 8 + 24 * 2 + 5, 36 + 26 + 5, 0, t) == OK_UI_CHANGED);  /* e */
+    assert(ok_ui_touch(&u, &p, 10, 145, 0, t) == OK_UI_CHANGED && u.keys == 1);      /* Caps */
+    assert(ok_ui_touch(&u, &p, 8 + 24 * 0 + 5, 36 + 26 * 2 + 5, 0, t) == OK_UI_CHANGED); /* A */
+    assert(ok_ui_touch(&u, &p, 70, 145, 0, t) == OK_UI_CHANGED && u.keys == 2);      /* symbols */
+    assert(ok_ui_touch(&u, &p, 8 + 5, 36 + 26 + 5, 0, t) == OK_UI_CHANGED);          /* ! */
+    assert(ok_ui_touch(&u, &p, 8 + 24 * 9 + 5, 36 + 5, 0, t) == OK_UI_CHANGED);      /* 0 */
+    assert(ok_ui_touch(&u, &p, 130, 145, 0, t) == OK_UI_CHANGED);                    /* space */
+    assert(!strcmp(u.password, "eA!0 ") && u.password_len == 5);
+    assert(ok_ui_touch(&u, &p, 200, 145, 0, t) == OK_UI_CHANGED && !strcmp(u.password, "eA!0"));
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 190, 176, 0, t) == OK_UI_WIFI_CONNECT && u.scene == OK_UI_WIFI);
+    assert(!strcmp(u.password, "eA!0"));
+    assert(ok_ui_touch(&u, &p, 100, 55, 0, t) == OK_UI_WIFI_CONNECT && u.ap_selected == 1 && !u.password_len);
+    assert(ok_ui_touch(&u, &p, 100, 30, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_PASSWORD);
+    assert(ok_ui_touch(&u, &p, 60, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_WIFI); /* Cancel */
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DEV);
+    assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
+
     /* Every scene renders, with and without a font. */
     ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
     assert(top[0] & 0x8000 && bottom[OK_UI_W * OK_UI_H - 1] & 0x8000);

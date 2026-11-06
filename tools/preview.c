@@ -115,5 +115,22 @@ int main(int argc, char **argv)
     snprintf(u.dev[0], sizeof u.dev[0], "keccak256(abc)      ok  0 ms");
     snprintf(u.dev[1], sizeof u.dev[1], "sign tx (eth-acct)  ok 41 ms");
     shot(dir, "dev", &u, &p, 15);
+    u.scene = OK_UI_WIFI;
+    u.ap_count = 3;
+    strcpy(u.aps[0].ssid, "iPhone de Okupa");
+    u.aps[0].secure = 1;
+    u.aps[0].strength = 3;
+    strcpy(u.aps[1].ssid, "MOVISTAR_5G_2.4");
+    u.aps[1].secure = 1;
+    u.aps[1].strength = 1;
+    strcpy(u.aps[2].ssid, "Cafe libre");
+    u.aps[2].strength = 2;
+    strcpy(u.wifi_status, "Tap a network");
+    shot(dir, "wifi", &u, &p, 15);
+    u.scene = OK_UI_PASSWORD;
+    u.ap_selected = 0;
+    strcpy(u.password, "okupa123");
+    u.password_len = 8;
+    shot(dir, "wifi-password", &u, &p, 15);
     return 0;
 }

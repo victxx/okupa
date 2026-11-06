@@ -245,10 +245,72 @@ static void dev(frame f, const uint8_t (*font)[8], const ok_ui *u)
     int i;
     centred(f, font, 128, 6, "Dev: the core on this console", PAPER, 1);
     for (i = 0; i < OK_UI_DEV_LINES; i++) text(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
-    frame_box(f, 6, 166, 100, 22, PAPER, INK);
-    centred(f, font, 56, 173, "Network", INK, 1);
+    frame_box(f, 6, 166, 80, 22, PAPER, INK);
+    centred(f, font, 46, 173, "Network", INK, 1);
+    frame_box(f, 92, 166, 78, 22, PAPER, INK);
+    centred(f, font, 131, 173, "Wi-Fi", INK, 1);
     frame_box(f, 176, 166, 74, 22, PAPER, INK);
     centred(f, font, 213, 173, "Back", INK, 1);
+}
+
+/* Wi-Fi list: one row per network, strongest first. */
+#define AP_Y(i) (24 + (i) * 25)
+static void wifi(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    int i, b;
+    centred(f, font, 128, 6, "Wi-Fi networks", PAPER, 1);
+    for (i = 0; i < u->ap_count && i < OK_UI_APS; i++) {
+        char name[23];
+        snprintf(name, sizeof name, "%.22s", u->aps[i].ssid);
+        frame_box(f, 6, AP_Y(i), 244, 22, PAPER, INK);
+        text(f, font, 12, AP_Y(i) + 7, name, INK, 1);
+        text(f, font, 196, AP_Y(i) + 7, u->aps[i].secure ? "*" : " ", INK, 1);
+        for (b = 0; b < 3; b++) rect(f, 212 + b * 9, AP_Y(i) + 16 - b * 4, 6, 3 + b * 4, b < u->aps[i].strength ? INK : MUTED);
+    }
+    if (!u->ap_count) centred(f, font, 128, 60, "No networks yet", PAPER, 1);
+    centred(f, font, 128, 152, u->wifi_status, PAPER, 1);
+    frame_box(f, 6, 166, 100, 22, PAPER, INK);
+    centred(f, font, 56, 173, "Search", INK, 1);
+    frame_box(f, 176, 166, 74, 22, PAPER, INK);
+    centred(f, font, 213, 173, "Back", INK, 1);
+}
+
+/* On-screen keyboard: digits on top, letters or symbols below. */
+static const char *key_rows[3][4] = {
+    {"1234567890", "qwertyuiop", "asdfghjkl-", "zxcvbnm._@"},
+    {"1234567890", "QWERTYUIOP", "ASDFGHJKL-", "ZXCVBNM._@"},
+    {"1234567890", "!@#$%^&*()", "-_=+[]{};:", "'\",.<>/?\\|"},
+};
+#define KEY_X(c) (8 + (c) * 24)
+#define KEY_Y(r) (36 + (r) * 26)
+
+static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    char head[33], shown[29];
+    int r, c, n = u->password_len;
+    snprintf(head, sizeof head, "Password: %.22s", u->ap_selected >= 0 ? u->aps[u->ap_selected].ssid : "");
+    text(f, font, 6, 4, head, PAPER, 1);
+    frame_box(f, 6, 14, 244, 18, PAPER, INK);
+    snprintf(shown, sizeof shown, "%s", u->password + (n > 28 ? n - 28 : 0));
+    text(f, font, 10, 19, shown, INK, 1);
+    for (r = 0; r < 4; r++)
+        for (c = 0; c < 10; c++) {
+            char k[2] = {key_rows[u->keys][r][c], 0};
+            frame_box(f, KEY_X(c), KEY_Y(r), 22, 24, PAPER, INK);
+            text(f, font, KEY_X(c) + 7, KEY_Y(r) + 8, k, INK, 1);
+        }
+    frame_box(f, 8, 140, 58, 22, u->keys == 1 ? RGB(29, 22, 6) : PAPER, INK);
+    centred(f, font, 37, 147, "Caps", INK, 1);
+    frame_box(f, 68, 140, 58, 22, u->keys == 2 ? RGB(29, 22, 6) : PAPER, INK);
+    centred(f, font, 97, 147, "#+=", INK, 1);
+    frame_box(f, 128, 140, 58, 22, PAPER, INK);
+    centred(f, font, 157, 147, "Space", INK, 1);
+    frame_box(f, 188, 140, 60, 22, PAPER, INK);
+    centred(f, font, 218, 147, "Del", INK, 1);
+    frame_box(f, 8, 166, 110, 22, PAPER, INK);
+    centred(f, font, 63, 173, "Cancel", INK, 1);
+    frame_box(f, 138, 166, 110, 22, RGB(29, 22, 6), INK);
+    centred(f, font, 193, 173, "Connect", INK, 1);
 }
 
 void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const uint8_t (*font)[8],
@@ -264,6 +326,12 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         bubble(top, font, "Draw me something for the house!");
     } else if (u->scene == OK_UI_DEV) {
         dev(bottom, font, u);
+    } else if (u->scene == OK_UI_WIFI) {
+        wifi(bottom, font, u);
+        bubble(top, font, u->wifi_status[0] ? u->wifi_status : "Which Wi-Fi do we use?");
+    } else if (u->scene == OK_UI_PASSWORD) {
+        password(bottom, font, u);
+        bubble(top, font, "Psst. I won't peek.");
     } else {
         home_buttons(bottom, font, p);
     }
@@ -344,9 +412,57 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (held) return OK_UI_NOTHING;
     if (u->scene == OK_UI_DEV) {
-        if (inside(x, y, 6, 166, 100, 22)) return OK_UI_RUN_NETWORK;
+        if (inside(x, y, 6, 166, 80, 22)) return OK_UI_RUN_NETWORK;
+        if (inside(x, y, 92, 166, 78, 22)) {
+            u->scene = OK_UI_WIFI;
+            return OK_UI_WIFI_SCAN;
+        }
         if (!inside(x, y, 176, 166, 74, 22)) return OK_UI_NOTHING;
         u->scene = OK_UI_HOME;
+        return OK_UI_CHANGED;
+    }
+    if (u->scene == OK_UI_WIFI) {
+        if (inside(x, y, 6, 166, 100, 22)) return OK_UI_WIFI_SCAN;
+        if (inside(x, y, 176, 166, 74, 22)) {
+            u->scene = OK_UI_DEV;
+            return OK_UI_CHANGED;
+        }
+        for (i = 0; i < u->ap_count && i < OK_UI_APS; i++) {
+            if (!inside(x, y, 6, AP_Y(i), 244, 22)) continue;
+            u->ap_selected = i;
+            memset(u->password, 0, sizeof u->password);
+            u->password_len = 0;
+            u->keys = 0;
+            if (!u->aps[i].secure) return OK_UI_WIFI_CONNECT;
+            u->scene = OK_UI_PASSWORD;
+            return OK_UI_CHANGED;
+        }
+        return OK_UI_NOTHING;
+    }
+    if (u->scene == OK_UI_PASSWORD) {
+        int r, c;
+        for (r = 0; r < 4; r++)
+            for (c = 0; c < 10; c++)
+                if (inside(x, y, KEY_X(c), KEY_Y(r), 22, 24)) {
+                    if (u->password_len < (int)sizeof u->password - 1) u->password[u->password_len++] = key_rows[u->keys][r][c];
+                    return OK_UI_CHANGED;
+                }
+        if (inside(x, y, 8, 140, 58, 22)) u->keys = u->keys == 1 ? 0 : 1;
+        else if (inside(x, y, 68, 140, 58, 22)) u->keys = u->keys == 2 ? 0 : 2;
+        else if (inside(x, y, 128, 140, 58, 22)) {
+            if (u->password_len < (int)sizeof u->password - 1) u->password[u->password_len++] = ' ';
+        } else if (inside(x, y, 188, 140, 60, 22)) {
+            if (u->password_len) u->password[--u->password_len] = 0;
+        } else if (inside(x, y, 8, 166, 110, 22)) {
+            memset(u->password, 0, sizeof u->password);
+            u->password_len = 0;
+            u->scene = OK_UI_WIFI;
+        } else if (inside(x, y, 138, 166, 110, 22)) {
+            u->scene = OK_UI_WIFI;
+            return OK_UI_WIFI_CONNECT;
+        } else {
+            return OK_UI_NOTHING;
+        }
         return OK_UI_CHANGED;
     }
     for (i = 0; i < BUTTONS; i++) {

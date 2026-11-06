@@ -8,9 +8,17 @@
  * set) by plain C, so the DSi, the host preview and later a phone share it. */
 #define OK_UI_W 256
 #define OK_UI_H 192
-enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV };
-enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK };
+enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD };
+enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT };
 #define OK_UI_DEV_LINES 14
+#define OK_UI_APS 5
+
+/* A Wi-Fi network found by the platform's scan. */
+typedef struct {
+    char ssid[33];
+    int secure;   /* needs a password */
+    int strength; /* 0..3 bars */
+} ok_ui_ap;
 
 typedef struct {
     int scene;
@@ -21,6 +29,13 @@ typedef struct {
     int eraser;
     int last_x, last_y; /* previous canvas point while the stylus is down */
     char dev[OK_UI_DEV_LINES][33];
+    /* Wi-Fi set-up: the platform fills aps and status; the player picks one
+     * and types its password, then the platform gets OK_UI_WIFI_CONNECT. */
+    ok_ui_ap aps[OK_UI_APS];
+    int ap_count, ap_selected;
+    char password[64];
+    int password_len, keys; /* keys: 0 lower case, 1 upper case, 2 symbols */
+    char wifi_status[33];
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);
