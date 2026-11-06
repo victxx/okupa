@@ -43,6 +43,13 @@ static int entropy(uint8_t *out, size_t n)
     return ok;
 }
 
+static double seconds_now(void)
+{
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    return (double)now.tv_sec + (double)now.tv_usec / 1e6;
+}
+
 /* One HTTPS round trip, on the connection left open by the last one when
  * the server keeps it (a stale one is reopened once). */
 static int fd = -1;
@@ -93,9 +100,15 @@ static int fetch(void *ctx, const char *host, const char *req, size_t n, const c
     hang_up();
     if ((e = dial(host))) return e;
     if (!entropy(seed, sizeof seed)) return -4;
-    e = ok_think_https(&tls, host, (int64_t)time(NULL), seed, sock_read, sock_write, &fd, req, n, body, body_len, resp,
-                       cap, got);
-    if (e || !ok_think_keeps_open(resp, *got)) hang_up();
+    {
+        double t0 = seconds_now();
+        int offered = ok_tls_resume(&tls, host, (int64_t)time(NULL), seed, 32, sock_read, sock_write, &fd);
+        e = ok_think_exchange(&tls, req, n, body, body_len, resp, cap, got);
+        if (getenv("OKUPA_TLS_LOG"))
+            fprintf(stderr, "  [tls %s %s, %.0f ms]\n", offered ? "offered resumption," : "full handshake,",
+                    ok_tls_resumed(&tls) ? "RESUMED" : "new session", (seconds_now() - t0) * 1000.0);
+    }
+    if (e || !ok_think_keeps_open(resp, *got) || getenv("OKUPA_HANGUP")) hang_up();
     return e;
 }
 
