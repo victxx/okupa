@@ -485,6 +485,7 @@ static int pose(const ok_ui *u, const ok_pet *p)
     case OK_MOOD_BORED: return OK_POSE_BORED;
     case OK_MOOD_LONELY: return OK_POSE_LONELY;
     }
+    if (u->mind_ticks && u->mind_mood) return u->mind_mood - 1; /* only while the pet itself is content */
     return u->happy_ticks ? OK_POSE_HAPPY : OK_POSE_IDLE;
 }
 
@@ -544,6 +545,26 @@ void ok_ui_start_intro(ok_ui *u)
     u->intro_t = 0;
 }
 
+static void say(ok_ui *u, const char *line);
+
+void ok_ui_direct(ok_ui *u, const ok_pet *p, int move, int where, int mood, const char *line)
+{
+    if (u->scene == OK_UI_SPLASH || u->scene == OK_UI_FILM || p->asleep) return;
+    if (move == OK_MOVE_TO_DOOR) {
+        if (where == ok_house_where() || (where != OK_PLACE_ATTIC && where != OK_PLACE_GARDEN)) return;
+        u->going = where + 1;
+    }
+    ok_monkey_direct(&u->anim, move);
+    if (mood >= 0 && mood < OK_POSES && mood != OK_POSE_ASLEEP) {
+        u->mind_mood = mood + 1;
+        u->mind_ticks = 600;
+    }
+    if (line && line[0]) {
+        snprintf(u->mind_line, sizeof u->mind_line, "%s", line);
+        say(u, u->mind_line);
+    }
+}
+
 /* Out to the terrace or back in: the okupa is placed in the new spot. */
 static void go(ok_ui *u, const ok_pet *p, int where)
 {
@@ -566,6 +587,14 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
         return u->intro_t % 2 == 0 ? OK_UI_CHANGED : OK_UI_NOTHING;
     }
     if (ok_house_where() == OK_PLACE_GARDEN && p->asleep) go(u, p, OK_PLACE_ATTIC); /* bed is indoors */
+    if (u->mind_ticks) u->mind_ticks--;
+    if (u->going && u->anim.at_door) { /* through the door: it comes in (or out) by the other side */
+        int where = u->going - 1;
+        u->going = 0;
+        go(u, p, where);
+        u->anim.x = u->anim.room.door_x;
+        u->anim.z = u->anim.room.door_z;
+    }
     if (!u->ready) { /* the first frame knows the loaded pet: asleep, its drawing */
         ok_monkey_room room;
         ok_house_room(&room);

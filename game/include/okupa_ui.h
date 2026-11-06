@@ -50,6 +50,9 @@ typedef struct {
     int sound;                  /* a sound to play, OK_SFX_* + 1; the platform plays it and clears it */
     int heard_bites, heard_move;
     uint32_t intro_t;           /* ticks into the splash or the opening film */
+    int mind_mood, mind_ticks;  /* a mood the okupa's mind gave, while fresh (OK_POSE_* + 1) */
+    char mind_line[41];         /* and its line, kept here while it is said */
+    int going;                  /* walking to the door to change place: OK_PLACE_* + 1 */
     /* The console's own account: the platform creates the key from the
      * player's scribbles (wallet_progress 0..100) and fills in the address. */
     int wallet_ready, wallet_progress;
@@ -61,6 +64,11 @@ void ok_ui_init(ok_ui *u);
 /* Starts with the splash and the opening film (a touch skips each); the
  * platform calls it once at boot. ok_ui_init alone starts at home. */
 void ok_ui_start_intro(ok_ui *u);
+/* A decision from the okupa's mind: its next move (OK_MOVE_*, or
+ * OK_MOVE_TO_DOOR with where = OK_PLACE_* to go out or in, walking to the
+ * door first), a mood (OK_POSE_*, -1 none) shown for a while if the pet
+ * itself is content, and a line (NULL or "" for none). */
+void ok_ui_direct(ok_ui *u, const ok_pet *p, int move, int where, int mood, const char *line);
 /* One frame (1/60 s) passed; returns OK_UI_CHANGED when the screens need
  * redrawing (30 times a second: the okupa is always moving a little). */
 int ok_ui_tick(ok_ui *u, const ok_pet *p);

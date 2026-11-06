@@ -25,7 +25,7 @@ enum { OK_EVENT_FEED, OK_EVENT_PLAY, OK_EVENT_PET, OK_EVENT_REFUSE, OK_EVENT_HEL
 /* What it is doing. */
 enum { OK_MOVE_IDLE, OK_MOVE_LOOK, OK_MOVE_SCRATCH, OK_MOVE_STRETCH, OK_MOVE_HOP, OK_MOVE_PEEK, OK_MOVE_WANDER,
        OK_MOVE_SIGH, OK_MOVE_WAVE, OK_MOVE_EAT, OK_MOVE_PLAY, OK_MOVE_PETTED, OK_MOVE_REFUSE, OK_MOVE_TO_BED,
-       OK_MOVE_SLEEP, OK_MOVE_WAKE, OK_MOVES };
+       OK_MOVE_SLEEP, OK_MOVE_WAKE, OK_MOVE_TO_DOOR, OK_MOVES };
 
 typedef struct {
     uint8_t wear, top, colour;
@@ -57,6 +57,7 @@ typedef struct {
 typedef struct {
     int32_t home_x, home_z, bed_x, bed_y, bed_z;
     int32_t spot_x[3], spot_z[3]; /* where it may wander to */
+    int32_t door_x, door_z;       /* where it stands to go out (or in) */
 } ok_monkey_room;
 
 typedef struct {
@@ -71,6 +72,8 @@ typedef struct {
      * towards its resting curl, swinging with inertia. */
     int32_t tail[11][3], tail_was[11][3];
     int tail_ready;
+    int directed;     /* a move asked for (OK_MOVE_* + 1), started at the next natural break */
+    int at_door;      /* 1 once a TO_DOOR walk has arrived: the caller changes place */
     uint32_t ticks, seed;
 } ok_monkey_anim;
 
@@ -92,6 +95,12 @@ void ok_monkey_skin(const ok_look *look, uint16_t skin[OK_SKIN * OK_SKIN]);
 
 void ok_monkey_init(ok_monkey_anim *a, const ok_monkey_room *room, int asleep, uint32_t seed);
 void ok_monkey_event(ok_monkey_anim *a, int event);
+/* Someone (the okupa's mind) chose its next move: it starts at the next
+ * natural break, as if its own random picker had chosen it; with no choice
+ * it keeps picking for itself. Moves that need a reason the player gives
+ * (eating, playing) play as gestures; sleep follows the pet, not this.
+ * OK_MOVE_TO_DOOR walks to room.door_x/z and sets at_door. */
+void ok_monkey_direct(ok_monkey_anim *a, int move);
 /* One tick of 1/60 s. mood is OK_POSE_*; wear lets it play with what it wears. */
 void ok_monkey_step(ok_monkey_anim *a, int mood, int wear);
 /* Draws it where the animation has it (world space, hundredths -> units).

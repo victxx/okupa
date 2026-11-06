@@ -186,8 +186,24 @@ void ok_monkey_event(ok_monkey_anim *a, int event)
 }
 
 /* The next thing to do while nothing is asked of it, by mood. */
+void ok_monkey_direct(ok_monkey_anim *a, int move)
+{
+    if (move < 0 || move >= OK_MOVES || move == OK_MOVE_IDLE || move == OK_MOVE_SLEEP || move == OK_MOVE_TO_BED || move == OK_MOVE_WAKE)
+        return;
+    a->directed = move + 1;
+    if (a->move == OK_MOVE_IDLE && !a->walking) a->next_idle = 1; /* standing about: now is a natural break */
+}
+
 static void pick(ok_monkey_anim *a, int wear)
 {
+    if (a->directed) {
+        start(a, a->directed - 1);
+        a->directed = 0;
+        a->look = below(a, 2) ? 1 : -1;
+        a->at_door = 0;
+        if (a->move == OK_MOVE_EAT || a->move == OK_MOVE_PLAY) a->bites = 0;
+        return;
+    }
     static const uint8_t idle[] = {OK_MOVE_LOOK, OK_MOVE_SCRATCH, OK_MOVE_LOOK, OK_MOVE_WANDER, OK_MOVE_LOOK, OK_MOVE_STRETCH};
     static const uint8_t happy[] = {OK_MOVE_HOP, OK_MOVE_WAVE, OK_MOVE_WANDER, OK_MOVE_LOOK, OK_MOVE_HOP, OK_MOVE_SCRATCH};
     static const uint8_t bored[] = {OK_MOVE_SIGH, OK_MOVE_LOOK, OK_MOVE_SIGH, OK_MOVE_WANDER, OK_MOVE_SCRATCH, OK_MOVE_STRETCH};
@@ -237,7 +253,7 @@ static int walk(ok_monkey_anim *a, int32_t gx, int32_t gz)
 static void done(ok_monkey_anim *a, int min, int range)
 {
     start(a, OK_MOVE_IDLE);
-    a->next_idle = 240 + 2 * (min + below(a, range));
+    a->next_idle = a->directed ? 20 : 240 + 2 * (min + below(a, range)); /* a move asked for goes next */
 }
 
 
@@ -629,6 +645,10 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         t[OK_SPRING_TAIL0] = 0;
         a->x = a->room.bed_x;
         a->z = a->room.bed_z + 420;
+        break;
+    case OK_MOVE_TO_DOOR:
+        yaw_free = 0;
+        if (!a->at_door && walk(a, a->room.door_x, a->room.door_z)) a->at_door = 1;
         break;
     case OK_MOVE_WAKE:
         yaw_free = 0;

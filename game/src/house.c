@@ -87,6 +87,7 @@ void ok_house_room(ok_monkey_room *room)
     room->spot_x[0] = 150, room->spot_z[0] = -380; /* under the window */
     room->spot_x[1] = 520, room->spot_z[1] = -330; /* by the boxes */
     room->spot_x[2] = -820, room->spot_z[2] = 520; /* by the plant */
+    room->door_x = 1150, room->door_z = -20;       /* inside the door in the right wall */
 }
 
 /* ----------------------------------------------------------------- light */
@@ -943,4 +944,5 @@ void ok_house_garden(ok_monkey_room *room)
     room->spot_x[0] = 800, room->spot_z[0] = -350; /* looking at the wall's pictures */
     room->spot_x[1] = 1750, room->spot_z[1] = -350;
     room->spot_x[2] = 1650, room->spot_z[2] = 700;
+    room->door_x = 520, room->door_z = -90; /* on the step outside the door */
 }
