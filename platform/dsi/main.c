@@ -276,6 +276,9 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
         (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
         move = OK_MOVE_LOOK; /* already there: it just looks around */
     if (move == OK_MOVE_PEEK && u->look.wear != OK_WEAR_SMILEY) move = OK_MOVE_LOOK; /* peeking needs its mask */
+    /* The body first: where it goes, what it looks at, how lively; then the
+     * move it makes there. -1 leaves each to its instinct. */
+    ok_ui_body(u, d->x, d->z, d->gaze >= 0 && d->gaze < OK_GAZES ? d->gaze : -1, d->energy);
     ok_ui_direct(u, p, move, where, poses[d->mood], said);
     ok_ui_listening(u, 0);
     if (d->thought[0]) ok_ui_thought(u, d->thought);
@@ -650,19 +653,30 @@ int main(void)
             }
             ok_dsi_mind_letters(storage && strcmp(letter_day, today) && !ok_dsi_net_pending(hash));
             if (ok_dsi_mind_take_object(&obj)) {
-                snprintf(said, sizeof said, "I made a %.20s!", obj.name);
-                ui.say = said;
-                ui.say_ticks = 60 * 5;
+                /* Its colour names onto the house's palette. */
+                static const uint8_t to_palette[OK_MAKE_COLOURS] = {2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 10, 11, 15, 1, 13, 0};
+                static uint8_t boxes[OK_MAKE_BOXES][7];
+                int b, c;
+                for (b = 0; b < obj.count; b++) {
+                    for (c = 0; c < 6; c++) boxes[b][c] = obj.box[b][c];
+                    boxes[b][6] = to_palette[obj.box[b][6] % OK_MAKE_COLOURS];
+                }
+                ok_ui_drop_object(&ui, (const uint8_t(*)[7])boxes, obj.count, obj.name); /* it says "I made ...!" */
             }
             if (ok_dsi_mind_take_drawing(pixels, name)) {
-                snprintf(said, sizeof said, "I drew %.20s! It's on the SD card.", name);
+                ok_ui_okupa_drawing(&ui, pixels); /* in a gilt frame on the wall */
+                snprintf(said, sizeof said, "I drew %.20s!", name);
                 ui.say = said;
                 ui.say_ticks = 60 * 5;
             }
-            if (ok_dsi_mind_take_dream(&w, &h, &about)) {
-                snprintf(said, sizeof said, "I dreamt of %.50s", about);
-                ui.say = said;
-                ui.say_ticks = 60 * 8;
+            {
+                const uint16_t *dream = ok_dsi_mind_take_dream(&w, &h, &about);
+                if (dream) {
+                    ok_ui_dream(&ui, dream, w, h); /* its cloud on the top screen */
+                    snprintf(said, sizeof said, "I dreamt of %.50s", about);
+                    ui.say = said;
+                    ui.say_ticks = 60 * 8;
+                }
             }
             if (ok_dsi_mind_take_letter(text)) {
                 if (send_letter(text, letter_day, today)) {
