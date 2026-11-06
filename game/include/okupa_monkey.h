@@ -45,7 +45,7 @@ enum { OK_SPRING_BOB, OK_SPRING_LEAN, OK_SPRING_ROLL, OK_SPRING_NOD, OK_SPRING_T
        OK_SPRING_RAISE_R, OK_SPRING_FWD_L, OK_SPRING_FWD_R, OK_SPRING_LEG_L, OK_SPRING_LEG_R, OK_SPRING_TAIL0,
        OK_SPRING_TAIL1, OK_SPRING_TAIL2, OK_SPRING_TAIL3, OK_SPRING_EAR, OK_SPRING_SQUASH, OK_SPRING_MASK,
        OK_SPRING_YAW, OK_SPRING_LIE, OK_SPRING_BALL, OK_SPRING_CHEST, OK_SPRING_ELBOW_L, OK_SPRING_ELBOW_R,
-       OK_SPRING_LIFT_L, OK_SPRING_LIFT_R, OK_SPRING_TAIL4, OK_SPRING_TAIL5, OK_SPRINGS };
+       OK_SPRING_LIFT_L, OK_SPRING_LIFT_R, OK_SPRING_TAIL4, OK_SPRING_TAIL5, OK_SPRING_WALK, OK_SPRINGS };
 /* LEG_L/R are where each foot is put, forward of the hip (hundredths), and
  * LIFT_L/R how high it is raised; the legs reach it by inverse kinematics. */
 
@@ -66,6 +66,11 @@ typedef struct {
     int mood, move, move_t, stage, next_idle, walking, phase;
     int blink, look, bites;
     int gaze_turn, gaze_nod, gaze_t; /* where it is glancing while idle */
+    int32_t gait;                     /* walk cycle, 1/4096 of a stride pair; advances with distance */
+    /* The tail as a chain of eleven points in the room (hundredths), pulled
+     * towards its resting curl, swinging with inertia. */
+    int32_t tail[11][3], tail_was[11][3];
+    int tail_ready;
     uint32_t ticks, seed;
 } ok_monkey_anim;
 

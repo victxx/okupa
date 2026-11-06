@@ -114,14 +114,16 @@ static const uint8_t stiff[OK_SPRINGS] = {
     180, 60, 60, 70, 60, 60, 110, 110, 110, 110, 250, 250, /* bob .. legs */
     90, 50, 30, 20,                                        /* tail, each joint softer */
     60, 200, 60, 40, 25, 250,                              /* ear, squash, mask, yaw, lie, ball */
-    60, 110, 110, 250, 250, 14, 10,                        /* chest, elbows, foot lifts, tail tip */
+    60, 110, 110, 250, 250, 14, 10, 30,                    /* chest, elbows, foot lifts, tail tip, walking */
 };
 static const uint8_t damp[OK_SPRINGS] = {
     91, 61, 60, 65, 62, 60, 77, 77, 77, 77, 125, 125,
     43, 28, 22, 18,
     22, 56, 70, 64, 56, 179,
-    60, 77, 77, 125, 125, 16, 14,
+    60, 77, 77, 125, 125, 16, 14, 60,
 };
+
+static int32_t isqrt(int32_t v);
 
 static uint32_t rnd(ok_monkey_anim *a)
 {
@@ -213,11 +215,19 @@ static int walk(ok_monkey_anim *a, int32_t gx, int32_t gz)
     }
     a->walking = 1;
     {
-        int ang = ok_r3d_atan2(dx, dz);
-        a->x += (int32_t)((int64_t)ok_r3d_sin(ang) * 5 / 4096);
-        a->z += (int32_t)((int64_t)ok_r3d_cos(ang) * 5 / 4096);
+        /* It speeds up and slows down with the walk spring, turns before it
+         * goes, and the stride advances with the ground covered, so each
+         * planted foot stays where it was put. */
+        int ang = ok_r3d_atan2(dx, dz), yaw = (int)((int64_t)a->s[OK_SPRING_YAW].x * OK_TURN / (360 * Q));
+        int off = ((ang - yaw) & (OK_TURN - 1)) > OK_TURN / 2 ? OK_TURN - ((ang - yaw) & (OK_TURN - 1)) : (ang - yaw) & (OK_TURN - 1);
+        int32_t blend = a->s[OK_SPRING_WALK].x / Q, speed = 6 * (blend < 0 ? 0 : blend > 100 ? 100 : blend) / 100;
+        if (off > OK_TURN / 6) speed = speed / 3; /* mostly turning on the spot */
+        if (d < 40 && speed > 2) speed = 2;     /* arriving */
+        a->x += (int32_t)((int64_t)ok_r3d_sin(ang) * speed / 4096);
+        a->z += (int32_t)((int64_t)ok_r3d_cos(ang) * speed / 4096);
         if ((dx > 0) != (gx - a->x > 0) && dx) a->x = gx;
         if ((dz > 0) != (gz - a->z > 0) && dz) a->z = gz;
+        a->gait += speed * 4096 / 120 + (speed < 2 ? 60 : 0); /* 120 hundredths a cycle: two steps of 60 */
     }
     return 0;
 }
@@ -228,6 +238,130 @@ static void done(ok_monkey_anim *a, int min, int range)
 {
     start(a, OK_MOVE_IDLE);
     a->next_idle = 240 + 2 * (min + below(a, range));
+}
+
+
+/* ----------------------------------------------------------------- tail */
+
+typedef struct {
+    ok_fx m[3][3];
+} m3;
+
+static void m3_mul(m3 *a, ok_fx r[3][3])
+{
+    ok_fx o[3][3];
+    int i, j;
+    for (i = 0; i < 3; i++)
+        for (j = 0; j < 3; j++)
+            o[i][j] = ok_fx_mul(a->m[i][0], r[0][j]) + ok_fx_mul(a->m[i][1], r[1][j]) + ok_fx_mul(a->m[i][2], r[2][j]);
+    memcpy(a->m, o, sizeof o);
+}
+
+static void m3_rot(m3 *a, int axis, int angle)
+{
+    ok_fx s = ok_r3d_sin(angle), c = ok_r3d_cos(angle);
+    ok_fx x[3][3] = {{4096, 0, 0}, {0, c, -s}, {0, s, c}}, y[3][3] = {{c, 0, s}, {0, 4096, 0}, {-s, 0, c}},
+          z[3][3] = {{c, -s, 0}, {s, c, 0}, {0, 0, 4096}};
+    m3_mul(a, axis == 0 ? x : axis == 1 ? y : z);
+}
+
+static void m3_apply(const m3 *a, const int32_t v[3], int32_t out[3])
+{
+    int i;
+    for (i = 0; i < 3; i++) out[i] = (int32_t)(((int64_t)a->m[i][0] * v[0] + (int64_t)a->m[i][1] * v[1] + (int64_t)a->m[i][2] * v[2]) / 4096);
+}
+
+/* Where a point of the hips' frame is in the room, the way ok_monkey_draw
+ * places the body (standing or lying). */
+static void body_to_room(const ok_monkey_anim *a, const int32_t p[3], int32_t out[3])
+{
+    int lie = a->s[OK_SPRING_LIE].x / Q, yaw;
+    int32_t q[3] = {p[0], p[1], p[2]}, r[3];
+    m3 m;
+    lie = lie < 0 ? 0 : lie > 100 ? 100 : lie;
+    yaw = (int)((int64_t)a->s[OK_SPRING_YAW].x * OK_TURN / (360 * Q)) * (100 - lie) / 100;
+    if (lie) {
+        memset(&m, 0, sizeof m);
+        m.m[0][0] = m.m[1][1] = m.m[2][2] = 4096;
+        q[1] -= 190;
+        m3_rot(&m, 2, DEG(90) * lie / 100);
+        m3_apply(&m, q, r);
+        q[0] = r[0], q[1] = r[1] + 160, q[2] = r[2];
+    }
+    memset(&m, 0, sizeof m);
+    m.m[0][0] = m.m[1][1] = m.m[2][2] = 4096;
+    m3_rot(&m, 1, yaw);
+    m3_apply(&m, q, r);
+    out[0] = r[0] + a->x + (a->room.bed_x - a->x) * lie / 100;
+    out[1] = r[1] + a->room.bed_y * lie / 100;
+    out[2] = r[2] + a->z + (a->room.bed_z - a->z) * lie / 100;
+}
+
+#define TAIL_LINK 52
+
+/* The tail's resting curl: down and back from the rump, then up into a
+ * question mark, swaying with its springs and a slow wave. */
+static void tail_rest(const ok_monkey_anim *a, int32_t rest[11][3])
+{
+    static const int8_t curl[10] = {-22, 8, 14, 18, 22, 26, 30, 34, 36, 30};
+    int32_t q[3] = {40, 195 + a->s[OK_SPRING_BOB].x / Q, -112}, step[3] = {0, 0, -TAIL_LINK}, d[3];
+    int i, sway = (int)((int64_t)a->s[OK_SPRING_TAIL0].x * OK_TURN / (360 * Q));
+    m3 m;
+    memset(&m, 0, sizeof m);
+    m.m[0][0] = m.m[1][1] = m.m[2][2] = 4096;
+    {   /* out to its right when standing; along the legs, under the blanket, in bed */
+        int lie = a->s[OK_SPRING_LIE].x / Q;
+        lie = lie < 0 ? 0 : lie > 100 ? 100 : lie;
+        m3_rot(&m, 1, -DEG(78) * (100 - lie) / 100);
+        m3_rot(&m, 0, -DEG(90) * lie / 100);
+    }
+    body_to_room(a, q, rest[0]);
+    for (i = 0; i < 10; i++) {
+        m3_rot(&m, 1, sway / 3 + (int)((int64_t)ok_r3d_sin((int)(a->ticks * 18u) - i * 420) * DEG(6) / 4096));
+        {   /* in bed it lies along the mattress instead of curling up */
+            int lie = a->s[OK_SPRING_LIE].x / Q;
+            lie = lie < 0 ? 0 : lie > 100 ? 100 : lie;
+            m3_rot(&m, 0, DEG(curl[i]) * (100 - lie) / 100 - DEG(4) * lie / 100 +
+                              (int)((int64_t)ok_r3d_sin((int)(a->ticks * 11u) - i * 300) * DEG(3) / 4096));
+        }
+        m3_apply(&m, step, d);
+        q[0] += d[0], q[1] += d[1], q[2] += d[2];
+        body_to_room(a, q, rest[i + 1]);
+    }
+}
+
+/* Each point keeps its speed (a little damped), is pulled towards where the
+ * curl wants it, softer towards the tip, then held at one link from the
+ * point before: so it lags when the body turns or hops and whips after. */
+static void tail_step(ok_monkey_anim *a)
+{
+    int32_t rest[11][3];
+    int i, k;
+    tail_rest(a, rest);
+    if (!a->tail_ready) {
+        memcpy(a->tail, rest, sizeof rest);
+        memcpy(a->tail_was, rest, sizeof rest);
+        a->tail_ready = 1;
+        return;
+    }
+    memcpy(a->tail[0], rest[0], sizeof rest[0]);
+    memcpy(a->tail_was[0], rest[0], sizeof rest[0]);
+    for (i = 1; i < 11; i++) {
+        int32_t next[3], d[3], len;
+        int pull = 34 - i * 2;
+        for (k = 0; k < 3; k++) {
+            next[k] = a->tail[i][k] + (a->tail[i][k] - a->tail_was[i][k]) * 86 / 100 + (rest[i][k] - a->tail[i][k]) * pull / 100;
+            d[k] = next[k] - a->tail[i - 1][k];
+        }
+        len = isqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (len > 400 || len < 1) { /* lost (a jump to the bed): start again from the curl */
+            memcpy(a->tail, rest, sizeof rest);
+            memcpy(a->tail_was, rest, sizeof rest);
+            return;
+        }
+        memcpy(a->tail_was[i], a->tail[i], sizeof a->tail[i]);
+        for (k = 0; k < 3; k++) a->tail[i][k] = a->tail[i - 1][k] + d[k] * TAIL_LINK / len;
+    }
 }
 
 void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
@@ -436,7 +570,9 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 55;
         t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 45;
         if (air >= 0 && air < 46) {
+            int dir = (mt / 72) % 2 ? -1 : 1;
             t[OK_SPRING_BALL] = 4 * 340 * air * (46 - air) / (46 * 46);
+            t[OK_SPRING_TURN] = dir * (air - 23) * 12 / 23; /* the head follows it across */
             t[OK_SPRING_NOD] = -(int)(t[OK_SPRING_BALL] / 18);
             t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 120;
             t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 15;
@@ -486,10 +622,14 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         break;
     case OK_MOVE_SLEEP:
         t[OK_SPRING_LIE] = 100;
-        t[OK_SPRING_BOB] = wave(k, 10, 4);
-        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 20;
+        t[OK_SPRING_BOB] = wave(k, 10, 3);
+        t[OK_SPRING_CHEST] = 8 + wave(k, 10, 3); /* slow sleeping breaths */
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 4; /* hands tucked under the chin */
+        t[OK_SPRING_FWD_L] = t[OK_SPRING_FWD_R] = 64;
+        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 108;
         t[OK_SPRING_TURN] = 0;
-        t[OK_SPRING_TILT] = 10;
+        t[OK_SPRING_NOD] = 16;
+        t[OK_SPRING_TILT] = 0;
         t[OK_SPRING_TAIL0] = 0;
         a->x = a->room.bed_x;
         a->z = a->room.bed_z + 420;
@@ -513,34 +653,23 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
 
     /* Walking: legs and arms swing, the body bobs twice a stride. */
     if (a->move == OK_MOVE_IDLE && (a->x != a->room.home_x || a->z != a->room.home_z)) walk(a, a->room.home_x, a->room.home_z);
+    t[OK_SPRING_WALK] = a->walking ? 100 : 0;
     if (a->walking) {
-        /* A real gait: the planted foot slides back exactly as fast as the
-         * body moves (half a stride per half cycle), the other swings
-         * forward through the air. */
-        int side;
-        for (side = 0; side < 2; side++) {
-            int q = (int)((k * 170u + (uint32_t)side * 2048u) & 4095u), off, lift = 0;
-            if (q < 2048) {
-                off = 30 - 60 * q / 2048;
-            } else {
-                off = -30 + 60 * (q - 2048) / 2048;
-                lift = (int)((int64_t)ok_r3d_sin((q - 2048) / 2) * 46 / 4096);
-            }
-            t[side ? OK_SPRING_LEG_R : OK_SPRING_LEG_L] = off;
-            t[side ? OK_SPRING_LIFT_R : OK_SPRING_LIFT_L] = lift;
-        }
-        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 26;
-        t[OK_SPRING_FWD_L] = -wave(k, 170, 34); /* arms swing against the legs */
-        t[OK_SPRING_FWD_R] = wave(k, 170, 34);
-        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 38;
-        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 14;
-        t[OK_SPRING_BOB] = (wave(k, 340, 16) < 0 ? -wave(k, 340, 16) : wave(k, 340, 16)) - 6; /* up over each step */
-        t[OK_SPRING_LEAN] = 8;
-        t[OK_SPRING_ROLL] = wave(k, 170, 7);                  /* a little waddle */
-        t[OK_SPRING_TILT] = -wave(k, 170, 4); /* the head keeps level over the swaying hips */
+        /* The body rides the gait: up over each planted foot, rolling onto
+         * it, arms swinging against the legs, the head kept level. */
+        int g = (int)(a->gait & 4095), b = a->s[OK_SPRING_WALK].x / Q;
+        int sw = (int)((int64_t)ok_r3d_sin(g) * 1000 / 4096), up = (int)((int64_t)ok_r3d_sin(2 * g) * 1000 / 4096);
+        b = b < 0 ? 0 : b > 100 ? 100 : b;
+        t[OK_SPRING_FWD_L] = -sw * 30 / 1000 * b / 100;
+        t[OK_SPRING_FWD_R] = sw * 30 / 1000 * b / 100;
+        t[OK_SPRING_ELBOW_L] = t[OK_SPRING_ELBOW_R] = 34;
+        t[OK_SPRING_RAISE_L] = t[OK_SPRING_RAISE_R] = 12;
+        t[OK_SPRING_BOB] = ((up < 0 ? -up : up) * 12 / 1000 - 6) * b / 100;
+        t[OK_SPRING_LEAN] = 6 * b / 100;
+        t[OK_SPRING_ROLL] = sw * 5 / 1000 * b / 100;
+        t[OK_SPRING_TILT] = -sw * 3 / 1000 * b / 100;
         t[OK_SPRING_NOD] = 3;
         t[OK_SPRING_TURN] = 0;
-        t[OK_SPRING_TAIL0] = wave(k, 170, 16);
         t[OK_SPRING_YAW] = ok_r3d_atan2(a->goal_x - a->x, a->goal_z - a->z) * 360 / OK_TURN;
         if (t[OK_SPRING_YAW] > 180) t[OK_SPRING_YAW] -= 360;
     } else {
@@ -569,6 +698,8 @@ void ok_monkey_step(ok_monkey_anim *a, int mood, int wear)
         s->v += (t[i] * Q - s->x) * stiff[i] / 2048 - s->v * damp[i] / 256;
         s->x += s->v;
     }
+
+    tail_step(a);
 
     /* Blinks at random, now and then twice. */
     if (a->blink > 0) a->blink--;
@@ -735,6 +866,24 @@ static int32_t isqrt(int32_t v)
 #define THIGH 75
 #define SHIN 72
 
+/* Where the gait puts a foot: forward of the hip and lifted, scaled by how
+ * much it is walking. Planted half the cycle (moving back exactly as fast as
+ * the body goes forward), swinging the other half on an eased arc. */
+static void gait_foot(const ok_monkey_anim *a, int right, int *off, int *lift)
+{
+    int q = (int)((a->gait + (right ? 2048 : 0)) & 4095), b = a->s[OK_SPRING_WALK].x / Q;
+    b = b < 0 ? 0 : b > 100 ? 100 : b;
+    if (q < 2048) {
+        *off = 30 - 60 * q / 2048;
+        *lift = 0;
+    } else {
+        *off = -30 + (int)(60 - (int64_t)(ok_r3d_cos((q - 2048) / 2) + 4096) * 60 / 8192);
+        *lift = (int)((int64_t)ok_r3d_sin((q - 2048) / 2) * 44 / 4096);
+    }
+    *off = *off * b / 100;
+    *lift = *lift * b / 100;
+}
+
 /* Two-bone inverse kinematics: the thigh's angle forward and the knee's bend
  * (1/4096 turns) that put the ankle dz forward of and dy below the hip. */
 static void reach(int dz, int dy, int *thigh, int *knee)
@@ -883,7 +1032,6 @@ static void face3d(const uint16_t *skin, const ok_monkey_face *f)
 
 void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
 {
-    static const int8_t curl[10] = {-22, 8, 14, 18, 22, 26, 30, 34, 36, 30};
     int s, i, lie = val(a, OK_SPRING_LIE), sq = val(a, OK_SPRING_SQUASH), hands, fur_id, mv = a->move;
     int bob = val(a, OK_SPRING_BOB), bare = look->wear == OK_WEAR_NONE || look->wear == OK_WEAR_GLASSES ||
                                             look->wear == OK_WEAR_SCARF || look->wear == OK_WEAR_SMILEY;
@@ -892,6 +1040,12 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     memset(face, 0, sizeof *face);
     expression(look, a, face);
     next_id = 100;
+    /* The tail, from its simulated chain (room coordinates). */
+    if (a->tail_ready) {
+        part_rows(skin, OK_PART_TAIL, 230, 0, 60);
+        for (i = 0; i < 10; i++)
+            limb(a->tail[i][0], a->tail[i][1], a->tail[i][2], a->tail[i + 1][0], a->tail[i + 1][1], a->tail[i + 1][2], 30 - i * 3 / 2);
+    }
     /* Where it is: standing in the room, or on the bed. */
     x = a->x + (a->room.bed_x - a->x) * lie / 100;
     y = a->room.bed_y * lie / 100;
@@ -912,10 +1066,11 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     hands = ++next_id;
     fur_id = ++next_id;
     for (s = -1; s <= 1; s += 2) {
-        int k = s > 0, thigh = DEG(6), knee = DEG(12);
+        int k = s > 0, thigh = DEG(6) + DEG(64) * lie / 100, knee = DEG(12) + DEG(88) * lie / 100, off, lift;
+        gait_foot(a, k, &off, &lift);
         if (lie < 30)
-            reach(val(a, k ? OK_SPRING_LEG_R : OK_SPRING_LEG_L) + 6,
-                  188 + bob - 50 - val(a, k ? OK_SPRING_LIFT_R : OK_SPRING_LIFT_L), &thigh, &knee);
+            reach(val(a, k ? OK_SPRING_LEG_R : OK_SPRING_LEG_L) + off + 6,
+                  188 + bob - 50 - val(a, k ? OK_SPRING_LIFT_R : OK_SPRING_LIFT_L) - lift, &thigh, &knee);
         ok_r3d_push();
         ok_r3d_translate(P(s * 72, 188 + bob, 0));
         ok_r3d_rotate_z(s * DEG(9)); /* a little bow-legged, so the knees show */
@@ -944,22 +1099,6 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_translate(P(0, -170, 0));
     part_rows(skin, OK_PART_TOP, ++next_id, 45, 100);
     ok_r3d_ellipsoid(P(0, 272, 10), P(170, 118, 146), 12, 8); /* a round tummy */
-    /* Tail: ten joints, each turned by a spring a beat behind the one before. */
-    part_rows(skin, OK_PART_TAIL, fur_id + 60, 0, 60);
-    ok_r3d_push();
-    ok_r3d_translate(P(40, 195, -112));
-    ok_r3d_rotate_y(-DEG(78));
-    for (i = 0; i < 10; i++) {
-        int sp = OK_SPRING_TAIL0 + (i * 6 / 10 < 4 ? i * 6 / 10 : 0), r = 30 - i * 3 / 2;
-        if (i * 6 / 10 >= 4) sp = i * 6 / 10 == 4 ? OK_SPRING_TAIL4 : OK_SPRING_TAIL5;
-        /* A wave runs down the tail, on top of the lagging springs. */
-        ok_r3d_rotate_y(deg(a, sp) * 7 / 10 + (int)((int64_t)ok_r3d_sin((int)(a->ticks * 22u) - i * 380) * DEG(8) / 4096));
-        ok_r3d_rotate_z((int)((int64_t)ok_r3d_sin((int)(a->ticks * 15u) - i * 300) * DEG(5) / 4096));
-        ok_r3d_rotate_x(DEG(curl[i]));
-        limb(0, 0, -52, 0, 0, 0, r);
-        ok_r3d_translate(P(0, 0, -52));
-    }
-    ok_r3d_pop();
     /* The chest bends over the belly: breathing, sighs, a stretch. */
     ok_r3d_push();
     ok_r3d_translate(P(0, 295, 0));
@@ -997,11 +1136,24 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
         ok_r3d_pop();
     }
     if (mv == OK_MOVE_PLAY) {
-        int h = val(a, OK_SPRING_BALL);
-        solid(RGB(29, 10, 8));
-        ok_r3d_ellipsoid(P(0, 330 + h, 230 - h / 6), P(62, 62, 62), 10, 7);
-        solid(RGB(30, 29, 26));
-        ok_r3d_ellipsoid(P(0, 330 + h, 230 - h / 6), P(64, 16, 64), 10, 3);
+        static uint16_t stripes[8];
+        static const uint16_t c[4] = {RGB(29, 7, 8), RGB(31, 30, 27), RGB(6, 13, 28), RGB(31, 29, 8)};
+        int h = val(a, OK_SPRING_BALL), j;
+        for (j = 0; j < 8; j++) stripes[j] = c[j / 2];
+        ok_r3d_push();
+        {   /* tossed from one hand to the other in an arc over its head */
+            int toss = a->move_t % 72, air = toss - 14, dir = (a->move_t / 72) % 2 ? -1 : 1, x = -dir * 120;
+            if (air >= 0 && air < 46) x = -dir * 120 + dir * 240 * air / 46;
+            else if (toss >= 60) x = dir * 120;
+            ok_r3d_translate(P(x, 330 + h * 2, 180));
+        }
+        ok_r3d_rotate_x((int)(a->ticks * 90u));           /* spinning */
+        ok_r3d_rotate_z(DEG(20));
+        ok_r3d_texture(stripes, 8);
+        ok_r3d_uv(0, 0, 8, 1);
+        ok_r3d_material(RGB(29, 7, 8), ++next_id, OK_R3D_EDGE | OK_R3D_TEXTURED);
+        ok_r3d_ellipsoid(P(0, 0, 0), P(70, 70, 70), 10, 7);
+        ok_r3d_pop();
     }
     /* Head, turning on the neck. */
     ok_r3d_push();
@@ -1047,11 +1199,6 @@ void ok_monkey_draw(const ok_look *look, const uint16_t *skin, const ok_monkey_a
     ok_r3d_pop();
     ok_r3d_pop();
     ok_r3d_pop();
-    /* Tucked in. */
-    if (lie > 50) {
-        solid(RGB(7, 13, 24));
-        ok_r3d_ellipsoid(P(-10, 220, 25), P(195, 280, 200), 12, 7);
-    }
     ok_r3d_pop();
 
 }
