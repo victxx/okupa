@@ -334,12 +334,12 @@ static void closet(frame f, const uint8_t (*font)[8], const ok_ui *u)
 /* Sketchbook: the 64x64 drawing at twice the size, tools on the right. */
 #define CX 8
 #define CY 40
-enum { T_PEN, T_ERASER, T_CLEAR, T_DONE, TOOLS };
-static const char *tools[TOOLS] = {"Pen", "Eraser", "Clear", "Done"};
+enum { T_PEN, T_ERASER, T_CLEAR, T_SEND, T_DONE, TOOLS };
+static const char *tools[TOOLS] = {"Pen", "Eraser", "Clear", "Send", "Done"};
 #define TX 148
-#define TY(i) (40 + (i) * 34)
+#define TY(i) (40 + (i) * 29)
 #define TW 100
-#define TH 28
+#define TH 25
 
 static void sketch(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
@@ -351,7 +351,7 @@ static void sketch(frame f, const uint8_t (*font)[8], const ok_ui *u)
     for (i = 0; i < TOOLS; i++) {
         int on = (i == T_PEN && !u->eraser) || (i == T_ERASER && u->eraser);
         frame_box(f, TX, TY(i), TW, TH, on ? RGB(29, 22, 6) : PAPER, INK);
-        centred(f, font, TX + TW / 2, TY(i) + 10, tools[i], INK, 1);
+        centred(f, font, TX + TW / 2, TY(i) + 9, i == T_SEND && u->drawing_sent ? "On its way" : tools[i], INK, 1);
     }
 }
 
@@ -399,15 +399,15 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         snprintf(link, sizeof link, "ethereum:%.42s", u->wallet_address);
         if (qrcodegen_encodeText(link, tmp, qr, qrcodegen_Ecc_MEDIUM, 1, 6, qrcodegen_Mask_AUTO, true)) {
             size = qrcodegen_getSize(qr);
-            scale = 120 / (size + 4);
+            scale = 112 / (size + 4);
             left = 128 - (size + 4) * scale / 2;
-            topq = 40;
+            topq = 38;
             rect(f, left, topq, (size + 4) * scale, (size + 4) * scale, RGB(31, 31, 31));
             for (y = 0; y < size; y++)
                 for (x = 0; x < size; x++)
                     if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
         }
-        centred(f, font, 128, 144, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
+        centred(f, font, 128, 152, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
         frame_box(f, 4, 166, 120, 22, PAPER, INK);
         centred(f, font, 64, 173, "Send hello", INK, 1);
     }
@@ -599,9 +599,6 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
         ok_monkey_room room;
         ok_house_room(&room);
         ok_monkey_init(&u->anim, &room, p->asleep, 0x6f6b7570u ^ (uint32_t)p->updated);
-        memcpy(u->wall, u->drawing, sizeof u->wall);
-        for (u->wall_set = 0; u->wall_set < (int)sizeof u->wall && !u->wall[u->wall_set]; u->wall_set++) {}
-        u->wall_set = u->wall_set < (int)sizeof u->wall;
         u->ready = 1;
     }
     u->ticks++;
@@ -668,6 +665,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (u->scene == OK_UI_SKETCH) {
         if (inside(x, y, CX, CY, 128, 128)) {
+            if (u->drawing_sent) return OK_UI_NOTHING; /* the signed pixels must stay as sent */
             if (!held) u->last_x = u->last_y = -1;
             stroke(u, (x - CX) / 2, (y - CY) / 2);
             return OK_UI_CHANGED;
@@ -677,15 +675,21 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             if (!inside(x, y, TX, TY(i), TW, TH)) continue;
             if (i == T_PEN) u->eraser = 0;
             if (i == T_ERASER) u->eraser = 1;
-            if (i == T_CLEAR) memset(u->drawing, 0, sizeof u->drawing);
+            if (i == T_CLEAR && !u->drawing_sent) memset(u->drawing, 0, sizeof u->drawing);
+            if (i == T_SEND) {
+                if (u->drawing_sent) return OK_UI_NOTHING;
+                say(u, "Off to Ethereum. It goes on the wall once a block has it.");
+                u->scene = OK_UI_HOME;
+                return OK_UI_SEND_DRAWING;
+            }
             if (i == T_DONE) {
                 int k;
                 u->scene = OK_UI_HOME;
-                memcpy(u->wall, u->drawing, sizeof u->wall);
-                for (k = 0; k < (int)sizeof u->wall && !u->wall[k]; k++) {}
-                u->wall_set = k < (int)sizeof u->wall;
-                say(u, u->wall_set ? "I love it! Send it and it goes on the wall." : "Nothing yet? Maybe next time.");
-                if (u->wall_set) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
+                for (k = 0; k < (int)sizeof u->drawing && !u->drawing[k]; k++) {}
+                if (u->drawing_sent) say(u, "It's on its way. Watch the wall!");
+                else if (k < (int)sizeof u->drawing) say(u, "I love it! Send it and it goes on the wall.");
+                else say(u, "Nothing yet? Maybe next time.");
+                if (k < (int)sizeof u->drawing) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
             }
             return OK_UI_CHANGED;
         }

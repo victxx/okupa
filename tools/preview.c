@@ -5,6 +5,10 @@
 #include "okupa_font.h"
 #include "okupa_ui.h"
 #include "png.h"
+#include "okupa_session.h"
+#include "okupa_tech.h"
+#include <stdio.h>
+#include <string.h>
 
 #define W OK_UI_W
 #define H (2 * OK_UI_H + 8)
@@ -31,6 +35,56 @@ static void shot(const char *dir, const char *name, ok_ui *u, const ok_pet *p, i
     ok_ui_render(u, p, hour, 42, ok_font(), top, bottom);
     snprintf(path, sizeof path, "%s/%s.png", dir, name);
     png(path);
+}
+
+/* The technical screens, filled with values from a host run against mainnet
+ * (run/watch-mainnet-20261106): a preview of the layout, not console data. */
+static void tech_shots(const char *dir)
+{
+    static ok_facts fa;
+    static const uint8_t mainnet_genesis[32] = {0xd4, 0xe5, 0x67, 0x40, 0xf8, 0x76, 0xae, 0xf8, 0xc0, 0x10, 0xb8,
+                                                0x6a, 0x40, 0xd5, 0xf5, 0x67, 0x45, 0xa1, 0x18, 0xd0, 0x90, 0x6a,
+                                                0x34, 0xe6, 0x9a, 0xec, 0x8c, 0x0d, 0xb1, 0xcb, 0x8f, 0xa3};
+    ok_tech t;
+    char path[512];
+    int i;
+    memset(&fa, 0, sizeof fa);
+    strcpy(fa.network, "mainnet");
+    fa.chain_id = 1;
+    memcpy(fa.genesis, mainnet_genesis, 32);
+    fa.fork_hash[0] = 0x07, fa.fork_hash[1] = 0xc9, fa.fork_hash[2] = 0x46, fa.fork_hash[3] = 0x2e;
+    strcpy(fa.dns_tree, "all.mainnet.ethdisco.net");
+    fa.dns_seq = 1, fa.dns_verified = 1, fa.dns_records = 31, fa.dns_nodes = 24;
+    fa.v4_sent = 1441, fa.v4_received = 1597, fa.v4_nodes = 384, fa.candidates = 141, fa.tried = 141;
+    fa.reached_status = 2, fa.full = 96;
+    fa.peer_count = 3;
+    fa.peers[0].ip[0] = 50, fa.peers[0].ip[1] = 21, fa.peers[0].ip[2] = 173, fa.peers[0].ip[3] = 102;
+    fa.peers[0].port = 30303, fa.peers[0].stage = OK_STAGE_HELD, fa.peers[0].disconnect = -1;
+    strcpy(fa.peers[0].client, "Nethermind/v2.0.0+bec830cd-h/linux-x64/dotnet10");
+    fa.peers[0].latest = 26357123;
+    fa.peers[1].ip[0] = 51, fa.peers[1].ip[1] = 210, fa.peers[1].ip[2] = 24, fa.peers[1].ip[3] = 225;
+    fa.peers[1].port = 30303, fa.peers[1].stage = OK_STAGE_STATUS, fa.peers[1].disconnect = 4;
+    strcpy(fa.peers[1].client, "reth/v2.10.0-575a300/x86_64-unknown-linux-gnu");
+    fa.peers[2].ip[0] = 162, fa.peers[2].ip[1] = 19, fa.peers[2].ip[2] = 103, fa.peers[2].ip[3] = 123;
+    fa.peers[2].port = 30400, fa.peers[2].stage = OK_STAGE_ACK, fa.peers[2].disconnect = 4;
+    fa.best_head = 26357125;
+    fa.blocks_checked = 2, fa.incl_state = 1;
+    strcpy(fa.build, "preview");
+    fa.dsi_mode = 1;
+    for (t.page = 0, ok_tech_init(&t); t.page < OK_TECH_PAGES; t.page++) {
+        t.ticks = 20;
+        ok_tech_render(&t, &fa, ok_font(), top, bottom);
+        snprintf(path, sizeof path, "%s/tech-%d.png", dir, t.page);
+        png(path);
+    }
+    ok_tech_init(&t);
+    for (i = 0; i < OK_TECH_STEPS; i++) {
+        t.step = i;
+        t.ticks = 25;
+        ok_tech_render(&t, &fa, ok_font(), top, bottom);
+        snprintf(path, sizeof path, "%s/how-%d.png", dir, i + 1);
+        png(path);
+    }
 }
 
 int main(int argc, char **argv)
@@ -92,5 +146,6 @@ int main(int argc, char **argv)
     u.wallet_ready = 1;
     strcpy(u.wallet_address, "0x9d8A62f656a8d1615C1294fd71e9CFb3E4855A4F");
     shot(dir, "wallet", &u, &p, 15);
+    tech_shots(dir);
     return 0;
 }

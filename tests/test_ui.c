@@ -48,7 +48,16 @@ int main(void)
     ok_ui_release(&u);
     assert(ok_ui_touch(&u, &p, 198, 120, 0, t) == OK_UI_CHANGED);
     for (i = 0; i < (int)sizeof u.drawing; i++) assert(u.drawing[i] == 0);
-    assert(ok_ui_touch(&u, &p, 198, 150, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
+    assert(ok_ui_touch(&u, &p, 198, 165, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
+    /* Send hands the drawing to the platform; once sent it cannot change. */
+    u.scene = OK_UI_SKETCH;
+    assert(ok_ui_touch(&u, &p, 198, 140, 0, t) == OK_UI_SEND_DRAWING && u.scene == OK_UI_HOME);
+    u.scene = OK_UI_SKETCH;
+    u.drawing_sent = 1;
+    assert(ok_ui_touch(&u, &p, 20, 60, 0, t) == OK_UI_NOTHING);
+    assert(ok_ui_touch(&u, &p, 198, 140, 0, t) == OK_UI_NOTHING);
+    u.drawing_sent = 0;
+    u.scene = OK_UI_HOME;
 
     /* Dev asks the platform to run the checks; Back returns. */
     assert(ok_ui_touch(&u, &p, 221, 130, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
