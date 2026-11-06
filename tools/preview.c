@@ -169,6 +169,17 @@ int main(int argc, char **argv)
         ok_ui_init(&w);
         wall_shots(dir, &w, &p);
         for (i = 0; i < 12; i++) ok_house_frame(i, NULL);
+        /* Its inner life: a thought, a question, listening to the answer. */
+        ok_ui_thought(&w, "I wonder what the clouds taste like.");
+        shot(dir, "home-thought", &w, &p, 11);
+        ok_ui_ask(&w, "What did you have for lunch today?");
+        shot(dir, "home-ask", &w, &p, 11);
+        ok_ui_listening(&w, 1);
+        shot(dir, "home-listening", &w, &p, 11);
+        ok_ui_listening(&w, 2);
+        shot(dir, "home-thinking", &w, &p, 11);
+        ok_ui_listening(&w, 0);
+        ok_ui_ask(&w, NULL);
     }
     u.scene = OK_UI_DEV;
     snprintf(u.dev[0], sizeof u.dev[0], "keccak256(abc)      ok  0 ms");
