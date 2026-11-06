@@ -239,6 +239,7 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
     if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
         (d->activity == OK_MIND_GO_INSIDE && here == OK_PLACE_ATTIC))
         move = OK_MOVE_LOOK; /* already there: it just looks around */
+    if (move == OK_MOVE_PEEK && u->look.wear != OK_WEAR_SMILEY) move = OK_MOVE_LOOK; /* peeking needs its mask */
     ok_ui_direct(u, p, move, where, poses[d->mood], said);
     ok_ui_listening(u, 0);
     if (d->thought[0]) ok_ui_thought(u, d->thought);
