@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 image=$(sed -n 's/.*"image": "\(.*\)".*/\1/p' platform/dsi/toolchain.lock.json)
 id=$(git rev-parse --short=7 HEAD)$(git diff --quiet HEAD -- . 2>/dev/null || echo -dirty)
 mkdir -p build/dsi
+rm -f build/dsi/obj/platform/dsi/main.o # it carries the build id
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL \
     --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
     --mount "type=bind,src=$PWD,dst=/work,readonly" \
