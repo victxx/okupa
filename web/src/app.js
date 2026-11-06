@@ -13,6 +13,7 @@ import * as swarm from './swarm.js';
 import * as arkiv from './arkiv.js';
 import { clients, sendAct, quoteAct, waitIncluded, verifiedAct } from './chain.js';
 import { ANON, anonFetch } from './anon.js';
+import { startScene } from './scene.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -123,9 +124,19 @@ function frame(px, bpp, lines) {
   for (const l of lines) { const p = document.createElement('span'); p.className = 'mono'; p.textContent = l; f.append(p); }
   return f;
 }
-function renderWall() {
+let scene = null;
+const as1bpp = (h) => (h.bpp === 1 ? hexToBytes(h.pixels) : okupa.toDrawing(hexToBytes(h.pixels)));
+// The attic has six frames: the six newest gifts, oldest first, like the console's wall.
+function hangInAttic(animateNewest) {
+  if (!scene) return;
+  const hung = store.get(wallKey(), []).slice(0, 6).reverse();
+  hung.forEach((h, i) => scene.hang(i, as1bpp(h), animateNewest && i === hung.length - 1));
+  if (animateNewest && hung.length) scene.cheer();
+}
+function renderWall(animateNewest = false) {
   const w = $('wall'); w.replaceChildren();
   const hung = store.get(wallKey(), []);
+  hangInAttic(animateNewest);
   if (!hung.length) { w.textContent = 'Nothing hung yet.'; w.className = 'wall muted'; return; }
   w.className = 'wall';
   for (const h of hung) w.append(frame(hexToBytes(h.pixels), h.bpp, [`from ${h.from.slice(0, 10)}…`, `${h.how}`, `tx ${h.tx.slice(0, 12)}…`]));
@@ -234,6 +245,7 @@ async function checkMailbox() {
   const entries = await arkiv.giftsFor(n.arkiv, me, n.chainId);
   log(`Arkiv: ${entries.length} mailbox entr${entries.length === 1 ? 'y' : 'ies'} name this monkey. Checking each against the chain.`, 'dim');
   const hung = store.get(wallKey(), []), cave = store.get(caveKey(), []);
+  let newOnes = 0, caveNew = 0;
   for (const e of entries) {
     const li = document.createElement('li'); li.className = 'mono'; list.append(li);
     const say = (t) => { li.textContent = `${e.key.slice(0, 12)}… ${t}`; };
@@ -259,7 +271,7 @@ async function checkMailbox() {
           store.set(caveKey(), cave.slice(0, 8));
           log(`✓ ${e.tx.slice(0, 12)}…: big picture from ${v.from.slice(0, 10)}…, block ${v.block}, ${picture.length} B from Swarm match the sealed keccak. Into the cave.`, 'ok');
           record({ act: 'received-swarm-big', from: v.from, to: me, tx: e.tx, block: String(v.block), arkivEntity: e.key, swarmAddress: bytesToHex(ref.subarray(0, 32)), pictureKeccak: bytesToHex(pictureHash), pictureBytes: picture.length });
-          say('into the cave (big, via Swarm)');
+          say('into the cave (big, via Swarm)'); caveNew++;
           continue;
         }
         log(`✓ ${e.tx.slice(0, 12)}…: sender ${v.from.slice(0, 10)}… recovered from the signature, block ${v.block}, seal opened, ${picture.length} B from Swarm match the sealed keccak.`, 'ok');
@@ -271,13 +283,14 @@ async function checkMailbox() {
       } else throw new Error('unknown gift kind');
       hung.unshift({ tx: e.tx, from: v.from, pixels: bytesToHex(px), bpp, how });
       store.set(wallKey(), hung.slice(0, 12));
-      say(`hung (${how})`);
+      say(`hung (${how})`); newOnes++;
     } catch (err) {
       say(`rejected: ${err.message}`);
       log(`✗ Arkiv entry ${e.key.slice(0, 12)}… rejected: ${err.message}`, 'bad');
     }
   }
-  renderWall(); renderCave();
+  renderWall(newOnes > 0); renderCave();
+  if (caveNew) scene?.cheer();
 }
 
 // ---------- the cave: where big pictures live ----------
@@ -359,6 +372,8 @@ async function devFund() {
 
 // ---------- boot ----------
 $('addr').textContent = account.address;
+startScene($('scene')).then((sc) => { scene = sc; hangInAttic(false); })
+  .catch((e) => { $('sceneNote').textContent = `The attic could not start here (${e.message}).`; });
 $('mycode').value = friendCode;
 $('mycode').onclick = () => { $('mycode').select(); navigator.clipboard?.writeText(friendCode).catch(() => {}); };
 setupSketch();

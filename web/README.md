@@ -123,5 +123,6 @@ node scripts/funding.mjs <monkey>... --bee <bee address>
 | `src/chain.js` | Send through RPC; independent checks of a transaction |
 | `src/anon.js` | anon-rpc reads |
 | `src/app.js` | The page |
+| `src/scene.js`, `scene/scene.c` | The attic: the console's renderer compiled to WebAssembly. `sh scene/build.sh` rebuilds `public/scene.wasm` (needs clang's wasm32 target and `wasm-ld`, e.g. `brew install lld`) |
 
 Keys live only in the browser's local storage. Run data goes in `../run/`, never in Git.
