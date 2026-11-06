@@ -301,7 +301,7 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
             size = qrcodegen_getSize(qr);
             scale = 112 / (size + 4);
             left = 128 - (size + 4) * scale / 2;
-            topq = 32;
+            topq = 38;
             rect(f, left, topq, (size + 4) * scale, (size + 4) * scale, RGB(31, 31, 31));
             for (y = 0; y < size; y++)
                 for (x = 0; x < size; x++)
