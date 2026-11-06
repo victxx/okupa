@@ -18,7 +18,7 @@
 #include <unistd.h>
 
 #define TREE "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net"
-#define MAX_NODES 8
+#define MAX_NODES 24 /* public nodes are often full: try many */
 
 static char (*out)[33];
 static int out_count;
@@ -32,14 +32,28 @@ static struct {
 static int node_count;
 
 static void line(int i, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static const char *log_path;
+
+/* Every line also goes to a log on the SD card, closed each time, so the last
+ * step before a crash can be read on a computer. */
 static void line(int i, const char *fmt, ...)
 {
     va_list ap;
+    FILE *f;
     if (i < 0 || i >= out_count) return;
     va_start(ap, fmt);
     vsnprintf(out[i], 33, fmt, ap);
     va_end(ap);
+    if (log_path && (f = fopen(log_path, "a"))) {
+        fprintf(f, "%lu %s\n", (unsigned long)time(NULL), out[i]);
+        fclose(f);
+    }
     redraw();
+}
+
+void ok_dsi_network_log(const char *path)
+{
+    log_path = path;
 }
 
 /* Entropy for handshake keys only (never wallet keys): the DSi has no random
@@ -393,7 +407,17 @@ void ok_dsi_network_test(char lines[][33], int count, void (*show)(void))
     }
     line(2, "List seq %lu, signed ok", (unsigned long)w.seq);
     line(3, "Nodes: %d, %u bad records", n, w.refused);
-    for (i = 0; i < n && 4 + i < count - 1; i++)
-        if (dial(i, 4 + i)) return;
+    /* A different starting node each run; rows 4..count-2 scroll. */
+    {
+        int start = (int)(cpuGetTiming() % (unsigned)(n ? n : 1)), rows = count - 5, full = 0, k;
+        for (k = 0; k < n; k++) {
+            int row = 4 + k % rows;
+            i = (start + k) % n;
+            if (k >= rows) line(row, " ");
+            if (dial(i, row)) return;
+            full += strstr(out[row], "full") != NULL;
+            line(count - 1, "Tried %d of %d, %d full", k + 1, n, full);
+        }
+    }
     line(count - 1, "No node had room. Try again.");
 }

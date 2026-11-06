@@ -16,7 +16,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40], wifi_path[40];
+static char save_path[40], temp_path[40], wifi_path[40], log_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -55,6 +55,7 @@ static int open_storage(void)
         snprintf(save_path, sizeof save_path, "%sokupa/save.bin", roots[i]);
         snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
         snprintf(wifi_path, sizeof wifi_path, "%sokupa/wifi.txt", roots[i]);
+        snprintf(log_path, sizeof log_path, "%sokupa/net-log.txt", roots[i]);
         return 1;
     }
     return 0;
@@ -122,6 +123,7 @@ int main(void)
     ok_pet pet;
     ok_ui ui;
 
+    defaultExceptionHandler(); /* a crash shows the registers and the address, not just "Data abort" */
     videoSetMode(MODE_5_2D);
     videoSetModeSub(MODE_5_2D);
     vramSetBankA(VRAM_A_MAIN_BG);
@@ -143,6 +145,7 @@ int main(void)
             save_status = "Save: new okupa on SD";
         }
         load_wifi();
+        ok_dsi_network_log(log_path);
     }
     ok_save_write(&pet, ui.drawing, saved);
 
