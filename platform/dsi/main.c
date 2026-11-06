@@ -29,6 +29,7 @@ static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
 static char save_path[40], temp_path[40], net_dir[40], key_path[40], look_path[40], wall_path[40], sent_path[40];
+static char letters_path[40]; /* the letters the okupa sent: "YYYY-MM-DD hash text" a line */
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -89,6 +90,7 @@ static int open_storage(void)
         snprintf(look_path, sizeof look_path, "%sokupa/look.txt", roots[i]);
         snprintf(wall_path, sizeof wall_path, "%sokupa/wall.bin", roots[i]);
         snprintf(sent_path, sizeof sent_path, "%sokupa/drawing-sent.bin", roots[i]);
+        snprintf(letters_path, sizeof letters_path, "%sokupa/letters.txt", roots[i]);
         return 1;
     }
     return 0;
@@ -245,6 +247,38 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
     if (d->thought[0]) ok_ui_thought(u, d->thought);
     if (d->ask[0]) ok_ui_ask(u, d->ask);
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
+}
+
+/* The day of the last letter the okupa sent, from letters.txt. */
+static void last_letter_day(char out[11])
+{
+    char line[256];
+    FILE *f;
+    out[0] = 0;
+    if (!letters_path[0] || !(f = fopen(letters_path, "r"))) return;
+    while (fgets(line, sizeof line, f))
+        if (strlen(line) > 10) snprintf(out, 11, "%.10s", line);
+    fclose(f);
+}
+
+/* A letter its mind wrote, signed and handed to the network with capped
+ * fees (account.c: at most 40 000 gas x 2 gwei); one a day. */
+static int send_letter(const char *text, char sent_day[11], const char *today)
+{
+    uint8_t tx[400], hash[32];
+    size_t len;
+    FILE *f;
+    if (ok_dsi_net_pending(hash)) return 0; /* one at a time */
+    if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), text, tx, sizeof tx, &len, hash)) return 0;
+    ok_dsi_net_send(tx, len, hash);
+    ok_facts_log(ok_dsi_uptime(), 'E', "signed letter %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+    if ((f = fopen(letters_path, "a"))) {
+        fprintf(f, "%s %02x%02x%02x%02x%02x%02x%02x%02x %s\n", today, hash[0], hash[1], hash[2], hash[3], hash[4], hash[5],
+                hash[6], hash[7], text);
+        fclose(f);
+    }
+    snprintf(sent_day, 11, "%s", today);
+    return 1;
 }
 
 int main(void)
@@ -470,6 +504,45 @@ int main(void)
             show_net = 0;
         }
         if (ok_dsi_mind_take(&thought)) obey(&ui, &pet, &thought, (int64_t)now);
+        /* What its mind made, drew, dreamed or wrote. */
+        {
+            static char said[80], letter_day[11];
+            static int letter_day_read;
+            char today[11], text[141], name[21];
+            uint8_t pixels[512], hash[32];
+            const char *about;
+            ok_object obj;
+            int w, h;
+            strftime(today, sizeof today, "%Y-%m-%d", localtime(&now));
+            if (!letter_day_read && storage) {
+                last_letter_day(letter_day);
+                letter_day_read = 1;
+            }
+            ok_dsi_mind_letters(storage && strcmp(letter_day, today) && !ok_dsi_net_pending(hash));
+            if (ok_dsi_mind_take_object(&obj)) {
+                snprintf(said, sizeof said, "I made a %.20s!", obj.name);
+                ui.say = said;
+                ui.say_ticks = 60 * 5;
+            }
+            if (ok_dsi_mind_take_drawing(pixels, name)) {
+                snprintf(said, sizeof said, "I drew %.20s! It's on the SD card.", name);
+                ui.say = said;
+                ui.say_ticks = 60 * 5;
+            }
+            if (ok_dsi_mind_take_dream(&w, &h, &about)) {
+                snprintf(said, sizeof said, "I dreamt of %.50s", about);
+                ui.say = said;
+                ui.say_ticks = 60 * 8;
+            }
+            if (ok_dsi_mind_take_letter(text)) {
+                if (send_letter(text, letter_day, today)) {
+                    ui.say = "I wrote you a letter, on Ethereum for good!";
+                } else {
+                    ui.say = "I wrote you a letter... but could not post it.";
+                }
+                ui.say_ticks = 60 * 5;
+            }
+        }
         if (tech_on) {
             if ((keysDown() & KEY_TOUCH)) {
                 touchRead(&touch);

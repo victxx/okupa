@@ -64,6 +64,19 @@ static int today_count;
 static char today_date[11];
 static char yesterday[OK_MIND_DIARY + 1];
 static int diary_written; /* today's entry is in diary.txt */
+
+/* What it makes, dreams and writes, handed to the game loop once each. */
+static char want_make[41], want_draw[41];
+static ok_object made;
+static uint8_t drew[512];
+static char drew_name[21];
+static char letter[141];
+static volatile int made_new, drew_new, letter_new, dream_new, letters_ok;
+static uint16_t dream_px[128 * 128];
+static int dream_w, dream_h;
+static char dream_about[OK_MIND_DREAM + 1];
+static uint8_t dream_png[160 * 1024];
+static uint8_t dream_scratch[200 * 1024];
 static char asked[OK_MIND_NOTE + 1];
 static uint32_t asked_at;
 static char heard_text[OK_MIND_TEXT + 1], saw_text[OK_MIND_TEXT + 1];
@@ -87,6 +100,10 @@ static struct {
     char ear_host[96], ear_provider[48], ear_model[64], ear_ip[20];
     uint8_t ear_signer[20];
     int have_ear;
+    /* Dreams: an image model (z-image-turbo), optional. */
+    char dream_host[96], dream_provider[48], dream_model[64], dream_ip[20];
+    uint8_t dream_signer[20];
+    int have_dream;
     /* Eyes: look through the camera every so many seconds while the player
      * is there (0 = only when asked with R). */
     long look_every;
@@ -132,6 +149,43 @@ void ok_dsi_mind_hear(const uint8_t *wav, size_t len)
 }
 
 void ok_dsi_mind_look(void) { look_wanted = 1; }
+
+void ok_dsi_mind_letters(int allowed) { letters_ok = allowed; }
+
+int ok_dsi_mind_take_object(ok_object *o)
+{
+    if (!made_new) return 0;
+    *o = made;
+    made_new = 0;
+    return 1;
+}
+
+int ok_dsi_mind_take_drawing(uint8_t pixels[512], char name[21])
+{
+    if (!drew_new) return 0;
+    memcpy(pixels, drew, 512);
+    memcpy(name, drew_name, 21);
+    drew_new = 0;
+    return 1;
+}
+
+int ok_dsi_mind_take_letter(char text[141])
+{
+    if (!letter_new) return 0;
+    memcpy(text, letter, 141);
+    letter_new = 0;
+    return 1;
+}
+
+const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about)
+{
+    if (!dream_new) return NULL;
+    dream_new = 0;
+    *w = dream_w;
+    *h = dream_h;
+    *about = dream_about;
+    return dream_px;
+}
 
 void ok_dsi_mind_guess(const uint8_t pixels[512])
 {
@@ -221,7 +275,8 @@ static int sock_write(void *ctx, const unsigned char *buf, size_t len)
 static int resolve(const char *host, struct in_addr *out)
 {
     struct addrinfo hints, *ai = NULL;
-    const char *ip = !strcmp(host, cfg.host) ? cfg.ip : !strcmp(host, cfg.ear_host) ? cfg.ear_ip : "";
+    const char *ip = !strcmp(host, cfg.host) ? cfg.ip : !strcmp(host, cfg.ear_host) ? cfg.ear_ip
+                     : !strcmp(host, cfg.dream_host) ? cfg.dream_ip : "";
     if (ip[0] && inet_aton(ip, out)) return 1;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET;
@@ -463,11 +518,17 @@ static int load_settings(uint8_t key[32])
         else if (!strcmp(text, "ear_ip")) snprintf(cfg.ear_ip, sizeof cfg.ear_ip, "%s", v);
         else if (!strcmp(text, "ear_signer")) cfg.have_ear = unhex(v, cfg.ear_signer, 20);
         else if (!strcmp(text, "look_every")) cfg.look_every = strtol(v, NULL, 10);
+        else if (!strcmp(text, "dream_host")) snprintf(cfg.dream_host, sizeof cfg.dream_host, "%.95s", v);
+        else if (!strcmp(text, "dream_provider")) snprintf(cfg.dream_provider, sizeof cfg.dream_provider, "%.47s", v);
+        else if (!strcmp(text, "dream_model")) snprintf(cfg.dream_model, sizeof cfg.dream_model, "%.63s", v);
+        else if (!strcmp(text, "dream_ip")) snprintf(cfg.dream_ip, sizeof cfg.dream_ip, "%.19s", v);
+        else if (!strcmp(text, "dream_signer")) cfg.have_dream = unhex(v, cfg.dream_signer, 20);
         else if (!strcmp(text, "city")) snprintf(cfg.city, sizeof cfg.city, "%.40s", v);
     }
     fclose(f);
     if (!cfg.host[0] || !cfg.provider[0] || !cfg.model[0] || !have_signer) return 0;
     cfg.have_ear = cfg.have_ear && cfg.ear_host[0] && cfg.ear_provider[0] && cfg.ear_model[0];
+    cfg.have_dream = cfg.have_dream && cfg.dream_host[0] && cfg.dream_provider[0] && cfg.dream_model[0];
     snprintf(path, sizeof path, "%smind.key", dir_path);
     if (!(f = fopen(path, "r"))) return 0;
     ok = fgets(text, sizeof text, f) != NULL;
@@ -674,10 +735,30 @@ static void save_diary(const char *date, const char *entry)
     fclose(f);
 }
 
+/* A file in a folder of its own on the SD card (objects/, drawings/, dreams/). */
+static void save_made(const char *folder, const char *name, const char *ext, const void *data, size_t n)
+{
+    char path[128], clean[24];
+    size_t i, o = 0;
+    FILE *f;
+    for (i = 0; name[i] && o < sizeof clean - 1; i++) {
+        char c = name[i];
+        clean[o++] = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ? c : '-';
+    }
+    clean[o] = 0;
+    snprintf(path, sizeof path, "%s%s", dir_path, folder);
+    mkdir(path, 0700);
+    snprintf(path, sizeof path, "%s%s/%s-%s.%s", dir_path, folder, today_date, o ? clean : "x", ext);
+    if ((f = fopen(path, "wb"))) {
+        fwrite(data, 1, n, f);
+        fclose(f);
+    }
+}
+
 /* Waits, but not when the player has just spoken or asked it to look. */
 static void rest_frames(int frames)
 {
-    while (frames-- > 0 && !clip_waiting && !look_wanted && !guess_wanted) wait_frames(1);
+    while (frames-- > 0 && !clip_waiting && !look_wanted && !guess_wanted && !want_make[0] && !want_draw[0]) wait_frames(1);
 }
 
 /* A failed call: say why on both screens. */
@@ -726,7 +807,7 @@ static int thinker(void *arg)
 {
     uint8_t key[32], nonce[16], mac[6];
     char did[64], why_cam[33];
-    ok_think_provider p, ear;
+    ok_think_provider p, ear, dreamer;
     ok_mind_obs obs;
     ok_pet pet;
     time_t rtc;
@@ -768,6 +849,11 @@ static int thinker(void *arg)
     ear.model = cfg.ear_model;
     memcpy(ear.signer, cfg.ear_signer, 20);
     ear.generation = 0;
+    dreamer.host = cfg.dream_host;
+    dreamer.provider = cfg.dream_provider;
+    dreamer.model = cfg.dream_model;
+    memcpy(dreamer.signer, cfg.dream_signer, 20);
+    dreamer.generation = 0;
 
     for (;;) {
         if ((paused || !wifi_ready()) && guess_wanted) { /* no guess without its mind */
@@ -901,6 +987,7 @@ static int thinker(void *arg)
         if (asked[0] && frames_alive - asked_at > 60u * 180u) asked[0] = 0; /* nobody answered in 3 minutes */
         if (asked[0]) obs.asked = asked;
         if (cfg.city[0]) obs.city = cfg.city;
+        obs.can_write_letter = letters_ok;
         ok_memory_tell(&facts, &obs);
         for (j = 0; j < recent_count; j++) obs.recent[j] = recent[j];
         obs.recent_count = recent_count;
@@ -953,6 +1040,15 @@ static int thinker(void *arg)
                 feed("keeps: %.32s", t.decision.remember);
                 today_add("learned: %.70s", t.decision.remember);
             }
+            if (t.decision.make[0] && !want_make[0]) snprintf(want_make, sizeof want_make, "%s", t.decision.make);
+            if (t.decision.draw[0] && !want_draw[0]) snprintf(want_draw, sizeof want_draw, "%s", t.decision.draw);
+            if (t.decision.letter[0] && letters_ok && !letter_new) {
+                snprintf(letter, sizeof letter, "%s", t.decision.letter);
+                letter_new = 1;
+                letters_ok = 0; /* the game loop says again when another is allowed */
+                feed("letter: %.31s", letter);
+                today_add("wrote the player a letter: %.52s", letter);
+            }
             mailbox = t.decision;
             mailbox_new = 1;
         } else {
@@ -965,6 +1061,50 @@ static int thinker(void *arg)
         line(3, "#%u: HTTP %d in %lu ms, %d known", count, t.http_status, (unsigned long)ms, facts.count);
         line(0, "0G mind: alive, %u/%u verified", verified, count);
         save_episode(&p, now_ms, count);
+
+        /* What it decided to make: an object, or a drawing of its own. */
+        if (want_make[0]) {
+            now_ms = (uint64_t)utc_now() * 1000u;
+            draw(nonce, sizeof nonce);
+            feed("making: %.30s", want_make);
+            t0 = cpuGetTiming();
+            r = ok_think_make(&t, &p, key, now_ms, nonce, want_make, fetch, NULL);
+            ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
+            if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                feed_verified(ms);
+                made = t.object;
+                if (!made.name[0]) snprintf(made.name, sizeof made.name, "%.20s", want_make);
+                feed("made: %.20s, %d boxes", made.name, made.count);
+                today_add("made %.60s out of boxes", made.name);
+                save_made("objects", made.name, "bin", &made, sizeof made);
+                made_new = 1;
+            } else if (r == OK_OK) {
+                failed();
+            }
+            save_episode(&p, now_ms, count);
+            want_make[0] = 0;
+        }
+        if (want_draw[0]) {
+            now_ms = (uint64_t)utc_now() * 1000u;
+            draw(nonce, sizeof nonce);
+            feed("drawing: %.29s", want_draw);
+            t0 = cpuGetTiming();
+            r = ok_think_draw(&t, &p, key, now_ms, nonce, want_draw, fetch, NULL);
+            ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
+            if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                feed_verified(ms);
+                memcpy(drew, t.drawing, sizeof drew);
+                snprintf(drew_name, sizeof drew_name, "%.20s", t.drawing_name[0] ? t.drawing_name : want_draw);
+                feed("drew: %.32s", drew_name);
+                today_add("drew %.70s", drew_name);
+                if (ok_png_drawing(drew, 2, photo, sizeof photo, &n) == OK_OK) save_made("drawings", drew_name, "png", photo, n);
+                drew_new = 1;
+            } else if (r == OK_OK) {
+                failed();
+            }
+            save_episode(&p, now_ms, count);
+            want_draw[0] = 0;
+        }
 
         /* The slow mind: a goal and a plan every five minutes. */
         if (t.stage == OK_THINK_DECIDED && (!aimed || frames_alive - aimed_at > 60u * 300u)) {
@@ -1015,6 +1155,28 @@ static int thinker(void *arg)
                     snprintf(yesterday, sizeof yesterday, "%s", t.diary);
                     feed("diary: %.31s", t.diary);
                     diary_written = 1;
+                    if (t.dream[0] && cfg.have_dream) { /* and tonight's dream, drawn by the image model */
+                        char about[OK_MIND_DREAM + 1];
+                        snprintf(about, sizeof about, "%s", t.dream);
+                        save_episode(&p, now_ms, count);
+                        now_ms = (uint64_t)utc_now() * 1000u;
+                        draw(nonce, sizeof nonce);
+                        feed("dreaming: %.28s", about);
+                        r = ok_think_dream(&t, &dreamer, key, now_ms, nonce, about, dream_png, sizeof dream_png,
+                                           sense_buf, sizeof sense_buf, fetch, NULL);
+                        if (r == OK_OK && t.stage == OK_THINK_DECIDED &&
+                            ok_png_read_rgb15(dream_png, t.image_len, dream_px, 128 * 128, &dream_w, &dream_h, dream_scratch,
+                                              sizeof dream_scratch) == OK_OK) {
+                            feed_verified(0);
+                            feed("dream: %dx%d picture, decoded here", dream_w, dream_h);
+                            snprintf(dream_about, sizeof dream_about, "%s", about);
+                            save_made("dreams", "dream", "png", dream_png, t.image_len);
+                            dream_new = 1;
+                        } else if (r == OK_OK) {
+                            failed();
+                        }
+                        if (r == OK_OK) save_episode(&dreamer, now_ms, count);
+                    }
                 } else if (r == OK_OK) {
                     failed();
                 }

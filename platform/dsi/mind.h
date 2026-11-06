@@ -35,6 +35,16 @@ void ok_dsi_mind_look(void);
  * with the verified guess, -1 if it could not, 0 not yet. */
 void ok_dsi_mind_guess(const uint8_t pixels[512]);
 int ok_dsi_mind_take_guess(char *out, size_t cap);
+/* What it makes, dreams and writes, once each: an object out of boxes, its
+ * own 64x64 drawing, last night's dream picture (DS colours) and a letter to
+ * send on Ethereum. ok_dsi_mind_letters: whether it may write one now (the
+ * game loop keeps the cap: one a day, none while another is pending). */
+#include "okupa_make.h"
+int ok_dsi_mind_take_object(ok_object *o);
+int ok_dsi_mind_take_drawing(uint8_t pixels[512], char name[21]);
+const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about);
+int ok_dsi_mind_take_letter(char text[141]);
+void ok_dsi_mind_letters(int allowed);
 /* 1 once per new verified decision (with its line, thought, question). */
 int ok_dsi_mind_take(ok_mind *d);
 /* Lines for the Dev screen. */
