@@ -14,5 +14,8 @@ ok_result ok_keys_public(const uint8_t priv[32], uint8_t pub[64]);
 void ok_keys_address(const uint8_t pub[64], uint8_t addr[20]);
 /* EIP-55 mixed-case hex, "0x" + 40 characters + NUL. */
 void ok_keys_checksum(const uint8_t addr[20], char out[43]);
+/* "0x" + 40 hex digits. All lower or all upper case is taken as is; mixed
+ * case must be the EIP-55 checksum (a typo is caught). OK_FORMAT otherwise. */
+ok_result ok_keys_parse_address(const char *text, uint8_t addr[20]);
 
 #endif

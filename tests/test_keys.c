@@ -46,6 +46,15 @@ int main(void)
     hex("fb6916095ca1df60bb79ce92ce3ea74c37c5d359", addr, 20);
     ok_keys_checksum(addr, text);
     assert(!strcmp(text, "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"));
+    /* Reading an address back: lower case, the checksum, and a typo in it. */
+    {
+        uint8_t back[20];
+        assert(ok_keys_parse_address("0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359", back) == OK_OK && !memcmp(back, addr, 20));
+        assert(ok_keys_parse_address("0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359\n", back) == OK_OK && !memcmp(back, addr, 20));
+        assert(ok_keys_parse_address("0xFB6916095ca1df60bB79Ce92cE3Ea74c37c5d359", back) == OK_FORMAT);
+        assert(ok_keys_parse_address("0xfb6916095ca1df60bb79ce92ce3ea74c37c5d35", back) == OK_FORMAT);
+        assert(ok_keys_parse_address("fb6916095ca1df60bb79ce92ce3ea74c37c5d359", back) == OK_FORMAT);
+    }
     /* Zero and the group order are not valid private keys. */
     memset(priv, 0, 32);
     assert(ok_keys_public(priv, pub) == OK_CRYPTO);

@@ -59,3 +59,26 @@ void ok_keys_checksum(const uint8_t addr[20], char out[43])
     }
     out[42] = 0;
 }
+
+ok_result ok_keys_parse_address(const char *text, uint8_t addr[20])
+{
+    char sum[43];
+    int i, lower = 0, upper = 0;
+    if (!text || !addr || text[0] != '0' || (text[1] != 'x' && text[1] != 'X')) return OK_FORMAT;
+    for (i = 0; i < 40; i++) {
+        char c = text[2 + i];
+        int v;
+        if (c >= '0' && c <= '9') v = c - '0';
+        else if (c >= 'a' && c <= 'f') v = c - 'a' + 10, lower = 1;
+        else if (c >= 'A' && c <= 'F') v = c - 'A' + 10, upper = 1;
+        else return OK_FORMAT;
+        if (i % 2) addr[i / 2] = (uint8_t)(addr[i / 2] | v);
+        else addr[i / 2] = (uint8_t)(v << 4);
+    }
+    if (text[42] && text[42] != ' ' && text[42] != '\r' && text[42] != '\n' && text[42] != '\t') return OK_FORMAT;
+    if (lower && upper) {
+        ok_keys_checksum(addr, sum);
+        if (memcmp(sum + 2, text + 2, 40)) return OK_FORMAT;
+    }
+    return OK_OK;
+}

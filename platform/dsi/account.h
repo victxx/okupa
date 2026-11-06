@@ -22,9 +22,10 @@ int ok_dsi_account_hello(uint64_t chain_id, uint64_t nonce, uint8_t *out, size_t
 int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
                        uint8_t hash[32]);
 
-/* A letter from the okupa's mind (printable ASCII, up to 140 bytes), signed
+/* A letter from the okupa's mind (printable ASCII, up to 140 bytes), to the
+ * address to (20 bytes; NULL = the console's own), signed
  * with capped fees: at most 40 000 gas x 2 gwei. */
-int ok_dsi_account_letter(uint64_t chain_id, uint64_t nonce, const char *text, uint8_t *out, size_t cap, size_t *len,
-                          uint8_t hash[32]);
+int ok_dsi_account_letter(uint64_t chain_id, uint64_t nonce, const char *text, const uint8_t *to, uint8_t *out,
+                          size_t cap, size_t *len, uint8_t hash[32]);
 
 #endif

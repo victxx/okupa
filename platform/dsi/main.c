@@ -13,6 +13,7 @@
 #include "okupa_monkey.h"
 #include "okupa_save.h"
 #include "okupa_facts.h"
+#include "okupa_keys.h"
 #include "okupa_tech.h"
 #include "okupa_keccak.h"
 #include "okupa_r3d.h"
@@ -332,6 +333,45 @@ static void last_letter_day(char out[11])
     fclose(f);
 }
 
+/* Who the letters go to: sd:/okupa/letters-to.txt, "0x<address> [name]",
+ * e.g. a friend's wallet and their ENS name (resolved elsewhere: the console
+ * cannot read ENS without an RPC). No file: the console's own address. A
+ * file that does not hold a valid address (or a checksum typo) stops the
+ * letters rather than send them somewhere wrong. */
+static uint8_t letter_to[20];
+static int letter_to_state; /* 0 no file, 1 valid, -1 invalid */
+static char letter_to_name[32], letter_to_text[43];
+
+static void load_letter_to(const char *dir)
+{
+    char path[64], line[128];
+    FILE *f;
+    snprintf(path, sizeof path, "%.40sletters-to.txt", dir);
+    letter_to_state = 0;
+    if (!(f = fopen(path, "r"))) return;
+    letter_to_state = -1;
+    if (fgets(line, sizeof line, f) && ok_keys_parse_address(line, letter_to) == OK_OK) {
+        const char *name = line + 42;
+        letter_to_state = 1;
+        ok_keys_checksum(letter_to, letter_to_text);
+        while (*name == ' ' || *name == '\t') name++;
+        snprintf(letter_to_name, sizeof letter_to_name, "%.31s", name);
+        letter_to_name[strcspn(letter_to_name, "\r\n")] = 0;
+        ok_facts_log(0, 'D', "letters go to %.24s", letter_to_name[0] ? letter_to_name : letter_to_text);
+    }
+    fclose(f);
+}
+
+/* The recipient as people read it: its name, or the address shortened. */
+static const char *letter_to_label(void)
+{
+    static char shortened[16];
+    if (letter_to_state != 1) return "my own address";
+    if (letter_to_name[0]) return letter_to_name;
+    snprintf(shortened, sizeof shortened, "%.6s...%.4s", letter_to_text, letter_to_text + 38);
+    return shortened;
+}
+
 /* A letter its mind wrote, signed and handed to the network with capped
  * fees (account.c: at most 40 000 gas x 2 gwei); one a day. */
 static int send_letter(const char *text, char sent_day[11], const char *today)
@@ -340,9 +380,13 @@ static int send_letter(const char *text, char sent_day[11], const char *today)
     size_t len;
     FILE *f;
     if (ok_dsi_net_pending(hash)) return 0; /* one at a time */
-    if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), text, tx, sizeof tx, &len, hash)) return 0;
+    if (letter_to_state < 0) return 0; /* letters-to.txt is wrong: never guess a recipient */
+    if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), ok_dsi_net_take_nonce(), text, letter_to_state == 1 ? letter_to : NULL,
+                               tx, sizeof tx, &len, hash))
+        return 0;
     ok_dsi_net_send(tx, len, hash);
-    ok_facts_log(ok_dsi_uptime(), 'E', "signed letter %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+    ok_facts_log(ok_dsi_uptime(), 'E', "letter %02x%02x%02x%02x to %.16s", hash[0], hash[1], hash[2], hash[3],
+                 letter_to_label());
     if ((f = fopen(letters_path, "a"))) {
         fprintf(f, "%s %02x%02x%02x%02x%02x%02x%02x%02x %s\n", today, hash[0], hash[1], hash[2], hash[3], hash[4], hash[5],
                 hash[6], hash[7], text);
@@ -375,12 +419,15 @@ static void show_mail(ok_ui *u, const char *dir)
         fclose(f);
     }
     last[strcspn(last, "\r\n")] = 0;
-    if (count)
-        snprintf(said, sizeof said, "%d letter%s on Ethereum. Last, %.10s: %.120s", count, count > 1 ? "s" : "", last,
-                 last + 28);
+    if (letter_to_state < 0)
+        snprintf(said, sizeof said, "letters-to.txt has no valid address (check the 0x and its capitals).");
+    else if (count)
+        snprintf(said, sizeof said, "%d letter%s on Ethereum, to %.24s. Last, %.10s: %.100s", count, count > 1 ? "s" : "",
+                 letter_to_label(), last, last + 28);
+    else if (on)
+        snprintf(said, sizeof said, "No letters yet. I'll write to %.24s when something matters.", letter_to_label());
     else
-        snprintf(said, sizeof said, on ? "No letters yet. I'll write you one when something matters."
-                                       : "No letters yet. Letters are off (letters-on.txt on the SD).");
+        snprintf(said, sizeof said, "No letters yet. Letters are off (letters-on.txt on the SD).");
     u->say = said;
     u->say_ticks = 60 * 8;
 }
@@ -521,7 +568,8 @@ int main(void)
                     hang_waiting = 1; /* hung below, in front of the player (not behind SELECT) */
                     snprintf(said, sizeof said, "Block %lu has my drawing. On the wall!", (unsigned long)inc_block);
                 } else {
-                    snprintf(said, sizeof said, "My hello is in block %lu!", (unsigned long)inc_block);
+                    snprintf(said, sizeof said, "My %s is in block %lu!",
+                             strcmp(ok_facts_now.tx_kind, "letter") ? "hello" : "letter", (unsigned long)inc_block);
                 }
                 ui.say = said;
                 ui.say_ticks = 600;
@@ -690,6 +738,7 @@ int main(void)
             strftime(today, sizeof today, "%Y-%m-%d", localtime(&now));
             static int letters_allowed;
             if (!letter_day_read && storage) {
+                load_letter_to(net_dir);
                 char on_path[48];
                 FILE *f;
                 last_letter_day(letter_day);
@@ -702,7 +751,8 @@ int main(void)
                     fclose(f);
                 }
             }
-            ok_dsi_mind_letters(letters_allowed && storage && strcmp(letter_day, today) && !ok_dsi_net_pending(hash));
+            ok_dsi_mind_letters(letters_allowed && letter_to_state >= 0 && storage && strcmp(letter_day, today) &&
+                                !ok_dsi_net_pending(hash));
             if (ok_dsi_mind_take_object(&obj)) {
                 /* Its colour names onto the house's palette. */
                 static const uint8_t to_palette[OK_MAKE_COLOURS] = {2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 10, 11, 15, 1, 13, 0};
