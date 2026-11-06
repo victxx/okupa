@@ -47,12 +47,14 @@ int ok_tls_resumed(const ok_tls *t)
 
 ok_result ok_tls_write(ok_tls *t, const void *data, size_t n)
 {
+    if (ok_yield) ok_yield(); /* between engine passes on cooperative threads */
     if (br_sslio_write_all(&t->io, data, n) < 0 || br_sslio_flush(&t->io) < 0) return OK_CRYPTO;
     return OK_OK;
 }
 
 ok_result ok_tls_read(ok_tls *t, void *buf, size_t cap, size_t *n)
 {
+    if (ok_yield) ok_yield();
     int k = br_sslio_read(&t->io, buf, cap);
     if (k > 0) {
         *n = (size_t)k;
