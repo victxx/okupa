@@ -12,6 +12,9 @@ void ok_dsi_network_test(char lines[][33], int count, void (*show)(void));
 /* Where to append a copy of every line (NULL: nowhere). */
 void ok_dsi_network_log(const char *path);
 
+/* Where to keep peers that once let us in (tried first next time). */
+void ok_dsi_network_peers(const char *path);
+
 /* Wi-Fi chosen in the app. Without it, the console's own saved settings. */
 void ok_dsi_wifi_use(const char *ssid, const char *password);
 int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void));

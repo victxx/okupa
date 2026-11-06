@@ -1,5 +1,6 @@
 #include "net.h"
 #include "okupa_dns.h"
+#include "okupa_discv4.h"
 #include "okupa_dnsdisc.h"
 #include "okupa_keccak.h"
 #include "okupa_keys.h"
@@ -18,7 +19,7 @@
 #include <unistd.h>
 
 #define TREE "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.sepolia.ethdisco.net"
-#define MAX_NODES 24 /* public nodes are often full: try many */
+#define MAX_NODES 48 /* public nodes are often full: try many */
 
 static char (*out)[33];
 static int out_count;
@@ -283,15 +284,144 @@ static int lookup(void *ctx, const char *name, char *txt, size_t cap, size_t *le
     return ok;
 }
 
-static void found(void *ctx, const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
+static int add_node(const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
 {
-    (void)ctx;
-    if (node_count >= MAX_NODES) return;
+    int i;
+    for (i = 0; i < node_count; i++)
+        if (!memcmp(nodes[i].pub, pub, 64)) return 0;
+    if (node_count >= MAX_NODES || !tcp) return 0;
     memcpy(nodes[node_count].pub, pub, 64);
     memcpy(nodes[node_count].ip, ip, 4);
     nodes[node_count].tcp = tcp;
     node_count++;
-    line(3, "Nodes found: %d", node_count);
+    return 1;
+}
+
+static void found(void *ctx, const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
+{
+    (void)ctx;
+    add_node(pub, ip, tcp);
+}
+
+/* Peers that once let us in, kept on the SD card: tried first next time. */
+static const char *peers_path;
+
+void ok_dsi_network_peers(const char *path)
+{
+    peers_path = path;
+}
+
+static int load_peers(void)
+{
+    char text[200];
+    int added = 0;
+    FILE *f = peers_path ? fopen(peers_path, "r") : NULL;
+    if (!f) return 0;
+    while (fgets(text, sizeof text, f)) {
+        uint8_t pub[64], ip[4];
+        unsigned a, b, c, d, port, k, v;
+        if (strncmp(text, "enode://", 8) || strlen(text) < 8 + 128 + 9) continue;
+        for (k = 0; k < 64; k++) {
+            if (sscanf(text + 8 + 2 * k, "%2x", &v) != 1) break;
+            pub[k] = (uint8_t)v;
+        }
+        if (k < 64 || sscanf(text + 8 + 128, "@%u.%u.%u.%u:%u", &a, &b, &c, &d, &port) != 5 || port > 65535) continue;
+        ip[0] = (uint8_t)a;
+        ip[1] = (uint8_t)b;
+        ip[2] = (uint8_t)c;
+        ip[3] = (uint8_t)d;
+        added += add_node(pub, ip, (uint16_t)port);
+    }
+    fclose(f);
+    return added;
+}
+
+static void remember_peer(int i)
+{
+    char text[200];
+    FILE *f;
+    int k, n;
+    if (!peers_path) return;
+    n = snprintf(text, sizeof text, "enode://");
+    for (k = 0; k < 64; k++) n += snprintf(text + n, sizeof text - (size_t)n, "%02x", nodes[i].pub[k]);
+    snprintf(text + n, sizeof text - (size_t)n, "@%u.%u.%u.%u:%u\n", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2],
+             nodes[i].ip[3], nodes[i].tcp);
+    if ((f = fopen(peers_path, "r"))) {
+        char have[200];
+        while (fgets(have, sizeof have, f))
+            if (!strcmp(have, text)) {
+                fclose(f);
+                return;
+            }
+        fclose(f);
+    }
+    if ((f = fopen(peers_path, "a"))) {
+        fputs(text, f);
+        fclose(f);
+    }
+}
+
+/* Discovery v4 over UDP for the core's crawler. */
+static int udp_fd = -1;
+
+static int udp_send(void *ctx, const ok_v4_endpoint *to, const uint8_t *packet, size_t n)
+{
+    struct sockaddr_in a;
+    (void)ctx;
+    memset(&a, 0, sizeof a);
+    a.sin_len = sizeof a;
+    a.sin_family = AF_INET;
+    a.sin_port = htons(to->udp);
+    memcpy(&a.sin_addr.s_addr, to->ip, 4);
+    return sendto(udp_fd, packet, n, 0, (struct sockaddr *)&a, sizeof a);
+}
+
+static int udp_recv(void *ctx, uint8_t *buf, size_t cap, ok_v4_endpoint *from)
+{
+    struct sockaddr_in a;
+    socklen_t alen = sizeof a;
+    int n = recvfrom(udp_fd, buf, cap, 0, (struct sockaddr *)&a, &alen);
+    (void)ctx;
+    if (n <= 0) return 0;
+    memcpy(from->ip, &a.sin_addr.s_addr, 4);
+    from->udp = ntohs(a.sin_port);
+    from->tcp = 0;
+    return n;
+}
+
+static void crawl_found(void *ctx, const ok_enr *e)
+{
+    (void)ctx;
+    add_node(e->pub, e->ip, e->tcp);
+}
+
+static void crawl(int seconds, uint8_t fork[4])
+{
+    static ok_v4_crawl c;
+    uint8_t priv[32], seed[4];
+    time_t start = time(NULL), now;
+    int frames = 0, i;
+    if ((udp_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) return;
+    fcntl(udp_fd, F_SETFL, fcntl(udp_fd, F_GETFL, 0) | O_NONBLOCK);
+    draw_key(priv);
+    draw(seed, sizeof seed);
+    c.send = udp_send;
+    c.recv = udp_recv;
+    c.found = crawl_found;
+    ok_v4_crawl_init(&c, priv, fork, (uint32_t)seed[0] << 24 | (uint32_t)seed[1] << 16 | seed[2] << 8 | seed[3]);
+    ok_wipe(priv, sizeof priv);
+    for (i = 0; i < ok_sepolia_bootnode_count; i++) ok_v4_crawl_add_enr(&c, ok_sepolia_bootnodes[i]);
+    while ((now = time(NULL)) - start < seconds) {
+        ok_v4_crawl_step(&c, (uint32_t)now);
+        stir();
+        if (frames++ % 30 == 0)
+            line(3, "discv4 %lds: %d seen, %u Sepolia", (long)(now - start), c.count, c.found_count);
+        swiWaitForVBlank();
+    }
+    line(3, "discv4: %d seen, %u Sepolia", c.count, c.found_count);
+    ok_wipe(c.priv, sizeof c.priv);
+    close(udp_fd);
+    udp_fd = -1;
 }
 
 /* A connected TCP stream for the core's session. */
@@ -363,6 +493,7 @@ static int dial(int i, int row)
     shutdown(fd, SHUT_WR);
     close(fd);
     if (rep.outcome == OK_SESSION_PASS) {
+        remember_peer(i);
         line(row, "%u.%u.%u.%u: PASS", nodes[i].ip[0], nodes[i].ip[1], nodes[i].ip[2], nodes[i].ip[3]);
         line(out_count - 1, "PASS %.27s", rep.client);
         return 1;
@@ -376,13 +507,29 @@ static int dial(int i, int row)
     return 0;
 }
 
+/* Dials nodes[from..node_count) in turn, from a different start each run;
+ * rows 4..count-2 scroll. 1 as soon as one lets us in. */
+static int try_nodes(int from, int count)
+{
+    int n = node_count - from, rows = count - 5, full = 0, k;
+    int start = n ? (int)(cpuGetTiming() % (unsigned)n) : 0;
+    for (k = 0; k < n; k++) {
+        int row = 4 + k % rows;
+        if (k >= rows) line(row, " ");
+        if (dial(from + (start + k) % n, row)) return 1;
+        full += strstr(out[row], "full") != NULL;
+        line(count - 1, "Tried %d of %d, %d full", k + 1, n, full);
+    }
+    return 0;
+}
+
 void ok_dsi_network_test(char lines[][33], int count, void (*show)(void))
 {
     static ok_dnsdisc_walk w;
     struct in_addr ip, gw, mask, dns2;
     uint8_t fork[4], mac[6];
     uint64_t next;
-    int i, n;
+    int n, from;
 
     out = lines;
     out_count = count;
@@ -415,32 +562,31 @@ void ok_dsi_network_test(char lines[][33], int count, void (*show)(void))
     }
 
     ok_forkid(&ok_sepolia, UINT64_MAX, (uint64_t)time(NULL), fork, &next);
+
+    /* 1. Peers that let us in before. */
+    n = load_peers();
+    line(2, "Known peers: %d", n);
+    if (try_nodes(0, count)) return;
+
+    /* 2. The signed DNS list. */
     w.lookup = lookup;
     w.found = found;
     line(2, "Sepolia list: reading DNS...");
-    n = ok_dnsdisc_walk_tree(&w, TREE, fork, MAX_NODES);
+    from = node_count;
+    ok_dnsdisc_walk_tree(&w, TREE, fork, 24);
     if (!w.seq && dns_server.s_addr != htonl(0x01010101)) {
         dns_server.s_addr = htonl(0x01010101); /* the local resolver did not answer: try 1.1.1.1 */
         line(1, "DNS: %s (fallback)", inet_ntoa(dns_server));
-        n = ok_dnsdisc_walk_tree(&w, TREE, fork, MAX_NODES);
+        ok_dnsdisc_walk_tree(&w, TREE, fork, 24);
     }
-    if (!w.seq) {
-        line(2, "Sepolia list: no verified root");
-        return;
-    }
-    line(2, "List seq %lu, signed ok", (unsigned long)w.seq);
-    line(3, "Nodes: %d, %u bad records", n, w.refused);
-    /* A different starting node each run; rows 4..count-2 scroll. */
-    {
-        int start = (int)(cpuGetTiming() % (unsigned)(n ? n : 1)), rows = count - 5, full = 0, k;
-        for (k = 0; k < n; k++) {
-            int row = 4 + k % rows;
-            i = (start + k) % n;
-            if (k >= rows) line(row, " ");
-            if (dial(i, row)) return;
-            full += strstr(out[row], "full") != NULL;
-            line(count - 1, "Tried %d of %d, %d full", k + 1, n, full);
-        }
-    }
+    if (w.seq) line(2, "DNS list %lu: %d nodes", (unsigned long)w.seq, node_count - from);
+    else line(2, "DNS list: no verified root");
+    if (try_nodes(from, count)) return;
+
+    /* 3. Lesser-known nodes through discovery v4. */
+    from = node_count;
+    crawl(45, fork);
+    line(2, "discv4: %d new nodes", node_count - from);
+    if (try_nodes(from, count)) return;
     line(count - 1, "No node had room. Try again.");
 }
