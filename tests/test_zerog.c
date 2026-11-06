@@ -49,6 +49,30 @@ int main(void)
     bad[10] = bad[10] == '0' ? '1' : '0';
     assert(ok_zerog_verify(req, strlen(REQ), resp, strlen(RESP), TEXT, strlen(TEXT), bad, signer) != OK_OK);
     assert(ok_zerog_verify(req, strlen(REQ), resp, strlen(RESP), TEXT, strlen(TEXT), "0x1234", signer) == OK_FORMAT);
-    puts("zerog: TEE response text rebuilt from our bytes; EIP-191 signer matches eth-account");
+    /* The Direct bearer token: same bytes as the SDK's recipe run with ethers 6.13.5. */
+    {
+        static const char want[] =
+            "app-sk-eyJhZGRyZXNzIjoiMHg5ZDhBNjJmNjU2YThkMTYxNUMxMjk0ZmQ3MWU5Q0ZiM0U0ODU1QTRGIiwicHJvdmlkZXIiOiIweDFjQjk1"
+            "RWI2NkNjNjdDNjJkNERFMENDOTY3MjZDNUE1ZDgyZTdDODUiLCJ0aW1lc3RhbXAiOjE4MDAwMDAwMDAwMDAsImV4cGlyZXNBdCI6MTgw"
+            "MDA4NjQwMDAwMCwibm9uY2UiOiIwMDExMjIzMzQ0NTU2Njc3ODg5OWFhYmJjY2RkZWVmZiIsImdlbmVyYXRpb24iOjAsInRva2VuSWQi"
+            "OjI1NX18MHhjNmE2MzJhMTg5MGRhMzI4YWIzODdhNDM1M2I2ZTRjMzk3MTY4MDJkOGFhNmI1ODZkYzc2ZWM3MGRmODQ2ZTg1MDZjMzk4"
+            "MjI0MjdhZWIwMTIzNWYxMWU2YTI0MTI4MjIxYTg4NmFkZWJiZTc1ODQwZDZiY2QxNGMzMDFjMTM3NTFj";
+        static char token[1024];
+        uint8_t key[32];
+        ok_zerog_session s;
+        size_t n, i;
+        memset(key, 0x46, 32);
+        memset(&s, 0, sizeof s);
+        s.provider = "0x1cB95Eb66Cc67C62d4DE0CC96726C5A5d82e7C85";
+        s.timestamp_ms = 1800000000000ull;
+        s.expires_ms = 1800086400000ull;
+        for (i = 0; i < 16; i++) s.nonce[i] = (uint8_t)(i * 0x11);
+        s.token_id = 255;
+        assert(ok_zerog_token(key, &s, token, sizeof token, &n) == OK_OK && n == strlen(want) && !strcmp(token, want));
+        assert(ok_zerog_token(key, &s, token, 100, &n) == OK_RANGE);
+        s.provider = "0x\"";
+        assert(ok_zerog_token(key, &s, token, sizeof token, &n) == OK_ARGUMENT);
+    }
+    puts("zerog: TEE response text rebuilt from our bytes; EIP-191 signer matches eth-account; Direct token matches the SDK");
     return 0;
 }

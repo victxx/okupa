@@ -17,4 +17,20 @@ ok_result ok_personal_recover(const void *msg, size_t n, const uint8_t sig[65], 
 ok_result ok_zerog_verify(const uint8_t *req, size_t req_len, const uint8_t *resp, size_t resp_len,
                           const char *text, size_t text_len, const char *sig_hex, const uint8_t signer[20]);
 
+/* EIP-191 personal_sign: r || s || v with v = 27/28, as wallets produce it. */
+ok_result ok_personal_sign(const void *msg, size_t n, const uint8_t priv[32], uint8_t sig[65]);
+
+/* The 0G Direct bearer token, signed by the console's own key: "app-sk-" +
+ * base64(token JSON + "|" + 0x signature), where the signature is personal_sign
+ * over keccak256(token JSON). token_id 255 = ephemeral (expires within 24 h). */
+typedef struct {
+    const char *provider;     /* as the contract lists it, e.g. checksummed 0x... */
+    uint64_t timestamp_ms, expires_ms;
+    uint8_t nonce[16];
+    uint32_t generation;      /* from the provider sub-account */
+    uint8_t token_id;
+} ok_zerog_session;
+
+ok_result ok_zerog_token(const uint8_t priv[32], const ok_zerog_session *s, char *out, size_t cap, size_t *len);
+
 #endif
