@@ -33,8 +33,8 @@ Qué está hecho y con qué evidencia. Los registros completos quedan en `run/` 
 | Wallet con QR | La dirección se muestra como QR EIP-681 (`ethereum:0x…`) con el generador de Nayuki fijado; leído correctamente por el detector de macOS. Probada en la DSi: la cartera se creó bien |
 | 0G proveedor qwen | Volvió el TLS; nuestro token pasa el proxy 0G, pero el servicio de Alibaba detrás responde 401 "API-key is blocked" (la clave del proveedor) |
 | Mente en 0G de punta a punta (`game/src/think.c`, rama `mind`) | Una decisión con el núcleo: petición desde el estado del okupa, token Direct, POST, firma TEE del chat id, verificación sobre nuestros bytes y solo entonces lectura del conjunto cerrado; cualquier fallo es parada segura (siesta). Test con proveedor falso: decisión, firmante equivocado, bytes cambiados, respuesta fuera del conjunto, 401, red caída |
-| `build/okupa-mind` contra 0G real (2026-11-06) | Testnet qwen: el proxy 0G acepta nuestro token y la cuenta (una clave sin ledger recibe "account not exists"), el upstream responde 401: parada segura. Mainnet 0GM-1.0-35B-A3B: TLS 1.2 con nuestras raíces, "account not exists" (cartera sin fondos). Ninguna inferencia verificada todavía |
-| Episodios en 0G Storage (`tools/zerog-store`) | El episodio de la parada segura (401) subido a Galileo: root `0x9b57ef7c…af27`, tx `0xff9c7c02…29f7`; descargado con prueba Merkle e idéntico byte a byte |
+| Primera decisión verificada en 0G mainnet (2026-11-06 22:07) | `build/okupa-mind` solo con el núcleo, 0GM-1.0-35B-A3B (TEE `0xDdaE…3d320Bfb`): id de petición `b499b8ea-9182-4bd9-a8b4-3595d1c65a14`, "eat / hungry / I need a snack!". Firma comprobada en C y, aparte, con ethers sobre nuestros bytes. El broker reescribe la petición (JSON canónico de Go y modelo upstream `0GM-1.0-35B-A3B-0427`) antes de que la TEE la firme; ahora la consola la construye ya canónica. Evidencia `run/zerog-mind-mainnet-20261106-220709/`; ledger de mainnet abierto con 3 0G y 1 0G en la subcuenta |
+| Episodios en 0G Storage (`tools/zerog-store`) | Episodio de la decisión verificada en Galileo: root `0x7152e7b2…773b`, tx `0xe8b6207d…b4e8`, descargado con prueba Merkle e idéntico. Antes, el de la parada segura (401): root `0x9b57ef7c…af27`. Índice `run/zerog-episodes.jsonl` |
 | DSi: Y en la pantalla Dev | `platform/dsi/mind.c`: una decisión por Wi-Fi en su propio hilo con el mismo código; pasos, id de petición, firma comprobada o no y decisión en pantalla; la frase verificada la dice el okupa. Ajustes `sd:/okupa/mind.txt` + `mind.key`; episodios en `sd:/okupa/episodes/`. Compila; sin probar en la consola |
 | Proveedores 0G testnet (21:20) | gpt-oss-20b y gemma-3-27b: el host no resuelve; glm-5.3 y Qwen2.5-0.5B (Phala): cortan el TLS; qwen3.8-omni-flash: upstream 401. Mainnet: 0GM-1.0-35B-A3B, -SIA y glm-5.3 responden por TLS 1.2 |
 
@@ -42,7 +42,7 @@ No se ha enviado ninguna transacción a Ethereum. En 0G testnet, solo las cuatro
 
 ## Siguiente
 
-0. Una decisión real verificada: testnet no tiene proveedor que responda; en mainnet hacen falta ~4 0G (ledger 3 + subcuenta 1) en la cartera de laboratorio de mainnet, con permiso del usuario. Después, la misma decisión desde la DSi.
+0. La misma decisión desde la DSi: `mind.txt` + `mind.key` (la clave del ledger de mainnet) en la SD, Dev → Y.
 
 1. Probar la ROM en la DSi y anotar los tiempos de la pantalla Dev.
 2. Que Geth local acepte una transacción nuestra en su txpool (cadena de pruebas, sin dinero).
