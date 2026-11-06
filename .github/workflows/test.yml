@@ -18,6 +18,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          # bearssl.org refuses shallow fetches of a single commit.
+          fetch-depth: 0
       - name: Test
         run: make test CC=${{ matrix.cc }}
       - name: Test with sanitizers
