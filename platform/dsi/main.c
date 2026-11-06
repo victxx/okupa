@@ -540,9 +540,15 @@ int main(void)
 #endif
 #if !defined(OKUPA_NO_NET) && !defined(OKUPA_NO_MIND)
             ok_dsi_mind_start(storage ? net_dir : NULL);
-    /* The buttons this platform really handles; the others stay hidden. */
-    ui.wired = OK_UI_HAS_PHOTO | OK_UI_HAS_TALK | OK_UI_HAS_GAMES | (storage ? OK_UI_HAS_MAIL : 0);
 #endif
+        }
+        /* The buttons this platform really handles, from what the mind
+         * loaded off the SD (mind.txt, ears, camera in DSi mode); the others
+         * stay hidden. Friend does nothing yet, so it never shows. */
+        {
+            uint32_t f = ok_facts_now.og_features;
+            ui.wired = (f & 4 ? OK_UI_HAS_PHOTO : 0) | (f & 2 ? OK_UI_HAS_TALK : 0) | (f & 8 ? OK_UI_HAS_GAMES : 0) |
+                       (storage ? OK_UI_HAS_MAIL : 0);
         }
         /* SELECT: the technical side, over the same running game. */
         if (keysDown() & KEY_SELECT) {
