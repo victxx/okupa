@@ -61,6 +61,10 @@ typedef struct {
     uint8_t wall[OK_UI_WALL][64 * 64 / 8];
     int wall_count;
     int drawing_sent; /* the sketchbook's drawing is on its way: not editable until it lands */
+    /* A picture new on the wall is hung with a little show: wall_seen is
+     * the wall as last shown, hang_t the ticks into hanging hang_slot. */
+    uint32_t wall_seen;
+    int wall_known, hang_t, hang_slot;
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);

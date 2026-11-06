@@ -162,7 +162,7 @@ static uint16_t art[OK_HOUSE_FRAMES][64 * 64];
 /* Where each frame hangs (centre x, y, half size, tilt in degrees, wood). */
 static const int16_t spots[6][5] = {
     {-1050, 520, 165, -2, 0}, {-660, 545, 150, 2, 1}, {-270, 560, 140, -1, 2},
-    {150, 545, 150, 3, 1},   {-650, 1010, 140, 2, 2}, {650, 1010, 140, -3, 0},
+    {150, 545, 150, 3, 1},   {-485, 1235, 105, 2, 2}, {485, 1235, 105, -3, 0},
 };
 
 void ok_house_frame(int slot, const uint8_t *pixels)
@@ -170,6 +170,14 @@ void ok_house_frame(int slot, const uint8_t *pixels)
     if (slot < 0 || slot >= OK_HOUSE_FRAMES) return;
     hung[slot] = pixels != NULL;
     if (pixels) memcpy(gallery[slot], pixels, OK_DRAWING_BYTES);
+}
+
+/* The frame being hung right now, and how far into it (ticks). */
+static int hang_slot = -1, hang_t;
+void ok_house_hanging(int slot, int t)
+{
+    hang_slot = slot >= 0 && slot < 6 ? slot : -1;
+    hang_t = t;
 }
 
 /* One frame: wood, a cream mount, and the drawing in ink, or nothing yet
@@ -370,7 +378,14 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     /* The gallery: six frames, empty until a picture is hung in them. */
     {
         int k;
-        for (k = 0; k < 6; k++) framed(k, hung[k] ? gallery[k] : k == 0 ? drawing : NULL);
+        for (k = 0; k < 6; k++) {
+            if (k == hang_slot) { /* on its way: only the nail waits for it */
+                mat(RGB(6, 5, 4), 0);
+                ok_r3d_ellipsoid(P(spots[k][0], spots[k][1] + spots[k][2] * 3 / 2, -1082), P(9, 9, 14), 4, 3);
+                continue;
+            }
+            framed(k, hung[k] ? gallery[k] : k == 0 ? drawing : NULL);
+        }
     }
     /* A woven rug. */
     tex(OK_ROOM_RUG, 0, RGB(20, 8, 6), 0);
@@ -530,6 +545,59 @@ static void garden_draw(uint16_t *frame, int m, const ok_look *look, const uint1
     fireflies(frame, a->ticks, l.night || m >= 1140);
 }
 
+/* A new picture being hung: it drops onto its nail, bumps, swings on its
+ * string and settles; a puff of dust, then a few glints. */
+#define HANG_DROP 22
+static void hang_frame(void)
+{
+    const int16_t *sp = spots[hang_slot];
+    int h = sp[2], t = hang_t, drop = 0, saved = next_id;
+    int32_t swing; /* hundredths of a degree */
+    if (t < HANG_DROP) {
+        drop = 1300 * (HANG_DROP * HANG_DROP - t * t) / (HANG_DROP * HANG_DROP);
+        swing = (int32_t)ok_r3d_sin(t * 160) * 300 / 4096;
+    } else {
+        int k = t - HANG_DROP, left = k < 120 ? 120 - k : 0;
+        if (k < 12) drop = (int)((int64_t)ok_r3d_sin(k * OK_TURN / 24) * 40 / 4096);
+        swing = (int32_t)((int64_t)ok_r3d_sin(k * OK_TURN / 38 + OK_TURN / 4) * 1100 / 4096 * left * left / (120 * 120));
+    }
+    next_id = 92;
+    ok_r3d_push();
+    ok_r3d_translate(P(sp[0], sp[1] + h * 3 / 2 + drop, -1096));
+    ok_r3d_rotate_z(swing * OK_TURN / 36000);
+    framed_at(hang_slot, gallery[hang_slot], 0, -h * 3 / 2, 0, h, sp[3], sp[4], 0, 0);
+    ok_r3d_pop();
+    next_id = saved;
+}
+
+static void hang_sparkle(uint16_t *frame)
+{
+    const int16_t *sp = spots[hang_slot];
+    int h = sp[2], k = hang_t - HANG_DROP, i;
+    if (k >= 0 && k < 26) /* dust shaken off the wall */
+        for (i = 0; i < 8; i++) {
+            int x, y, side = i & 1 ? 1 : -1;
+            if (!ok_r3d_project(P(sp[0] + side * (h - 10), sp[1] - h, -1050), &x, &y, NULL)) continue;
+            x += side * (k * (2 + i % 3) / 6 + i / 2);
+            y += k * k / 60 + (i / 2) - k / 4;
+            if (ok_r3d_id_at(x, y) < 100) dot(frame, x, y, RGB(26, 23, 18));
+        }
+    if (k >= 40 && k < 150) /* glints at the corners, one after another */
+        for (i = 0; i < 4; i++) {
+            int x, y, on = (k - 40 - i * 12) / 3, r;
+            if (on < 0 || on > 8) continue;
+            r = on < 4 ? on : 8 - on;
+            if (!ok_r3d_project(P(sp[0] + (i & 1 ? h : -h), sp[1] + (i & 2 ? -h : h), -1050), &x, &y, NULL)) continue;
+            for (; r >= 0; r--) {
+                uint16_t c = r ? RGB(31, 29, 18) : RGB(31, 31, 30);
+                dot(frame, x + r, y, c);
+                dot(frame, x - r, y, c);
+                dot(frame, x, y + r, c);
+                dot(frame, x, y - r, c);
+            }
+        }
+}
+
 void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const uint8_t *drawing, const ok_look *look,
                    const uint16_t *skin, const ok_monkey_anim *a, ok_monkey_face *face)
 {
@@ -542,6 +610,7 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
         int m = (hour % 24) * 60 + minute % 60, key = ((m / 5 * 2 + (lights_off != 0)) * 2 + mask_on_floor) * 4, i;
         uint32_t s = sum(drawing), t = a->ticks;
         for (i = 0; i < OK_HOUSE_FRAMES; i++) s = s * 7 + (hung[i] ? sum(gallery[i]) + 1 : 0);
+        s = s * 7 + (uint32_t)(hang_slot + 1);
         light l;
         light_at(m, lights_off, &l);
         if (!kept.valid || kept.key != key || kept.art_sum != s) {
@@ -553,6 +622,7 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
         ok_r3d_restore(frame);
         ok_r3d_camera(ok_v3_make(0, U(2100), U(4600)), ok_v3_make(0, U(650), 0), 340);
         apply(&l);
+        if (hang_slot >= 0) hang_frame();
         ok_monkey_draw(look, skin, a, face);
         /* In bed, the knitted blanket over it, up to the shoulders. */
         if (a->s[OK_SPRING_LIE].x / 256 > 55) {
@@ -564,6 +634,7 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
         ok_r3d_finish();
         if (kept.sun) beam(frame, kept.beam_x, kept.beam_y, kept.beam_add, 1); /* standing in the sun, it is lit too */
         ok_monkey_face_draw(frame, face);
+        if (hang_slot >= 0) hang_sparkle(frame);
         /* Small living things. */
         if (kept.night)
             for (i = 0; i < 6; i++)

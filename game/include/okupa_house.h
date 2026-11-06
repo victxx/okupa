@@ -33,6 +33,10 @@ void ok_house_room(ok_monkey_room *room);
  * on easels. Empty frames stay up, waiting. */
 #define OK_HOUSE_FRAMES 12
 void ok_house_frame(int slot, const uint8_t *pixels);
+/* A new picture arriving in an attic slot (0-5): t ticks into its hanging
+ * (drop, bump, swing, settle, about 2.5 s; slot -1 when none). */
+#define OK_HOUSE_HANG_TICKS 170
+void ok_house_hanging(int slot, int t);
 
 /* Where the okupa is: in the attic, or out on the terrace with the garden
  * gallery. ok_house_garden gives the terrace's places, for ok_monkey_init. */

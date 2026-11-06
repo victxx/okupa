@@ -87,6 +87,51 @@ static void tech_shots(const char *dir)
     }
 }
 
+/* Six little pictures as a player might draw them, for the wall. */
+static void doodle(uint8_t *d, int kind)
+{
+    int x, y;
+    memset(d, 0, OK_DRAWING_BYTES);
+    for (y = 0; y < 64; y++)
+        for (x = 0; x < 64; x++) {
+            int dx = x - 32, dy = y - 32, r2 = dx * dx + dy * dy, on = 0;
+            switch (kind) {
+            case 0: on = (r2 < 22 * 22 && r2 > 19 * 19) || (r2 < 9 && (dx == -8 || dx == 8 || 1) && dy == -6 && (dx < -5 || dx > 5)) ||
+                         (dy > 4 && dy < 8 && dx * dx < 120 && r2 > 100); break; /* a smiley */
+            case 1: on = (y > 30 && y < 56 && x > 14 && x < 50 && (x == 15 || x == 49 || y == 55 || y == 31)) ||
+                         (y <= 30 && y > 8 && (y - 8 == 32 - x || y - 8 == x - 32)) || (x > 27 && x < 36 && y > 42 && y < 56 && (x == 28 || x == 35 || y == 43)); break; /* a house */
+            case 2: on = ((y + (x / 6 % 2 ? x % 6 : 6 - x % 6)) % 14) < 2; break; /* waves */
+            case 3: on = r2 < 12 * 12 || ((dx == 0 || dy == 0 || dx == dy || dx == -dy) && r2 > 16 * 16 && r2 < 27 * 27); break; /* a sun */
+            case 4: on = (y > 50 && y < 53) || (x > 30 && x < 34 && y > 20 && y < 52) || ((x - 32) * (x - 32) + (y - 18) * (y - 18) * 2 < 120); break; /* a tree */
+            default: on = ((dx > 0 ? dx : -dx) + (dy > 0 ? dy : -dy) < 24 && (dx > 0 ? dx : -dx) + (dy > 0 ? dy : -dy) > 20) || r2 < 16; break; /* a gem */
+            }
+            if (on) ok_drawing_set(d, (unsigned)x, (unsigned)y, 1);
+        }
+}
+
+/* The wall full of pictures seen in blocks, and a new one being hung. */
+static void wall_shots(const char *dir, ok_ui *u, const ok_pet *p)
+{
+    char path[512];
+    int k, i;
+    static const int at[3] = {10, 34, 70};
+    u->scene = OK_UI_HOME;
+    u->ready = 0;
+    u->wall_known = 0;
+    u->wall_count = 5;
+    for (k = 0; k < 6; k++) doodle(u->wall[k], k);
+    for (i = 0; i < 30; i++) ok_ui_tick(u, p);
+    u->wall_count = 6; /* the sixth one is seen in a block */
+    for (k = 0; k < 3; k++) {
+        while (u->hang_t < at[k] && i++ < 400) ok_ui_tick(u, p);
+        ok_ui_render(u, p, 11, 20, ok_font(), top, bottom);
+        snprintf(path, sizeof path, "%s/home-hang-%d.png", dir, k + 1);
+        png(path);
+    }
+    while (u->hang_t) ok_ui_tick(u, p);
+    shot(dir, "home-wall", u, p, 11);
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "build/preview";
@@ -119,6 +164,12 @@ int main(int argc, char **argv)
         ok_drawing_set(u.drawing, 32, (unsigned)i, i > 10 && i < 50);
     }
     shot(dir, "sketchbook", &u, &p, 15);
+    {
+        static ok_ui w;
+        ok_ui_init(&w);
+        wall_shots(dir, &w, &p);
+        for (i = 0; i < 12; i++) ok_house_frame(i, NULL);
+    }
     u.scene = OK_UI_DEV;
     snprintf(u.dev[0], sizeof u.dev[0], "keccak256(abc)      ok  0 ms");
     snprintf(u.dev[1], sizeof u.dev[1], "sign tx (eth-acct)  ok 41 ms");

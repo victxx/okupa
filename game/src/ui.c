@@ -212,10 +212,34 @@ static void bubble(frame f, const uint8_t (*font)[8], const char *s, int hx, int
 static uint16_t skin[OK_SKIN * OK_SKIN];
 static ok_look skin_look = {255, 255, 255};
 
+/* The wall as a number, to notice a new picture. */
+static uint32_t wall_sum(const ok_ui *u)
+{
+    uint32_t s = (uint32_t)u->wall_count + 1;
+    int k, i;
+    for (k = 0; k < u->wall_count && k < OK_UI_WALL; k++)
+        for (i = 0; i < (int)sizeof u->wall[k]; i++) s = s * 31 + u->wall[k][i];
+    return s;
+}
+
+/* The wall's pictures in the attic's six frames and, the same, on the
+ * terrace. One not yet hung waits off the wall for its show. */
+static void hang_pictures(const ok_ui *u)
+{
+    int k, newest = u->wall_count - 1, waiting = u->wall_known && !u->hang_t && wall_sum(u) != u->wall_seen;
+    for (k = 0; k < 6; k++) {
+        const uint8_t *pic = k < u->wall_count && k < OK_UI_WALL ? u->wall[k] : NULL;
+        ok_house_frame(k, waiting && k == newest ? NULL : pic);
+        ok_house_frame(6 + k, pic);
+    }
+    ok_house_hanging(u->hang_t ? u->hang_slot : -1, u->hang_t);
+}
+
 static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p, int hour, int minute,
                        const char *line)
 {
     ok_monkey_face face;
+    hang_pictures(u);
     if (memcmp(&skin_look, &u->look, sizeof skin_look)) {
         ok_monkey_skin(&u->look, skin);
         skin_look = u->look;
@@ -600,6 +624,31 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
         ok_house_room(&room);
         ok_monkey_init(&u->anim, &room, p->asleep, 0x6f6b7570u ^ (uint32_t)p->updated);
         u->ready = 1;
+    }
+    /* The wall: a picture the console just saw in a block gets hung, in
+     * the attic, with the okupa there to see it. */
+    if (!u->wall_known) {
+        u->wall_known = 1;
+        u->wall_seen = wall_sum(u);
+    } else if (!u->hang_t && wall_sum(u) != u->wall_seen) {
+        if (u->wall_count <= 0) {
+            u->wall_seen = wall_sum(u);
+        } else if (ok_house_where() == OK_PLACE_ATTIC) {
+            u->wall_seen = wall_sum(u);
+            u->hang_slot = u->wall_count - 1;
+            u->hang_t = 1;
+        } else if (!u->going) {
+            ok_ui_direct(u, p, OK_MOVE_TO_DOOR, OK_PLACE_ATTIC, OK_POSE_HAPPY, NULL);
+        }
+    }
+    if (u->hang_t) {
+        if (u->hang_t == 22) { /* it lands on its nail */
+            u->sound = 1 + OK_SFX_POP;
+            u->happy_ticks = 360;
+            if (!p->asleep) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
+        }
+        if (u->hang_t == 60) u->sound = 1 + OK_SFX_YAY;
+        if (++u->hang_t > OK_HOUSE_HANG_TICKS) u->hang_t = 0;
     }
     u->ticks++;
     if (u->say_ticks && --u->say_ticks == 0) u->say = NULL;
