@@ -26,4 +26,7 @@ int ok_dsi_mind_take(ok_mind *d);
 /* Lines for the Dev screen. */
 const char (*ok_dsi_mind_lines(void))[33];
 
+/* What the mind thread is doing right now (for the freeze watchdog). */
+extern volatile const char *ok_dsi_mind_where;
+
 #endif

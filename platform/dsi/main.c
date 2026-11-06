@@ -259,9 +259,43 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
 }
 
+/* ---- Watchdog: if the game loop stops for 2 s, the vertical blank
+ * interrupt (which still runs) writes on the bottom screen where the
+ * network and the mind threads are, so a freeze explains itself. ----------- */
+static volatile uint32_t heartbeat;
+static void watch_text(uint16_t *fb, int x, int y, const char *s)
+{
+    const uint8_t (*font)[8] = ok_font();
+    int row, col;
+    for (; *s && x < 248; s++, x += 8)
+        for (row = 0; row < 8; row++)
+            for (col = 0; col < 8; col++)
+                fb[(y + row) * 256 + x + col] = (font[(unsigned char)*s & 127][row] >> col & 1) ? 0xffff : 0x801f;
+}
+
+static void watchdog(void)
+{
+    static uint32_t seen, still;
+    if (heartbeat != seen) {
+        seen = heartbeat;
+        still = 0;
+        return;
+    }
+    if (++still == 120 || (still > 120 && still % 60 == 0)) {
+        uint16_t *fb = bgGetGfxPtr(bottom_bg);
+        char t[40];
+        snprintf(t, sizeof t, "STUCK %lus", (unsigned long)(still / 60));
+        watch_text(fb, 0, 0, t);
+        snprintf(t, sizeof t, "net: %.24s", ok_dsi_net_where ? ok_dsi_net_where : "-");
+        watch_text(fb, 0, 10, t);
+        snprintf(t, sizeof t, "mind: %.23s", ok_dsi_mind_where ? ok_dsi_mind_where : "-");
+        watch_text(fb, 0, 20, t);
+    }
+}
+
 int main(void)
 {
-    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0;
+    int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0, threads_on = 0;
     uint32_t frame_at, late = 0, draw_us = 0, loop_us = 0, loop_at = 0;
     ok_look worn;
     ok_tech tech;
@@ -327,19 +361,17 @@ int main(void)
         load_wall(&ui);
     }
     machine_facts(0);
+    irqSet(IRQ_VBLANK, watchdog);
+    irqEnable(IRQ_VBLANK);
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
     ok_r3d_divider(hw_divide);
     ok_house_clock = now_us;
     ok_dsi_audio_start();
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
-#ifndef OKUPA_NO_NET /* a build for measuring the drawing alone */
-    ok_dsi_net_start();
-#endif
     ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
-#ifndef OKUPA_NO_NET
-    ok_dsi_mind_start(storage ? net_dir : NULL);
-#endif
+    /* The network and the mind start once the intro is over: their crypto
+     * shares this one CPU and the film needs all of it. */
     ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
     frame_at = cpuGetTiming();
@@ -348,9 +380,21 @@ int main(void)
         int ticks = 0;
         uint32_t t;
         cothread_yield_irq(IRQ_VBLANK); /* not swiWaitForVBlank: Wi-Fi runs in another thread */
+        heartbeat++;
         scanKeys();
         ok_dsi_audio_pump();
         now = time(NULL);
+        if (!threads_on && ui.scene != OK_UI_SPLASH && ui.scene != OK_UI_FILM) {
+            threads_on = 1;
+            /* OKUPA_NO_NET / NO_POSTMAN / NO_MIND: builds for measuring and
+             * for finding which thread holds the CPU. */
+#if !defined(OKUPA_NO_NET) && !defined(OKUPA_NO_POSTMAN)
+            ok_dsi_net_start();
+#endif
+#if !defined(OKUPA_NO_NET) && !defined(OKUPA_NO_MIND)
+            ok_dsi_mind_start(storage ? net_dir : NULL);
+#endif
+        }
         /* SELECT: the technical side, over the same running game. */
         if (keysDown() & KEY_SELECT) {
             tech_on = !tech_on;
