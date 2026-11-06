@@ -152,7 +152,7 @@ int main(void)
     ok_save_write(&pet, ui.drawing, saved);
 
     for (;;) {
-        swiWaitForVBlank();
+        cothread_yield_irq(IRQ_VBLANK); /* not swiWaitForVBlank: Wi-Fi runs in another thread */
         scanKeys();
         now = time(NULL);
         if (now != last) {

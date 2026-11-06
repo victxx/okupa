@@ -33,6 +33,14 @@ static struct {
 static int node_count;
 
 static void line(int i, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+/* Wait for the next frame while letting other threads run: dswifi's network
+ * stack lives in its own cooperative thread, and swiWaitForVBlank() would
+ * starve it (no packets would ever be processed). */
+static void next_frame(void)
+{
+    cothread_yield_irq(IRQ_VBLANK);
+}
+
 static const char *log_path;
 
 /* Every line also goes to a log on the SD card, closed each time, so the last
@@ -115,7 +123,7 @@ static int wait_online(void (*report)(int seconds))
     int frames;
     for (frames = 0; frames < 60 * 30; frames++) {
         int status = Wifi_AssocStatus();
-        swiWaitForVBlank();
+        next_frame();
         stir();
         if (status == ASSOCSTATUS_CANNOTCONNECT) return 0;
         if (online()) return 1;
@@ -174,7 +182,7 @@ int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void)
     Wifi_EnableWifi();
     Wifi_ScanMode();
     for (frames = 0; frames < 60 * 4; frames++) {
-        swiWaitForVBlank();
+        next_frame();
         if (frames % 30 == 0) {
             snprintf(status, 33, "Searching... %d found", Wifi_GetNumAP());
             show();
@@ -247,7 +255,7 @@ static int wait_for(int fd, short events, int ms)
         stir();
         if (rc > 0) return (p.revents & events) != 0;
         if (rc < 0) return 0;
-        swiWaitForVBlank();
+        next_frame();
     }
     return 0;
 }
@@ -416,7 +424,7 @@ static void crawl(int seconds, uint8_t fork[4])
         stir();
         if (frames++ % 30 == 0)
             line(3, "discv4 %lds: %d seen, %u Sepolia", (long)(now - start), c.count, c.found_count);
-        swiWaitForVBlank();
+        next_frame();
     }
     line(3, "discv4: %d seen, %u Sepolia", c.count, c.found_count);
     ok_wipe(c.priv, sizeof c.priv);
