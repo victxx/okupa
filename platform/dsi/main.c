@@ -1,7 +1,9 @@
 /* Okupa on the Nintendo DSi: the room on the top screen, touch below. The
  * same core and game code as the host; this file only owns the hardware. */
 #include "account.h"
+#include "audio.h"
 #include "net.h"
+#include "okupa_music.h"
 #include "okupa_checks.h"
 #include "okupa.h"
 #include "okupa_font.h"
@@ -21,7 +23,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40], net_dir[40], key_path[40], wall_path[40], sent_path[40];
+static char save_path[40], temp_path[40], net_dir[40], key_path[40], look_path[40], wall_path[40], sent_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -40,6 +42,7 @@ static void present(int top, int bottom)
 /* Redraws while a long task (the network test) runs. */
 static void show_now(void)
 {
+    ok_dsi_audio_pump();
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     ok_ui_render(shown_ui, shown_pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
@@ -61,6 +64,7 @@ static int open_storage(void)
         snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
         snprintf(net_dir, sizeof net_dir, "%sokupa/", roots[i]);
         snprintf(key_path, sizeof key_path, "%sokupa/account.key", roots[i]);
+        snprintf(look_path, sizeof look_path, "%sokupa/look.txt", roots[i]);
         snprintf(wall_path, sizeof wall_path, "%sokupa/wall.bin", roots[i]);
         snprintf(sent_path, sizeof sent_path, "%sokupa/drawing-sent.bin", roots[i]);
         return 1;
@@ -77,6 +81,29 @@ static int load_file(const char *path, ok_pet *p, uint8_t drawing[512])
     n = fread(buf, 1, sizeof buf, f);
     fclose(f);
     return ok_save_read(buf, n, p, drawing) == OK_OK;
+}
+
+/* What the okupa wears: three small numbers in a text file of its own. */
+static void load_look(ok_look *look)
+{
+    unsigned w, t, c;
+    FILE *f = fopen(look_path, "r");
+    if (!f) return;
+    if (fscanf(f, "%u %u %u", &w, &t, &c) == 3 && w < OK_WEARS && t < OK_TOPS && c < OK_COLOURS) {
+        look->wear = (uint8_t)w;
+        look->top = (uint8_t)t;
+        look->colour = (uint8_t)c;
+    }
+    fclose(f);
+}
+
+static int save_look(const ok_look *look)
+{
+    FILE *f = fopen(look_path, "w");
+    int ok;
+    if (!f) return 0;
+    ok = fprintf(f, "%u %u %u\n", look->wear, look->top, look->colour) > 0;
+    return fclose(f) == 0 && ok;
 }
 
 /* Write a new file, then swap it in. If the power goes in between, the
@@ -160,6 +187,8 @@ static void machine_facts(int checks)
 int main(void)
 {
     int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0;
+    uint32_t frame_at, late = 0, draw_us = 0;
+    ok_look worn;
     ok_tech tech;
     time_t now = time(NULL), last = now, saved_at = now;
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
@@ -190,17 +219,26 @@ int main(void)
         } else {
             save_status = "Save: new okupa on SD";
         }
+        load_look(&ui.look);
         ok_dsi_net_files(net_dir);
         load_wall(&ui);
     }
     machine_facts(0);
-    cpuStartTiming(0); /* runs for good: the checks and the network's entropy read it */
+    cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
+    ok_dsi_audio_start();
+    ok_ui_start_intro(&ui);
+    ok_dsi_audio_tune(OK_TUNE_INTRO);
     ok_dsi_net_start();
     ok_save_write(&pet, ui.drawing, saved);
+    worn = ui.look;
+    frame_at = cpuGetTiming();
 
     for (;;) {
+        int ticks = 0;
+        uint32_t t;
         cothread_yield_irq(IRQ_VBLANK); /* not swiWaitForVBlank: Wi-Fi runs in another thread */
         scanKeys();
+        ok_dsi_audio_pump();
         now = time(NULL);
         /* SELECT: the technical side, over the same running game. */
         if (keysDown() & KEY_SELECT) {
@@ -239,11 +277,31 @@ int main(void)
         if (now != last) {
             ok_pet_update(&pet, (int64_t)now);
             last = now;
+            tm = localtime(&now);
+            ok_dsi_audio_tune(ui.scene == OK_UI_SPLASH || ui.scene == OK_UI_FILM ? OK_TUNE_INTRO
+                              : pet.asleep ? OK_TUNE_SLEEP : tm->tm_hour >= 21 || tm->tm_hour < 7 ? OK_TUNE_NIGHT : OK_TUNE_DAY);
         }
-        if (ok_ui_tick(&ui)) {
-            redraw = 1;
+        /* The okupa lives in real time: one tick per 1/60 s that passed, even
+         * when drawing a frame took longer than that. */
+        t = cpuGetTiming(); /* bus clock: wraps every 128 s, the difference does not care */
+        late += t - frame_at;
+        frame_at = t;
+        while (late >= 560190 && ticks < 8) { /* one DS frame, 1/59.83 s, in bus cycles */
+            late -= 560190;
+            ticks++;
+            if (ok_ui_tick(&ui, &pet)) redraw = 1;
+        }
+        if (ticks == 8) late = 0;
+        if (ui.sound) {
+            ok_dsi_audio_sfx(ui.sound - 1);
+            ui.sound = 0;
+        }
+        if (redraw) {
             snprintf(ui.net_status, sizeof ui.net_status, "%s", ok_dsi_net_summary());
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
+            else if (ui.scene == OK_UI_DEV && ui.dev[OK_UI_DEV_LINES - 1][0])
+                snprintf(ui.dev[OK_UI_DEV_LINES - 4], sizeof ui.dev[0], "Frame: %lu.%lu ms to draw",
+                         (unsigned long)(draw_us / 1000), (unsigned long)(draw_us / 100 % 10));
             {
                 uint8_t hash[32];
                 if (ok_dsi_net_pending(hash))
@@ -354,11 +412,14 @@ int main(void)
                 }
                 saved_at = now;
             }
+            if (memcmp(&worn, &ui.look, sizeof worn) && save_look(&ui.look)) worn = ui.look;
         }
         if (redraw) {
+            uint32_t start = now_us();
             tm = localtime(&now);
             ok_ui_render(&ui, &pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
             present(top, bottom);
+            draw_us = (draw_us * 7 + (now_us() - start)) / 8;
             redraw = 0;
         }
     }
