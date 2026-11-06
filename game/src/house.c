@@ -5,7 +5,7 @@
 #define W OK_R3D_W
 #define H OK_R3D_H
 #define RGB(r, g, b) ((uint16_t)(0x8000u | (r) | ((g) << 5) | ((b) << 10)))
-#define CHARCOAL RGB(5, 5, 6)
+#define CHARCOAL RGB(2, 2, 3) /* nearly black around the attic: it floats like a diorama */
 #define DEG(d) ((d) * OK_TURN / 360)
 #define U(v) ((ok_fx)((v) * 4096 / 100)) /* hundredths of a unit */
 
@@ -22,6 +22,26 @@ static void box(int x0, int y0, int z0, int x1, int y1, int z1)
 static void blob(int x, int y, int z, int rx, int ry, int rz)
 {
     ok_r3d_ellipsoid(P(x, y, z), P(rx, ry, rz), 10, 7);
+}
+
+/* A quad cut into nu x nv smaller ones (corners counterclockwise from the
+ * front): textures stay straight in perspective, small triangles warp little. */
+static void quad_grid(ok_v3 a, ok_v3 b, ok_v3 c, ok_v3 d, int nu, int nv)
+{
+    int i, j;
+    for (j = 0; j < nv; j++)
+        for (i = 0; i < nu; i++) {
+            ok_v3 p[4];
+            int k;
+            for (k = 0; k < 4; k++) {
+                int u = i + (k == 1 || k == 2), v = j + (k >= 2);
+                /* bilinear: along a-b and d-c, then between them */
+                ok_fx x0 = a.x + (b.x - a.x) * u / nu, y0 = a.y + (b.y - a.y) * u / nu, z0 = a.z + (b.z - a.z) * u / nu;
+                ok_fx x1 = d.x + (c.x - d.x) * u / nu, y1 = d.y + (c.y - d.y) * u / nu, z1 = d.z + (c.z - d.z) * u / nu;
+                p[k] = ok_v3_make(x0 + (x1 - x0) * v / nv, y0 + (y1 - y0) * v / nv, z0 + (z1 - z0) * v / nv);
+            }
+            ok_r3d_quad(p[0], p[1], p[2], p[3]);
+        }
 }
 
 static void limb_house(int x0, int y0, int z0, int x1, int y1, int z1, int r)
@@ -209,16 +229,18 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     apply(l);
     /* Floor planks, wallpaper below the eaves, plaster above, a patch of bare brick. */
     tex(OK_ROOM_PLANKS, 4, wood, 0);
-    box(-1400, -100, -1100, 1400, 0, 1300);
+    quad_grid(P(-1400, 0, 1300), P(1400, 0, 1300), P(1400, 0, -1100), P(-1400, 0, -1100), 14, 12);
+    tex(OK_ROOM_BEAM, 6, wood, 0); /* the floor's front edge */
+    quad_grid(P(-1400, -100, 1300), P(1400, -100, 1300), P(1400, 0, 1300), P(-1400, 0, 1300), 14, 1);
     tex(OK_ROOM_WALLPAPER, 5, RGB(20, 22, 17), 0);
-    ok_r3d_quad(P(-1400, 0, -1100), P(1400, 0, -1100), P(1400, 700, -1100), P(-1400, 700, -1100));
+    quad_grid(P(-1400, 0, -1100), P(1400, 0, -1100), P(1400, 700, -1100), P(-1400, 700, -1100), 14, 4);
     tex(OK_ROOM_PLASTER, 5, RGB(24, 21, 17), 0);
-    ok_r3d_quad(P(-1400, 700, -1100), P(1400, 700, -1100), P(0, 2100, -1100), P(0, 2100, -1100));
+    quad_grid(P(-1400, 700, -1100), P(1400, 700, -1100), P(0, 2100, -1100), P(0, 2100, -1100), 8, 7);
     tex(OK_ROOM_BRICK, 7, RGB(18, 8, 6), 0);
-    ok_r3d_quad(P(380, 120, -1094), P(1150, 120, -1094), P(1250, 560, -1094), P(520, 640, -1094));
+    quad_grid(P(380, 120, -1094), P(1150, 120, -1094), P(1250, 560, -1094), P(520, 640, -1094), 4, 3);
     tex(OK_ROOM_BOARDS, 6, RGB(16, 11, 7), OK_R3D_BOTH);
-    ok_r3d_quad(P(-1400, 0, -1100), P(-1400, 700, -1100), P(-1400, 700, 1300), P(-1400, 0, 1300));
-    ok_r3d_quad(P(1400, 0, -1100), P(1400, 700, -1100), P(1400, 700, 1300), P(1400, 0, 1300));
+    quad_grid(P(-1400, 0, -1100), P(-1400, 700, -1100), P(-1400, 700, 1300), P(-1400, 0, 1300), 3, 12);
+    quad_grid(P(1400, 0, -1100), P(1400, 700, -1100), P(1400, 700, 1300), P(1400, 0, 1300), 3, 12);
     /* Skirting, beams and the ridge. */
     tex(OK_ROOM_BEAM, 8, beam_c, 0);
     box(-1400, 0, -1100, 1400, 60, -1080);
