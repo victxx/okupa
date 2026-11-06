@@ -168,7 +168,7 @@ static void string_lights(double x0, double y0, double x1, double y1, double z, 
     for (i = 1; i < n; i++) {
         double t = (double)i / n, s = 0.9 * 4 * t * (1 - t);
         uint16_t c = bulbs[i % 5];
-        if (when == DAY) c = (uint16_t)(0x8000 | ((c >> 1) & 0x3def) + RGB(8, 8, 8));
+        if (when == DAY) c = (uint16_t)(0x8000 | (((c >> 1) & 0x3def) + RGB(8, 8, 8)));
         mat(c, OK_R3D_UNLIT);
         ok_r3d_ellipsoid(V(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - s - 0.35, z + 0.2), V(0.28, 0.36, 0.28), 6, 4);
     }

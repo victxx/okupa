@@ -138,7 +138,7 @@ static void ask_body(const ok_io *io, ok_rlpx_session *s, int snappy, watcher *w
 {
     size_t len;
     w->request++;
-    if (ok_eth_get_bodies(w->request, &w->h[w->at].hash, 1, out, sizeof out, &len) == OK_OK &&
+    if (ok_eth_get_bodies(w->request, (const uint8_t(*)[32])&w->h[w->at].hash, 1, out, sizeof out, &len) == OK_OK &&
         send_message(io, s, OK_P2P_ETH_OFFSET + OK_ETH_GET_BLOCK_BODIES, out, len, snappy))
         w->waiting = 2;
     else

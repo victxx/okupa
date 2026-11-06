@@ -141,7 +141,7 @@ static void template(const char *dir)
     for (y = 0; y < S; y++)
         for (x = 0; x < S; x++) {
             uint16_t c = skin[(y / Z) * OK_SKIN + x / Z];
-            if ((x % (8 * Z) == 0) || (y % (8 * Z) == 0)) c = (uint16_t)(0x8000 | ((c >> 1) & 0x3def) + ((c >> 2) & 0x1ce7));
+            if ((x % (8 * Z) == 0) || (y % (8 * Z) == 0)) c = (uint16_t)(0x8000 | (((c >> 1) & 0x3def) + ((c >> 2) & 0x1ce7)));
             canvas[(y + 40) * CW + 8 + x] = c;
         }
     for (i = 0; i < OK_PARTS; i++) {
@@ -181,7 +181,7 @@ static void map(const char *dir)
         for (y = 0; y < p->h; y++)
             for (x = 0; x < p->w; x++) {
                 uint16_t c = hues[i];
-                if ((x / 8 + y / 8) % 2) c = (uint16_t)(0x8000 | ((c >> 1) & 0x3def) + ((c >> 2) & 0x1ce7));
+                if ((x / 8 + y / 8) % 2) c = (uint16_t)(0x8000 | (((c >> 1) & 0x3def) + ((c >> 2) & 0x1ce7)));
                 if (x == p->w / 2) c = RGB(31, 31, 31);
                 if (y < 3) c = RGB(4, 4, 4);
                 skin[(p->y + y) * OK_SKIN + p->x + x] = c;
