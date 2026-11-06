@@ -255,6 +255,12 @@ int main(void)
         assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "a house"));
         assert(strstr(fake.req_body, "Pictionary") && strstr(fake.req_body, "\"max_tokens\":16"));
         assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"guess\":\"a house\""));
+        fake.content = "A cosy little house! I want to live there!";
+        assert(ok_think_comment(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "A cosy little house! I want to live there!"));
+        assert(strstr(fake.req_body, "sent it to hang on your wall"));
+        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"comment\""));
         fake.content = "I think this might be a small cottage";
         assert(ok_think_guess(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
                OK_OK);

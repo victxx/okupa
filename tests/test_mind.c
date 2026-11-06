@@ -14,7 +14,7 @@ static ok_result parse(const char *content, ok_mind *d)
 int main(void)
 {
     static char out[8192], text[2048];
-    char memory[OK_MIND_LINE + 24];
+    char memory[OK_MIND_MEMORY];
     ok_json root, v, m;
     ok_mind_obs obs;
     ok_mind d;
@@ -77,6 +77,8 @@ int main(void)
                  "\\\"remember\\\":\\\"The player is called Victor\\\"}", &d) == OK_OK);
     assert(!strcmp(d.thought, "Who is this person?") && !strcmp(d.ask, "What is your name?"));
     assert(!strcmp(d.remember, "The player is called Victor"));
+    ok_mind_memory(&d, memory);
+    assert(!strcmp(memory, "look (asked: What is your name?)")); /* so it does not ask again */
     assert(d.x == -1 && d.z == -1 && d.gaze == -1 && d.energy == 50); /* no body given: instinct */
     assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
                  "\\\"x\\\":80,\\\"z\\\":250,\\\"gaze\\\":\\\"window\\\",\\\"energy\\\":72.5}", &d) == OK_OK);
