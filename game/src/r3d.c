@@ -57,7 +57,7 @@ static ok_v3 to_light, light_rgb, ambient_rgb;
 static xform stack[STACK];
 static int sp;
 static uint16_t tone[4];
-static int cur_id, cur_flags;
+static int cur_id, cur_flags, shadow_k;
 static vert vb[MAX_VERTS];
 static int triangles;
 static const uint16_t *tex;
@@ -227,6 +227,10 @@ void ok_r3d_material(uint16_t colour, int id, int flags)
     if ((flags & OK_R3D_TEXTURED) && !tex) flags &= ~OK_R3D_TEXTURED;
     cur_id = id & 255;
     cur_flags = flags;
+    if (flags & OK_R3D_SHADOW) { /* shadows: the colour's red is how dark (k/32), the id picks the layer */
+        shadow_k = colour & 31 ? colour & 31 : 8;
+        cur_id = 250 + (id % 5);
+    }
     if (flags & OK_R3D_EDGE) {
         uint16_t t = tone[0];
         edge_on[cur_id] = 1;
@@ -355,9 +359,11 @@ static int tone_of(int32_t l)
     return l < 1100 ? 0 : l < 2200 ? 1 : l < 3300 ? 2 : 3;
 }
 
-static uint16_t darker(uint16_t c)
+/* c times (32 - k) / 32 per channel. */
+static uint16_t shade_by(uint16_t c, int k)
 {
-    return (uint16_t)(0x8000u | ((c >> 1 & 0x3def) + (c >> 2 & 0x1ce7)));
+    int r = (c & 31) * (32 - k) / 32, g = (c >> 5 & 31) * (32 - k) / 32, b = (c >> 10 & 31) * (32 - k) / 32;
+    return (uint16_t)(0x8000u | r | g << 5 | b << 10);
 }
 
 /* Value of an attribute at the weights (wa, wb, wc), with 8 fraction bits. */
@@ -446,9 +452,9 @@ static void raster(const vert *a, const vert *b, const vert *c)
         for (; x <= x1; x++, wa += dax, wb += dbx, wc += dcx, z += dzdx, l += dldx, u += dudx, v += dvdx) {
             if ((wa | wb | wc) < 0) break;
             if ((int32_t)(z >> 8) <= zrow[x]) continue;
-            if (cur_flags & OK_R3D_SHADOW) {
-                if (irow[x] != 255) row[x] = darker(row[x]);
-                irow[x] = 255;
+            if (cur_flags & OK_R3D_SHADOW) { /* each layer darkens a pixel once; layers stack */
+                if (irow[x] != cur_id) row[x] = shade_by(row[x], shadow_k);
+                irow[x] = (uint8_t)cur_id;
                 continue;
             }
             zrow[x] = (int32_t)(z >> 8);
@@ -806,7 +812,7 @@ int32_t ok_r3d_depth_at(int x, int y)
 int ok_r3d_id_at(int x, int y)
 {
     if (x < 0 || y < 0 || x >= W || y >= H) return 0;
-    return ids[y * W + x] == 255 ? 0 : ids[y * W + x];
+    return ids[y * W + x] >= 250 ? 0 : ids[y * W + x]; /* shadows are not objects */
 }
 
 int ok_r3d_triangles(void)

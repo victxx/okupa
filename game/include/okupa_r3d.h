@@ -23,7 +23,7 @@ typedef struct {
 /* Material flags. */
 #define OK_R3D_UNLIT 1  /* its own colour, whatever the light */
 #define OK_R3D_EDGE 2   /* outlined where it stands in front of another object */
-#define OK_R3D_SHADOW 4 /* darkens what is already drawn, writes no depth */
+#define OK_R3D_SHADOW 4 /* darkens what is drawn by (red of colour)/32, once per id 0..4; layers stack */
 #define OK_R3D_BOTH 8   /* both sides visible */
 #define OK_R3D_TEXTURED 16 /* colours from the texture, lit like the rest */
 #define OK_R3D_FLAT 32 /* one light per triangle: low-poly facets */
