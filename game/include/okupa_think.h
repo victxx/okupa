@@ -20,7 +20,7 @@
  * Any failure is a safe stop: stage says where, and the okupa naps. Nothing
  * here opens sockets: the platform gives one HTTPS round trip per call. */
 
-#define OK_THINK_REQUEST 4096
+#define OK_THINK_REQUEST 6144
 #define OK_THINK_RESPONSE 32768
 #define OK_THINK_SIGNATURE 4096
 #define OK_THINK_CHAT_ID 96
@@ -76,21 +76,26 @@ typedef struct {
 
 /* now_ms: unix milliseconds. nonce: 16 fresh random bytes for the token. */
 ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
-                       const uint8_t nonce[16], const ok_pet *pet, int hour, int minute, const char *last_action,
-                       uint32_t minutes_away, ok_think_fetch_fn fetch, void *fetch_ctx);
+                       const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx);
 
 const char *ok_think_stage_name(ok_think_stage s);
 
 /* The episode of one decision as JSON (for 0G Storage): the stage, decision,
  * chat id, signer, signed text and signature, and the exact request and
- * response as JSON strings, so anyone can rebuild and re-check the hashes. */
-ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64_t now_ms, char *out, size_t cap,
-                           size_t *len);
+ * response as JSON strings, so anyone can rebuild and re-check the hashes.
+ * prev: sha256 hex of the episode before it ("" for the first), so the
+ * okupa's life is a chain anyone can walk. */
+ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64_t now_ms, const char *prev,
+                           char *out, size_t cap, size_t *len);
 
 /* An HTTPS round trip over the core's TLS for platforms that only have a
- * connected socket: rd/wr move raw bytes on it. */
+ * connected socket: rd/wr move raw bytes on it. ok_think_https opens the TLS
+ * session first; ok_think_exchange reuses one already open (keep-alive). */
 int ok_think_https(ok_tls *tls, const char *host, int64_t now, const uint8_t seed[32], ok_tls_read_fn rd,
                    ok_tls_write_fn wr, void *io, const char *req, size_t req_len, char *resp, size_t cap,
                    size_t *got);
+int ok_think_exchange(ok_tls *tls, const char *req, size_t req_len, char *resp, size_t cap, size_t *got);
+/* 0 if the server said it closes the connection after this response. */
+int ok_think_keeps_open(const char *resp, size_t n);
 
 #endif

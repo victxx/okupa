@@ -77,16 +77,22 @@ static ok_result run(ok_think_provider *p, const char *content)
     static const uint8_t device[32] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
                                        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
     static const uint8_t nonce[16] = {1, 2, 3};
+    ok_mind_obs obs;
     ok_pet pet;
     ok_pet_init(&pet, 1800000000);
+    memset(&obs, 0, sizeof obs);
+    obs.pet = &pet;
+    obs.hour = 9;
+    obs.minute = 5;
+    obs.player_did = "said hi";
     fake.content = content;
     fake.calls = 0;
-    return ok_think_run(&t, p, device, 1800000000000ull, nonce, &pet, 9, 5, "player said hi", 12, fetch, NULL);
+    return ok_think_run(&t, p, device, 1800000000000ull, nonce, &obs, fetch, NULL);
 }
 
 int main(void)
 {
-    static const char good[] = "{\\\"activity\\\":\\\"read\\\",\\\"mood\\\":\\\"curious\\\",\\\"line\\\":\\\"A new book!\\\"}";
+    static const char good[] = "{\\\"activity\\\":\\\"eat\\\",\\\"mood\\\":\\\"curious\\\",\\\"line\\\":\\\"A new book!\\\"}";
     uint8_t pub[64];
     ok_think_provider p = {"tee.example", "0x1cB95Eb66Cc67C62d4DE0CC96726C5A5d82e7C85", "0GM-1.0", {0}, 0};
     ok_json root, v;
@@ -101,20 +107,21 @@ int main(void)
     /* A verified decision: two round trips, the closed-set answer, our token. */
     run(&p, good);
     assert(t.stage == OK_THINK_DECIDED && fake.calls == 2);
-    assert(t.decision.activity == OK_ACT_READ && t.decision.mood == OK_FEEL_CURIOUS);
+    assert(t.decision.activity == OK_MIND_EAT && t.decision.mood == OK_FEEL_CURIOUS);
     assert(!strcmp(t.decision.line, "A new book!") && !strcmp(t.chat_id, "chat-abc_1"));
     assert(t.request_len == fake.req_len && !memcmp(t.request, fake.req_body, t.request_len));
     assert(!strncmp(t.request, "{\"chat_template_kwargs\":", 24)); /* keys sorted, as Go re-encodes it */
     assert(strlen(fake.last_auth) > 400);
 
     /* The episode is JSON and carries the exact bytes. */
-    assert(ok_think_episode(&t, &p, 1800000000001ull, episode, sizeof episode, &n) == OK_OK);
+    assert(ok_think_episode(&t, &p, 1800000000001ull, "ab12", episode, sizeof episode, &n) == OK_OK);
     assert(ok_json_parse(episode, n, &root) == OK_OK);
     assert(ok_json_member(&root, "request", &v) == OK_OK && ok_json_string(&v, s, sizeof s, &n) == OK_OK);
     assert(n == t.request_len && !memcmp(s, t.request, n));
     assert(ok_json_member(&root, "chat_id", &v) == OK_OK && ok_json_string(&v, s, sizeof s, &n) == OK_OK);
     assert(!strcmp(s, "chat-abc_1"));
-    assert(strstr(episode, "\"stage\":\"decided\",\"verified\":true") && strstr(episode, "\"activity\":\"read\""));
+    assert(strstr(episode, "\"prev_sha256\":\"ab12\""));
+    assert(strstr(episode, "\"stage\":\"decided\",\"verified\":true") && strstr(episode, "\"activity\":\"eat\""));
 
     /* The broker renames the model to the upstream id the response names:
      * still ours byte for byte otherwise, so it verifies. */
@@ -122,25 +129,25 @@ int main(void)
     run(&p, good);
     assert(t.stage == OK_THINK_DECIDED && !strcmp(t.upstream_model, "0GM-1.0-0427"));
     assert(strstr(t.forwarded, "\"model\":\"0GM-1.0-0427\"") && t.forwarded_len == t.request_len + 5);
-    assert(ok_think_episode(&t, &p, 1, episode, sizeof episode, &n) == OK_OK);
+    assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
     assert(strstr(episode, "\"upstream_model\":\"0GM-1.0-0427\""));
     fake.upstream = NULL;
 
     /* The wrong signer, or a signature over other bytes: refused, the okupa naps. */
     p.signer[0] ^= 1;
     run(&p, good);
-    assert(t.stage == OK_THINK_UNVERIFIED && t.decision.activity == OK_ACT_NAP && !t.decision.line[0]);
+    assert(t.stage == OK_THINK_UNVERIFIED && t.decision.activity == OK_MIND_SLEEP && !t.decision.line[0]);
     p.signer[0] ^= 1;
     fake.tamper = 1;
     run(&p, good);
     assert(t.stage == OK_THINK_UNVERIFIED);
     fake.tamper = 0;
-    assert(ok_think_episode(&t, &p, 1, episode, sizeof episode, &n) == OK_OK);
+    assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
     assert(strstr(episode, "\"verified\":false") && strstr(episode, "\"safe_stop\":true"));
 
     /* A verified answer outside the closed sets is still refused. */
     run(&p, "{\\\"activity\\\":\\\"fly\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"hi\\\"}");
-    assert(t.stage == OK_THINK_ANSWER && t.decision.activity == OK_ACT_NAP);
+    assert(t.stage == OK_THINK_ANSWER && t.decision.activity == OK_MIND_SLEEP);
 
     /* No chat id header: the completion id is used. */
     fake.no_id = 1;
@@ -155,12 +162,17 @@ int main(void)
     fake.status = 200;
     fake.fail_net = 1;
     run(&p, good);
-    assert(t.stage == OK_THINK_NET && t.net_error == 62 && t.decision.activity == OK_ACT_NAP);
+    assert(t.stage == OK_THINK_NET && t.net_error == 62 && t.decision.activity == OK_MIND_SLEEP);
     fake.fail_net = 0;
 
     /* Hosts and models that would break the URL are refused up front. */
     p.model = "a b";
     assert(run(&p, good) == OK_ARGUMENT && t.stage == OK_THINK_SETUP && fake.calls == 0);
+
+    /* Keep-alive: the connection stays unless the server says it closes. */
+    assert(ok_think_keeps_open("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", 38));
+    assert(!ok_think_keeps_open("HTTP/1.1 200 OK\r\nconnection: Close\r\n\r\n", 39));
+    assert(!ok_think_keeps_open("HTTP/1.0 200 OK\r\n\r\n", 19));
 
     printf("think: ok\n");
     return 0;

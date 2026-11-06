@@ -57,14 +57,13 @@ static ok_think_stage stop(ok_think *t, ok_think_stage s)
 {
     t->stage = s;
     memset(&t->decision, 0, sizeof t->decision);
-    t->decision.activity = OK_ACT_NAP; /* the safe stop: no answer, the okupa naps */
+    t->decision.activity = OK_MIND_SLEEP; /* the safe stop: no answer, the okupa sleeps */
     t->decision.mood = OK_FEEL_SLEEPY;
     return s;
 }
 
 ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
-                       const uint8_t nonce[16], const ok_pet *pet, int hour, int minute, const char *last_action,
-                       uint32_t minutes_away, ok_think_fetch_fn fetch, void *fetch_ctx)
+                       const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx)
 {
     static char token[640], headers[800], req[OK_THINK_REQUEST + 1024], path[256];
     ok_zerog_session s;
@@ -76,13 +75,12 @@ ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t de
     if (!t) return OK_ARGUMENT;
     memset(t, 0, sizeof *t);
     stop(t, OK_THINK_SETUP);
-    if (!p || !p->host || !p->provider || !device_key || !nonce || !pet || !fetch || !url_safe(p->host, 0) ||
+    if (!p || !p->host || !p->provider || !device_key || !nonce || !obs || !fetch || !url_safe(p->host, 0) ||
         !url_safe(p->model, 1))
         return OK_ARGUMENT;
     ok_keys_checksum(p->signer, t->signer);
 
-    if (ok_mind_request(p->model, pet, hour, minute, last_action, minutes_away, t->request, sizeof t->request,
-                        &t->request_len) != OK_OK)
+    if (ok_mind_request(p->model, obs, t->request, sizeof t->request, &t->request_len) != OK_OK)
         return OK_RANGE;
     s.provider = p->provider;
     s.timestamp_ms = now_ms;
@@ -93,8 +91,8 @@ ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t de
     if (ok_zerog_token(device_key, &s, token, sizeof token, &n) != OK_OK) return OK_CRYPTO;
     snprintf(headers, sizeof headers, "Content-Type: application/json\r\nAuthorization: Bearer %s\r\n", token);
     ok_wipe(token, sizeof token);
-    if (ok_http_request("POST", p->host, "/v1/proxy/chat/completions", headers, t->request, t->request_len, req,
-                        sizeof req, &n) != OK_OK)
+    if (ok_http_request_alive("POST", p->host, "/v1/proxy/chat/completions", headers, t->request, t->request_len,
+                              req, sizeof req, &n) != OK_OK)
         return OK_RANGE;
     ok_wipe(headers, sizeof headers);
 
@@ -135,7 +133,7 @@ ok_result ok_think_run(ok_think *t, const ok_think_provider *p, const uint8_t de
 
     /* 2. The TEE's signature for this chat id. */
     snprintf(path, sizeof path, "/v1/proxy/signature/%s?model=%s", t->chat_id, p->model);
-    if (ok_http_request("GET", p->host, path, NULL, NULL, 0, req, sizeof req, &n) != OK_OK) return OK_RANGE;
+    if (ok_http_request_alive("GET", p->host, path, NULL, NULL, 0, req, sizeof req, &n) != OK_OK) return OK_RANGE;
     e = fetch(fetch_ctx, p->host, req, n, t->sigwire, sizeof t->sigwire - 1, &got);
     if (e || ok_http_response_read(t->sigwire, got, &r, &body) != OK_OK || r.status != 200) {
         t->net_error = e;
@@ -198,13 +196,13 @@ static int put(char *out, size_t cap, size_t *o, const char *s)
     return 1;
 }
 
-ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64_t now_ms, char *out, size_t cap,
-                           size_t *len)
+ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64_t now_ms, const char *prev,
+                           char *out, size_t cap, size_t *len)
 {
     char head[256];
     size_t o = 0;
     int decided;
-    if (!t || !p || !out || !len) return OK_ARGUMENT;
+    if (!t || !p || !prev || !out || !len) return OK_ARGUMENT;
     decided = t->stage == OK_THINK_DECIDED;
     snprintf(head, sizeof head, "{\"okupa_episode\":1,\"time_ms\":%llu,\"stage\":\"%s\",\"verified\":%s,\"http\":%d,",
              (unsigned long long)now_ms, ok_think_stage_name(t->stage),
@@ -212,7 +210,8 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
     if (!put(out, cap, &o, head) || !put(out, cap, &o, "\"provider\":") ||
         !put_str(out, cap, &o, p->provider, strlen(p->provider)) || !put(out, cap, &o, ",\"model\":") ||
         !put_str(out, cap, &o, p->model, strlen(p->model)) || !put(out, cap, &o, ",\"tee_signer\":") ||
-        !put_str(out, cap, &o, t->signer, strlen(t->signer)) || !put(out, cap, &o, ",\"upstream_model\":") ||
+        !put_str(out, cap, &o, t->signer, strlen(t->signer)) || !put(out, cap, &o, ",\"prev_sha256\":") || !put_str(out, cap, &o, prev, strlen(prev)) ||
+        !put(out, cap, &o, ",\"upstream_model\":") ||
         !put_str(out, cap, &o, t->upstream_model, strlen(t->upstream_model)) || !put(out, cap, &o, ",\"chat_id\":") ||
         !put_str(out, cap, &o, t->chat_id, strlen(t->chat_id)) || !put(out, cap, &o, ",\"decision\":"))
         return OK_RANGE;
@@ -225,7 +224,7 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
             !put(out, cap, &o, ",\"line\":") || !put_str(out, cap, &o, t->decision.line, strlen(t->decision.line)) ||
             !put(out, cap, &o, "}"))
             return OK_RANGE;
-    } else if (!put(out, cap, &o, "{\"activity\":\"nap\",\"safe_stop\":true}")) {
+    } else if (!put(out, cap, &o, "{\"activity\":\"sleep\",\"safe_stop\":true}")) {
         return OK_RANGE;
     }
     if (!put(out, cap, &o, ",\"signed_text\":") || !put_str(out, cap, &o, t->text, strlen(t->text)) ||
@@ -266,13 +265,10 @@ static int complete(char *buf, size_t n)
     return n - (size_t)(end - buf) - 4 >= want;
 }
 
-int ok_think_https(ok_tls *tls, const char *host, int64_t now, const uint8_t seed[32], ok_tls_read_fn rd,
-                   ok_tls_write_fn wr, void *io, const char *req, size_t req_len, char *resp, size_t cap,
-                   size_t *got)
+int ok_think_exchange(ok_tls *tls, const char *req, size_t req_len, char *resp, size_t cap, size_t *got)
 {
     size_t n;
     *got = 0;
-    ok_tls_open(tls, host, now, seed, 32, rd, wr, io);
     if (ok_tls_write(tls, req, req_len) != OK_OK) return ok_tls_error(tls) ? ok_tls_error(tls) : -1;
     while (*got < cap) {
         if (ok_tls_read(tls, resp + *got, cap - *got, &n) != OK_OK || n == 0) break; /* closed */
@@ -282,4 +278,26 @@ int ok_think_https(ok_tls *tls, const char *host, int64_t now, const uint8_t see
     if (!*got) return ok_tls_error(tls) ? ok_tls_error(tls) : -1;
     resp[*got] = 0; /* cap leaves room for it */
     return 0;
+}
+
+int ok_think_https(ok_tls *tls, const char *host, int64_t now, const uint8_t seed[32], ok_tls_read_fn rd,
+                   ok_tls_write_fn wr, void *io, const char *req, size_t req_len, char *resp, size_t cap,
+                   size_t *got)
+{
+    ok_tls_open(tls, host, now, seed, 32, rd, wr, io);
+    return ok_think_exchange(tls, req, req_len, resp, cap, got);
+}
+
+int ok_think_keeps_open(const char *resp, size_t n)
+{
+    ok_http_response r;
+    char value[32];
+    const char *end = find(resp, n, "\r\n\r\n");
+    size_t i;
+    if (!end || n < 12 || memcmp(resp, "HTTP/1.1", 8)) return 0;
+    r.headers = resp;
+    r.headers_len = (size_t)(end - resp) + 2;
+    if (ok_http_header(&r, "Connection", value, sizeof value) != OK_OK) return 1;
+    for (i = 0; value[i]; i++) value[i] = (char)(value[i] >= 'A' && value[i] <= 'Z' ? value[i] + 32 : value[i]);
+    return strcmp(value, "close") != 0;
 }

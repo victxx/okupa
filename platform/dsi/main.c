@@ -93,7 +93,8 @@ static int save(const ok_pet *p, const uint8_t drawing[512])
 int main(void)
 {
     int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, show_mind = 0;
-    time_t now = time(NULL), last = now, saved_at = now;
+    time_t now = time(NULL), last = now, saved_at = now, last_input = now;
+    static ok_mind thought; /* the mind's latest decision; ui.say points into it */
     uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
@@ -125,6 +126,8 @@ int main(void)
     }
     cpuStartTiming(0); /* runs for good: the checks and the network's entropy read it */
     ok_dsi_net_start();
+    ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
+    ok_dsi_mind_start(storage ? net_dir : NULL);
     ok_save_write(&pet, ui.drawing, saved);
 
     for (;;) {
@@ -141,18 +144,20 @@ int main(void)
             if (show_net && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_net_lines(), sizeof ui.dev);
             if (show_mind && ui.scene == OK_UI_DEV) memcpy(ui.dev, ok_dsi_mind_lines(), sizeof ui.dev);
         }
-        /* Y on the Dev screen: one decision of the okupa's mind on 0G. */
-        if (ui.scene == OK_UI_DEV && (keysDown() & KEY_Y) && !ok_dsi_mind_busy()) {
-            ok_dsi_mind_start(storage ? net_dir : NULL, &pet);
+        /* The okupa's mind on 0G lives in its own thread: tell it what the
+         * okupa notices, take what it decided. Y on the Dev screen shows it
+         * and pauses or resumes it. */
+        if (keysDown() || (keysHeld() & KEY_TOUCH)) last_input = now;
+        ok_dsi_mind_observe(&pet, 0, (uint32_t)(now - last_input),
+                            (keysDown() & KEY_TOUCH) ? "touched the screen" : NULL);
+        if (ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
+            if (show_mind) ok_dsi_mind_toggle();
             show_mind = 1;
             show_net = 0;
         }
-        {
-            const char *thought = ok_dsi_mind_take_line();
-            if (thought) {
-                ui.say = thought;
-                ui.say_ticks = 60 * 8;
-            }
+        if (ok_dsi_mind_take(&thought) && thought.line[0]) {
+            ui.say = thought.line;
+            ui.say_ticks = 60 * 5;
         }
         if (keysHeld() & KEY_TOUCH) {
             int r;

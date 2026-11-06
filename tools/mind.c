@@ -2,13 +2,18 @@
  * request from a pet state, a 0G Direct token signed by the given key, HTTPS
  * with our TLS, the TEE signature fetched and checked, the closed-set answer.
  * Only the socket, the clock and the entropy live here.
- *   build/okupa-mind <host> <provider 0x..> <model> <tee signer 0x..> <key file> [out dir]
- * The key must own the 0G ledger that pays the provider. Exit 0 only for a
- * verified decision; anything else is a safe stop (the okupa naps). */
+ *   build/okupa-mind <host> <provider 0x..> <model> <tee signer 0x..> <key file> [out dir] [decisions]
+ * With several decisions it lives for a while: each one remembers the last
+ * few, one TLS connection is kept open between them, and the episodes are
+ * chained by hash (episode-N.json). The key must own the 0G ledger that pays
+ * the provider. Exit 0 only if every decision was verified; anything else is
+ * a safe stop (the okupa sleeps). */
 #define _POSIX_C_SOURCE 200809L /* getaddrinfo with -std=c99 */
+#include "okupa_sha256.h"
 #include "okupa_think.h"
 #include <netdb.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -35,30 +40,57 @@ static int entropy(uint8_t *out, size_t n)
     return ok;
 }
 
-/* One HTTPS round trip on a fresh connection. */
-static int fetch(void *ctx, const char *host, const char *req, size_t n, char *resp, size_t cap, size_t *got)
+/* One HTTPS round trip, on the connection left open by the last one when
+ * the server keeps it (a stale one is reopened once). */
+static int fd = -1;
+static char open_host[128];
+
+static void hang_up(void)
 {
-    static ok_tls tls;
+    if (fd >= 0) close(fd);
+    fd = -1;
+}
+
+static int dial(const char *host)
+{
     struct addrinfo hints, *ai;
     struct timeval tv = {60, 0};
-    uint8_t seed[32];
-    int fd, e;
-    (void)ctx;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host, "443", &hints, &ai)) return -2;
     fd = socket(AF_INET, SOCK_STREAM, 0);
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     if (fd < 0 || connect(fd, ai->ai_addr, ai->ai_addrlen)) {
         freeaddrinfo(ai);
-        if (fd >= 0) close(fd);
+        hang_up();
         return -3;
     }
     freeaddrinfo(ai);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    snprintf(open_host, sizeof open_host, "%s", host);
+    return 0;
+}
+
+static int fetch(void *ctx, const char *host, const char *req, size_t n, char *resp, size_t cap, size_t *got)
+{
+    static ok_tls tls;
+    uint8_t seed[32];
+    int e, reused = fd >= 0 && !strcmp(open_host, host);
+    (void)ctx;
+    if (reused) {
+        e = ok_think_exchange(&tls, req, n, resp, cap, got);
+        if (!e && ok_think_keeps_open(resp, *got)) return 0;
+        if (!e) {
+            hang_up();
+            return 0;
+        }
+        hang_up(); /* the server dropped the idle connection: once more, fresh */
+    }
+    hang_up();
+    if ((e = dial(host))) return e;
     if (!entropy(seed, sizeof seed)) return -4;
     e = ok_think_https(&tls, host, (int64_t)time(NULL), seed, sock_read, sock_write, &fd, req, n, resp, cap, got);
-    close(fd);
+    if (e || !ok_think_keeps_open(resp, *got)) hang_up();
     return e;
 }
 
@@ -86,23 +118,32 @@ static void save(const char *dir, const char *name, const char *data, size_t n)
     }
 }
 
+static double seconds(void)
+{
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    return (double)now.tv_sec + (double)now.tv_usec / 1e6;
+}
+
 int main(int argc, char **argv)
 {
     static ok_think t;
-    static char episode[65536];
-    char keyhex[80], sig[160];
-    uint8_t key[32], nonce[16];
+    static char episode[65536], memory[OK_MIND_RECENT][OK_MIND_LINE + 24];
+    char keyhex[80], prev[65] = "", name[48];
+    uint8_t key[32], nonce[16], hash[32];
     ok_think_provider p;
+    ok_mind_obs obs;
     ok_pet pet;
-    struct timeval now;
     struct tm local;
     time_t sec;
     size_t n;
     FILE *f;
     ok_result r;
+    int count = argc > 7 ? atoi(argv[7]) : 1, i, j, verified = 0;
+    double t0;
 
-    if (argc < 6) {
-        fprintf(stderr, "usage: okupa-mind <host> <provider> <model> <tee signer> <key file> [out dir]\n");
+    if (argc < 6 || count < 1 || count > 500) {
+        fprintf(stderr, "usage: okupa-mind <host> <provider> <model> <tee signer> <key file> [out dir] [decisions]\n");
         return 2;
     }
     p.host = argv[1];
@@ -119,40 +160,63 @@ int main(int argc, char **argv)
     }
     fclose(f);
     keyhex[strcspn(keyhex, "\r\n")] = 0;
-    if (!unhex(keyhex, key, 32) || !entropy(nonce, sizeof nonce)) return 2;
+    if (!unhex(keyhex, key, 32)) return 2;
     ok_wipe(keyhex, sizeof keyhex);
 
-    gettimeofday(&now, NULL);
-    sec = now.tv_sec;
-    localtime_r(&sec, &local);
+    sec = time(NULL);
     ok_pet_init(&pet, (int64_t)sec - 4 * 3600); /* a few hours since the last visit */
-    ok_pet_update(&pet, (int64_t)sec);
-    r = ok_think_run(&t, &p, key, (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_usec / 1000u, nonce, &pet,
-                     local.tm_hour, local.tm_min, "player opened the lid", 240, fetch, NULL);
+    memset(&obs, 0, sizeof obs);
+    obs.pet = &pet;
+    obs.player_did = "opened the lid";
+    for (i = 0; i < count; i++) {
+        sec = time(NULL);
+        localtime_r(&sec, &local);
+        ok_pet_update(&pet, (int64_t)sec);
+        obs.hour = local.tm_hour;
+        obs.minute = local.tm_min;
+        obs.seconds_since_player = (uint32_t)(i * 5);
+        if (i) obs.player_did = NULL;
+        if (!entropy(nonce, sizeof nonce)) return 2;
+        t0 = seconds();
+        r = ok_think_run(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, &obs, fetch, NULL);
+        if (r != OK_OK) {
+            fprintf(stderr, "okupa-mind: setup failed (%s); the okupa sleeps\n", ok_result_name(r));
+            ok_wipe(key, sizeof key);
+            return 1;
+        }
+        printf("%3d %5.2fs %-10s %-36s ", i + 1, seconds() - t0, ok_think_stage_name(t.stage),
+               t.chat_id[0] ? t.chat_id : "-");
+        if (t.stage == OK_THINK_DECIDED) {
+            verified++;
+            printf("VERIFIED %s / %s \"%s\"\n", ok_mind_activity_name(t.decision.activity),
+                   ok_mind_mood_name(t.decision.mood), t.decision.line);
+            /* It remembers what it just did, newest first. */
+            for (j = OK_MIND_RECENT - 1; j > 0; j--) memcpy(memory[j], memory[j - 1], sizeof memory[0]);
+            ok_mind_memory(&t.decision, memory[0]);
+            if (obs.recent_count < OK_MIND_RECENT) obs.recent_count++;
+            for (j = 0; j < obs.recent_count; j++) obs.recent[j] = memory[j];
+        } else {
+            printf("safe stop, the okupa sleeps (http %d, net %d)\n", t.http_status, t.net_error);
+            if (t.response_len) printf("    %.*s\n", (int)(t.response_len > 300 ? 300 : t.response_len), t.response);
+        }
+        if (argc > 6 && ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) ==
+                            OK_OK) {
+            if (count == 1) {
+                save(argv[6], "request.json", t.request, t.request_len);
+                if (t.response) save(argv[6], "response.json", t.response, t.response_len);
+                if (t.signature[0]) save(argv[6], "signature.hex", t.signature, strlen(t.signature));
+                if (t.text[0]) save(argv[6], "signed_text.txt", t.text, strlen(t.text));
+                save(argv[6], "episode.json", episode, n);
+            } else {
+                snprintf(name, sizeof name, "episode-%03d.json", i + 1);
+                save(argv[6], name, episode, n);
+            }
+            ok_sha256(episode, n, hash);
+            for (j = 0; j < 32; j++) snprintf(prev + 2 * j, 3, "%02x", hash[j]);
+        }
+    }
     ok_wipe(key, sizeof key);
-    if (r != OK_OK) {
-        fprintf(stderr, "okupa-mind: setup failed (%s); the okupa naps\n", ok_result_name(r));
-        return 1;
-    }
-    printf("stage %s, http %d, net error %d\n", ok_think_stage_name(t.stage), t.http_status, t.net_error);
-    printf("chat id (request id) %s\n", t.chat_id[0] ? t.chat_id : "-");
-    printf("tee signer %s\n", t.signer);
-    if (t.stage == OK_THINK_DECIDED)
-        printf("VERIFIED decision: activity %s, mood %s, line \"%s\"\n", ok_mind_activity_name(t.decision.activity),
-               ok_mind_mood_name(t.decision.mood), t.decision.line);
-    else
-        printf("safe stop: the okupa naps (no verified answer)\n");
-    if (t.response_len) printf("response: %.*s\n", (int)(t.response_len > 400 ? 400 : t.response_len), t.response);
-
-    if (argc > 6) {
-        save(argv[6], "request.json", t.request, t.request_len);
-        if (t.response) save(argv[6], "response.json", t.response, t.response_len);
-        n = (size_t)snprintf(sig, sizeof sig, "%s", t.signature);
-        if (n) save(argv[6], "signature.hex", sig, n);
-        if (t.text[0]) save(argv[6], "signed_text.txt", t.text, strlen(t.text));
-        if (ok_think_episode(&t, &p, (uint64_t)time(NULL) * 1000u, episode, sizeof episode, &n) == OK_OK)
-            save(argv[6], "episode.json", episode, n);
-        printf("saved to %s\n", argv[6]);
-    }
-    return t.stage == OK_THINK_DECIDED ? 0 : 1;
+    hang_up();
+    printf("tee signer %s; %d of %d verified\n", t.signer, verified, count);
+    return verified == count ? 0 : 1;
 }
