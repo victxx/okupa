@@ -10,6 +10,7 @@
 
 #define OK_FACTS_PEERS 8 /* the last dial attempts, newest first */
 #define OK_FACTS_BLOCKS 4
+#define OK_FACTS_LOG 32
 
 typedef struct {
     uint8_t ip[4];
@@ -17,7 +18,7 @@ typedef struct {
     uint8_t pub[8];      /* first bytes of the node id */
     int stage;           /* OK_STAGE_* reached (okupa_session.h) */
     int disconnect;      /* devp2p reason (4 = too many peers), -1 none */
-    char client[40];     /* from their Hello, e.g. "Geth/v1.16.7-stable/linux-amd64/go1.24" */
+    char client[48];     /* from their Hello, e.g. "Geth/v1.16.7-stable/linux-amd64/go1.24" */
     uint32_t ms_tcp, ms_rlpx, ms_hello, ms_status; /* time to reach each step */
     uint64_t latest;     /* their head, from eth/69 Status */
     uint8_t latest_hash[32];
@@ -91,14 +92,31 @@ typedef struct {
     /* The machine. */
     int dsi_mode;            /* 133 MHz DSi mode */
     uint32_t heap_used, heap_free, code_size;
-    uint32_t us_keccak, us_ecdh, us_sign_check, us_recover; /* from the core checks */
+    char checks[10][33];     /* the core's timed known-answer checks, run on this console */
+    int checks_n;
     char build[24];
     char ssid[33];
     uint8_t ip[4];
     int rssi;
+
+    /* What just happened, newest last: a live feed for the screens. */
+    struct {
+        uint32_t t;   /* seconds since the console started */
+        char src;     /* 'E' Ethereum, 'G' 0G, 'D' the DSi itself */
+        char text[40];
+    } log[OK_FACTS_LOG];
+    uint32_t log_count; /* entries ever written; the ring keeps the last OK_FACTS_LOG */
 } ok_facts;
 
 /* The one record, owned by the platform. */
 extern ok_facts ok_facts_now;
+
+/* Adds a line to the live feed. now is seconds since start (any clock that
+ * only moves forward). */
+void ok_facts_log(uint32_t now, char src, const char *fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 3, 4)))
+#endif
+    ;
 
 #endif

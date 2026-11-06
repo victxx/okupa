@@ -43,5 +43,11 @@ int main(void)
     strcpy(buf, "HTTP/1.1 200 OK\r\nContent-Length: 12x\r\n\r\n");
     assert(ok_http_response_read(buf, strlen(buf), &r, &body) == OK_FORMAT);
     puts("http: request bytes, Content-Length and chunked bodies, headers by name, partial reads");
+    {
+        static char keep[256];
+        size_t kn;
+        assert(ok_http_request_alive("GET", "a.example", "/x", NULL, NULL, 0, keep, sizeof keep, &kn) == OK_OK);
+        assert(strstr(keep, "\r\nConnection: keep-alive\r\n") && !strstr(keep, "close"));
+    }
     return 0;
 }

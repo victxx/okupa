@@ -9,14 +9,19 @@ BUILD_ID ?= unknown
 
 SECP := third_party/secp256k1
 BEAR := third_party/bearssl
-CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/font.c game/src/checks.c game/src/save.c game/src/mind.c game/src/facts.c third_party/qrcodegen/qrcodegen.c \
-        third_party/tiny_sha3/sha3.c platform/dsi/main.c platform/dsi/net.c platform/dsi/account.c
+CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/mind.c game/src/think.c game/src/facts.c game/src/tech.c third_party/qrcodegen/qrcodegen.c \
+        third_party/tiny_sha3/sha3.c platform/dsi/main.c platform/dsi/net.c platform/dsi/account.c platform/dsi/audio.c platform/dsi/mind.c game/src/music.c
 SECP_SRC := $(SECP)/src/secp256k1.c $(SECP)/src/precomputed_ecmult.c $(SECP)/src/precomputed_ecmult_gen.c
 BEAR_SRC := $(shell find $(BEAR)/src -name '*.c')
 CORE_OBJ := $(addprefix $(OUT)/obj/,$(CORE:.c=.o))
 LIB_OBJ := $(addprefix $(OUT)/obj/,$(SECP_SRC:.c=.o) $(BEAR_SRC:.c=.o))
 
 ARCH := -mthumb -mcpu=arm946e-s+nofp
+# Hot code in ARM mode: Thumb on the ARM946 has no 32x32->64 multiply, so
+# every 64-bit product (the renderer, the synth, the crypto) becomes a call.
+ARM_MODE_OBJ := $(addprefix $(OUT)/obj/,game/src/r3d.o game/src/monkey.o game/src/house.o game/src/music.o game/src/intro.o \
+                game/src/ui.o game/src/icons.o core/src/keccak.o core/src/sha256.o core/src/aes.o) $(LIB_OBJ)
+$(ARM_MODE_OBJ): MODE := -marm
 SPECS := $(BLOCKSDS)/sys/crts/ds_arm9.specs
 # Smaller libsecp256k1 tables for a 4 MB-era machine; same results, a bit slower.
 SECP_DEFS := -DENABLE_MODULE_RECOVERY=1 -DENABLE_MODULE_ECDH=1 -DECMULT_WINDOW_SIZE=5 \
@@ -40,7 +45,7 @@ $(OUT)/okupa.nds: $(OUT)/okupa.elf
 
 $(OUT)/obj/$(SECP)/%.o: $(SECP)/%.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -I$(SECP)/src $(SECP_DEFS) $(filter-out -Wextra -Werror,$(CFLAGS)) -Wno-unused-function -c -o $@ $<
+	$(CC) $(CPPFLAGS) -I$(SECP)/src $(SECP_DEFS) $(filter-out -Wextra -Werror,$(CFLAGS)) $(MODE) -Wno-unused-function -c -o $@ $<
 
 # Third-party code compiled as upstream ships it, without our -Werror.
 $(OUT)/obj/third_party/qrcodegen/%.o: third_party/qrcodegen/%.c
@@ -49,8 +54,8 @@ $(OUT)/obj/third_party/qrcodegen/%.o: third_party/qrcodegen/%.c
 
 $(OUT)/obj/$(BEAR)/%.o: $(BEAR)/%.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -I$(BEAR)/src $(filter-out -Wextra -Werror,$(CFLAGS)) -c -o $@ $<
+	$(CC) $(CPPFLAGS) -I$(BEAR)/src $(filter-out -Wextra -Werror,$(CFLAGS)) $(MODE) -c -o $@ $<
 
 $(OUT)/obj/%.o: %.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(MODE) -c -o $@ $<
