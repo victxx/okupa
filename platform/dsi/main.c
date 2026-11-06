@@ -1,5 +1,6 @@
 /* Okupa on the Nintendo DSi: the room on the top screen, touch below. The
  * same core and game code as the host; this file only owns the hardware. */
+#include "account.h"
 #include "net.h"
 #include "okupa_checks.h"
 #include "okupa.h"
@@ -16,7 +17,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40], net_dir[40];
+static char save_path[40], temp_path[40], net_dir[40], key_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -55,6 +56,7 @@ static int open_storage(void)
         snprintf(save_path, sizeof save_path, "%sokupa/save.bin", roots[i]);
         snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
         snprintf(net_dir, sizeof net_dir, "%sokupa/", roots[i]);
+        snprintf(key_path, sizeof key_path, "%sokupa/account.key", roots[i]);
         return 1;
     }
     return 0;
@@ -165,6 +167,11 @@ int main(void)
                 ok_wipe(ui.password, sizeof ui.password);
                 ui.password_len = 0;
             }
+            if (r == OK_UI_WALLET_OPEN) {
+                snprintf(ui.wallet_network, sizeof ui.wallet_network, "%s", ok_dsi_net_name());
+                ok_dsi_account_open(storage ? key_path : NULL, &ui);
+            }
+            if (r == OK_UI_WALLET_SCRIBBLE) ok_dsi_account_scribble(touch.px, touch.py, &ui);
             if (r == OK_UI_RUN_NETWORK) show_net = 1; /* the postman is always running: just show it */
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {

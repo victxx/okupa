@@ -245,12 +245,48 @@ static void dev(frame f, const uint8_t (*font)[8], const ok_ui *u)
     int i;
     centred(f, font, 128, 6, "Dev: the core on this console", PAPER, 1);
     for (i = 0; i < OK_UI_DEV_LINES; i++) text(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
-    frame_box(f, 6, 166, 80, 22, PAPER, INK);
-    centred(f, font, 46, 173, "Network", INK, 1);
-    frame_box(f, 92, 166, 78, 22, PAPER, INK);
-    centred(f, font, 131, 173, "Wi-Fi", INK, 1);
-    frame_box(f, 176, 166, 74, 22, PAPER, INK);
-    centred(f, font, 213, 173, "Back", INK, 1);
+    frame_box(f, 4, 166, 60, 22, PAPER, INK);
+    centred(f, font, 34, 173, "Net", INK, 1);
+    frame_box(f, 66, 166, 58, 22, PAPER, INK);
+    centred(f, font, 95, 173, "Wi-Fi", INK, 1);
+    frame_box(f, 126, 166, 62, 22, PAPER, INK);
+    centred(f, font, 157, 173, "Wallet", INK, 1);
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, "Back", INK, 1);
+}
+
+/* The console's wallet: scribble to create the key, then its address. */
+#define SCRIBBLE_X 8
+#define SCRIBBLE_Y 30
+#define SCRIBBLE_W 240
+#define SCRIBBLE_H 100
+static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    char head[33];
+    snprintf(head, sizeof head, "Wallet (%.10s)", u->wallet_network[0] ? u->wallet_network : "mainnet");
+    centred(f, font, 128, 6, head, PAPER, 1);
+    if (!u->wallet_ready) {
+        frame_box(f, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H, PAPER, INK);
+        centred(f, font, 128, SCRIBBLE_Y + 40, "Scribble here", MUTED, 1);
+        centred(f, font, 128, SCRIBBLE_Y + 54, "to make the key", MUTED, 1);
+        frame_box(f, 8, 138, 240, 12, RGB(24, 23, 21), INK);
+        rect(f, 10, 140, 236 * (u->wallet_progress > 100 ? 100 : u->wallet_progress) / 100, 8, RGB(9, 22, 10));
+        centred(f, font, 128, 154, "Your strokes are its randomness", PAPER, 1);
+    } else {
+        char a[23], b[21];
+        snprintf(a, sizeof a, "%.22s", u->wallet_address);
+        snprintf(b, sizeof b, "%.20s", u->wallet_address + 22);
+        frame_box(f, 8, 30, 240, 40, PAPER, INK);
+        centred(f, font, 128, 38, a, INK, 1);
+        centred(f, font, 128, 52, b, INK, 1);
+        centred(f, font, 128, 84, "This address is the okupa.", PAPER, 1);
+        centred(f, font, 128, 96, "Its key never leaves", PAPER, 1);
+        centred(f, font, 128, 108, "this console.", PAPER, 1);
+        centred(f, font, 128, 130, "Send a little ETH here", PAPER, 1);
+        centred(f, font, 128, 142, "to let it write.", PAPER, 1);
+    }
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, "Back", INK, 1);
 }
 
 /* Wi-Fi list: one row per network, strongest first. */
@@ -332,6 +368,9 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
     } else if (u->scene == OK_UI_PASSWORD) {
         password(bottom, font, u);
         bubble(top, font, "Psst. I won't peek.");
+    } else if (u->scene == OK_UI_WALLET) {
+        wallet(bottom, font, u);
+        bubble(top, font, u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!");
     } else {
         home_buttons(bottom, font, u, p);
     }
@@ -410,14 +449,24 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         }
         return OK_UI_NOTHING;
     }
+    if (u->scene == OK_UI_WALLET) {
+        if (!u->wallet_ready && inside(x, y, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H)) return OK_UI_WALLET_SCRIBBLE;
+        if (held || !inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;
+        u->scene = OK_UI_DEV;
+        return OK_UI_CHANGED;
+    }
     if (held) return OK_UI_NOTHING;
     if (u->scene == OK_UI_DEV) {
-        if (inside(x, y, 6, 166, 80, 22)) return OK_UI_RUN_NETWORK;
-        if (inside(x, y, 92, 166, 78, 22)) {
+        if (inside(x, y, 4, 166, 60, 22)) return OK_UI_RUN_NETWORK;
+        if (inside(x, y, 66, 166, 58, 22)) {
             u->scene = OK_UI_WIFI;
             return OK_UI_WIFI_SCAN;
         }
-        if (!inside(x, y, 176, 166, 74, 22)) return OK_UI_NOTHING;
+        if (inside(x, y, 126, 166, 62, 22)) {
+            u->scene = OK_UI_WALLET;
+            return OK_UI_WALLET_OPEN;
+        }
+        if (!inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;
         u->scene = OK_UI_HOME;
         return OK_UI_CHANGED;
     }

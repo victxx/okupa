@@ -8,8 +8,9 @@
  * set) by plain C, so the DSi, the host preview and later a phone share it. */
 #define OK_UI_W 256
 #define OK_UI_H 192
-enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD };
-enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT };
+enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET };
+enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
+       OK_UI_WALLET_SCRIBBLE };
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
 
@@ -37,6 +38,10 @@ typedef struct {
     int password_len, keys; /* keys: 0 lower case, 1 upper case, 2 symbols */
     char wifi_status[33];
     char net_status[33]; /* the platform's one-line network state, shown at home */
+    /* The console's own account: the platform creates the key from the
+     * player's scribbles (wallet_progress 0..100) and fills in the address. */
+    int wallet_ready, wallet_progress;
+    char wallet_address[43], wallet_network[12];
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);
