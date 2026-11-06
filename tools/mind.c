@@ -12,6 +12,7 @@
  * a safe stop (the okupa sleeps). */
 #define _POSIX_C_SOURCE 200809L /* getaddrinfo with -std=c99 */
 #include "okupa_sha256.h"
+#include "okupa_act.h"
 #include "okupa_think.h"
 #include <netdb.h>
 #include <stdio.h>
@@ -150,7 +151,8 @@ int main(int argc, char **argv)
                             : NULL;
     double t0;
 
-    if (sense || (argc > 7 && (!strcmp(argv[7], "plan") || !strcmp(argv[7], "diary") || !strncmp(argv[7], "dream=", 6))))
+    if (sense || (argc > 7 && (!strcmp(argv[7], "plan") || !strcmp(argv[7], "diary") || !strncmp(argv[7], "dream=", 6) ||
+                   !strncmp(argv[7], "make=", 5) || !strncmp(argv[7], "draw=", 5))))
         count = 1;
     if (argc < 6 || count < 1 || count > 500) {
         fprintf(stderr, "usage: okupa-mind <host> <provider> <model> <tee signer> <key file> [out dir] [decisions]\n");
@@ -202,6 +204,32 @@ int main(int argc, char **argv)
         return t.stage == OK_THINK_DECIDED ? 0 : 1;
     }
 
+    if (argc > 7 && (!strncmp(argv[7], "make=", 5) || !strncmp(argv[7], "draw=", 5))) { /* things it makes */
+        int make = argv[7][0] == 'm', b, x, y;
+        if (!entropy(nonce, sizeof nonce)) return 2;
+        t0 = seconds();
+        r = make ? ok_think_make(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, argv[7] + 5, fetch, NULL)
+                 : ok_think_draw(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, argv[7] + 5, fetch, NULL);
+        ok_wipe(key, sizeof key);
+        hang_up();
+        if (r != OK_OK) return 1;
+        printf("%s %.2fs %s %s signer %s\n", t.kind, seconds() - t0, ok_think_stage_name(t.stage), t.chat_id, t.recovered);
+        if (t.stage == OK_THINK_DECIDED && make) {
+            printf("VERIFIED object \"%s\", %d boxes:\n", t.object.name, t.object.count);
+            for (b = 0; b < t.object.count; b++)
+                printf("   [%2u %2u %2u  %2u %2u %2u] %s\n", t.object.box[b][0], t.object.box[b][1], t.object.box[b][2],
+                       t.object.box[b][3], t.object.box[b][4], t.object.box[b][5], ok_make_colour_name(t.object.box[b][6]));
+        } else if (t.stage == OK_THINK_DECIDED) {
+            printf("VERIFIED drawing \"%s\":\n", t.drawing_name);
+            for (y = 0; y < 64; y += 2) {
+                for (x = 0; x < 64; x++) putchar(ok_drawing_get(t.drawing, (unsigned)x, (unsigned)y) || ok_drawing_get(t.drawing, (unsigned)x, (unsigned)y + 1) ? '#' : '.');
+                putchar('\n');
+            }
+        }
+        if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
+            save(argv[6], "episode.json", episode, n);
+        return t.stage == OK_THINK_DECIDED ? 0 : 1;
+    }
     if (argc > 7 && !strncmp(argv[7], "dream=", 6)) { /* a dream: a picture from the image model */
         static uint8_t image[300000];
         static char buf[4096];

@@ -319,6 +319,38 @@ ok_result ok_think_diary(ok_think *t, const ok_think_provider *p, const uint8_t 
     return r;
 }
 
+ok_result ok_think_make(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                        const uint8_t nonce[16], const char *what, ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    ok_result r;
+    if (!t) return OK_ARGUMENT;
+    begin(t, "object");
+    if (!p || !p->model || !what) return OK_ARGUMENT;
+    if (ok_make_object_request(p->model, what, t->request, sizeof t->request, &t->request_len) != OK_OK) return OK_RANGE;
+    r = call(t, p, device_key, now_ms, nonce, "/v1/proxy/chat/completions", "application/json", t->request,
+             t->request_len, fetch, fetch_ctx);
+    if (r == OK_OK && t->stage == OK_THINK_DECIDED && ok_make_object_parse(t->response, t->response_len, &t->object) != OK_OK)
+        stop(t, OK_THINK_ANSWER);
+    return r;
+}
+
+ok_result ok_think_draw(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                        const uint8_t nonce[16], const char *subject, ok_think_fetch_fn fetch, void *fetch_ctx)
+{
+    ok_result r;
+    if (!t) return OK_ARGUMENT;
+    begin(t, "drawing");
+    if (!p || !p->model || !subject) return OK_ARGUMENT;
+    if (ok_make_drawing_request(p->model, subject, t->request, sizeof t->request, &t->request_len) != OK_OK)
+        return OK_RANGE;
+    r = call(t, p, device_key, now_ms, nonce, "/v1/proxy/chat/completions", "application/json", t->request,
+             t->request_len, fetch, fetch_ctx);
+    if (r == OK_OK && t->stage == OK_THINK_DECIDED &&
+        ok_make_drawing_parse(t->response, t->response_len, t->drawing, t->drawing_name) != OK_OK)
+        stop(t, OK_THINK_ANSWER);
+    return r;
+}
+
 ok_result ok_think_dream(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
                          const uint8_t nonce[16], const char *prompt, uint8_t *image, size_t cap, char *buf,
                          size_t buf_cap, ok_think_fetch_fn fetch, void *fetch_ctx)
@@ -588,6 +620,22 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
     } else if (!strcmp(kind, "diary")) {
         if (!put(out, cap, &o, ",\"entry\":") || !put_str(out, cap, &o, t->diary, strlen(t->diary)) ||
             !put(out, cap, &o, ",\"dream\":") || !put_str(out, cap, &o, t->dream, strlen(t->dream)))
+            return OK_RANGE;
+    } else if (!strcmp(kind, "object")) {
+        int b;
+        if (!put(out, cap, &o, ",\"object\":") || !put_str(out, cap, &o, t->object.name, strlen(t->object.name)) ||
+            !put(out, cap, &o, ",\"boxes\":["))
+            return OK_RANGE;
+        for (b = 0; b < t->object.count; b++) {
+            snprintf(head, sizeof head, "%s[%u,%u,%u,%u,%u,%u,\"%s\"]", b ? "," : "", t->object.box[b][0], t->object.box[b][1],
+                     t->object.box[b][2], t->object.box[b][3], t->object.box[b][4], t->object.box[b][5],
+                     ok_make_colour_name(t->object.box[b][6]));
+            if (!put(out, cap, &o, head)) return OK_RANGE;
+        }
+        if (!put(out, cap, &o, "]")) return OK_RANGE;
+    } else if (!strcmp(kind, "drawing")) {
+        if (!put(out, cap, &o, ",\"drawing\":") || !put_str(out, cap, &o, t->drawing_name, strlen(t->drawing_name)) ||
+            !put(out, cap, &o, ",\"pixels_b64\":") || !put_b64(out, cap, &o, (const char *)t->drawing, 512))
             return OK_RANGE;
     } else if (!strcmp(kind, "dream")) {
         if (!put(out, cap, &o, ",\"dream\":") || !put_str(out, cap, &o, t->dream, strlen(t->dream))) return OK_RANGE;

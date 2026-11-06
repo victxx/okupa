@@ -2,6 +2,7 @@
 #define OKUPA_THINK_H
 
 #include "okupa.h"
+#include "okupa_make.h"
 #include "okupa_mind.h"
 #include "okupa_pet.h"
 #include "okupa_tls.h"
@@ -62,6 +63,9 @@ typedef struct {
     ok_mind_plan plan;            /* ok_think_plan: its goal for the next while */
     char diary[OK_MIND_DIARY + 1]; /* ok_think_diary: today's entry */
     char dream[OK_MIND_DREAM + 1]; /* ok_think_diary: tonight's dream, as a picture to make */
+    ok_object object;              /* ok_think_make: the object it built */
+    uint8_t drawing[512];          /* ok_think_draw: its own drawing */
+    char drawing_name[21];
     /* ok_think_dream: the picture, decoded from the answer; the TEE signs
      * sha256(request):sha256(these bytes). */
     uint8_t *image;
@@ -121,6 +125,12 @@ ok_result ok_think_plan(ok_think *t, const ok_think_provider *p, const uint8_t d
                         const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx);
 ok_result ok_think_diary(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
                          const uint8_t nonce[16], const ok_mind_obs *obs, ok_think_fetch_fn fetch, void *fetch_ctx);
+
+/* Things it makes: an object out of boxes, or its own drawing. */
+ok_result ok_think_make(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                        const uint8_t nonce[16], const char *what, ok_think_fetch_fn fetch, void *fetch_ctx);
+ok_result ok_think_draw(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,
+                        const uint8_t nonce[16], const char *subject, ok_think_fetch_fn fetch, void *fetch_ctx);
 
 /* A dream: the image model draws prompt as a 128x128 PNG into image (cap
  * bytes). buf holds the request. */
