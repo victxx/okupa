@@ -892,6 +892,10 @@ int main(void)
             if (r == OK_UI_GAMES) menu_games = 1;
             if (r == OK_UI_TALK && !held) menu_talk = 1;
             if (r == OK_UI_MAIL && storage) show_mail(&ui, net_dir);
+            if (r == OK_UI_MAIL && !storage) {
+                ui.say = "No SD card, so no letters.";
+                ui.say_ticks = 60 * 5;
+            }
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
             ok_ui_release(&ui);

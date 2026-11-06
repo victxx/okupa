@@ -3,6 +3,7 @@
 #include "okupa_text.h"
 #include "okupa_icons.h"
 #include "okupa_intro.h"
+#include "okupa_facts.h"
 #include "qrcodegen.h"
 #include <stdio.h>
 #include <string.h>
@@ -329,26 +330,32 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
 
 /* --------------------------------------------------------- bottom screen */
 
-/* Buttons: two menus of four columns and two rows, picked by two tabs. The
- * care buttons fill like a glass with how full that need is. */
-enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_PHOTO, B_TALK, B_GAMES, B_MAIL, B_FRIEND, B_DREAM, B_DEV, BUTTONS };
-static const char *labels[BUTTONS] = {"Feed", "Play", "Pet", "Sleep", "Draw", "Photo",
-                                      "Talk", "Games", "Mail", "Friend", "Dream", "Dev"};
-static const int soon[BUTTONS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0};
+/* Buttons: four columns and two rows a menu, a second menu (and two tabs)
+ * only when they do not all fit. A button is shown only when it does
+ * something real: Photo, Talk, Games, Mail and Friend when the platform
+ * says it handles them (ok_ui.wired), Dream once there is a dream. The care
+ * buttons fill like a glass with how full that need is. */
+enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_GALLERY, B_TALK, B_PHOTO, B_GAMES, B_MAIL, B_FRIEND, B_DREAM, B_DEV,
+       BUTTONS };
+static const char *labels[BUTTONS] = {"Feed", "Play", "Pet", "Sleep", "Draw", "Gallery", "Talk",
+                                      "Photo", "Games", "Mail", "Friend", "Dream", "Dev"};
 static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(31, 20, 21), RGB(20, 19, 30),
-                                         RGB(30, 24, 16), RGB(22, 26, 30), RGB(29, 22, 28), RGB(24, 29, 18),
-                                         RGB(30, 27, 20), RGB(24, 24, 24), RGB(22, 22, 31), RGB(21, 27, 22)};
+                                         RGB(30, 24, 16), RGB(31, 25, 12), RGB(29, 22, 28), RGB(22, 26, 30),
+                                         RGB(24, 29, 18), RGB(30, 27, 20), RGB(26, 22, 31), RGB(22, 22, 31),
+                                         RGB(21, 27, 22)};
 #define PER_PAGE 8
 #define BX(s) (8 + ((s) % 4) * 62)
 #define BY(s) (34 + ((s) / 4) * 58)
 #define BW 54
 #define BH 52
-/* The two tabs under the buttons. */
+/* The two tabs under the buttons, when there are two menus. */
 #define TABS 2
 #define TAB_X(i) (64 + (i) * 66)
-#define TAB_Y 150
+#define TAB_Y 148
 #define TAB_W 62
-#define TAB_H 20
+#define TAB_H 19
+/* The strip at the bottom: what its mind (or the post) is doing. */
+#define STRIP_Y 170
 /* Out to the terrace and back, beside the closet. */
 #define OUT_X 100
 #define OUT_Y 8
@@ -360,13 +367,31 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 #define CLOSET_W 72
 #define CLOSET_H 20
 
-static void button(frame f, const uint8_t (*font)[8], int i, const char *label, int pressed, const ok_pet *p)
+/* The buttons shown, in order; returns how many. */
+static int shown(const ok_ui *u, int list[BUTTONS])
 {
-    static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY, OK_ICON_PET, OK_ICON_SLEEP, OK_ICON_DRAW, OK_ICON_PHOTO,
-                                      OK_ICON_TALK, OK_ICON_GAMES, OK_ICON_MAIL, OK_ICON_FRIEND, OK_ICON_DREAM, OK_ICON_DEV};
+    static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, OK_UI_HAS_GAMES,
+                                            0, OK_UI_HAS_FRIEND, 0, 0};
+    /* What the mind says works here (ok_facts.og_features): 2 hearing, 4 the camera, 8 Pictionary. */
+    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 0, 0, 0};
+    int i, n = 0;
+    for (i = 0; i < BUTTONS; i++) {
+        if (needs_wire[i] && !(u->wired & needs_wire[i]) && !(ok_facts_now.og_features & needs_mind[i])) continue;
+        if (i == B_DREAM && !u->dream_w) continue;
+        list[n++] = i;
+    }
+    return n;
+}
+
+static void button(frame f, const uint8_t (*font)[8], int i, int s, const char *label, const char *badge, int pressed,
+                   const ok_pet *p)
+{
+    static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY,  OK_ICON_PET,   OK_ICON_SLEEP,  OK_ICON_DRAW,
+                                      OK_ICON_GALLERY, OK_ICON_TALK, OK_ICON_PHOTO, OK_ICON_GAMES, OK_ICON_MAIL,
+                                      OK_ICON_FRIEND, OK_ICON_DREAM, OK_ICON_DEV};
     static const int need[4] = {OK_NEED_HUNGER, OK_NEED_FUN, OK_NEED_LOVE, OK_NEED_ENERGY};
-    int s = i % PER_PAGE, x = BX(s), y = BY(s) + (pressed ? 2 : 0);
-    uint16_t card = soon[i] ? RGB(19, 18, 17) : PAPER;
+    int x = BX(s), y = BY(s) + (pressed ? 2 : 0);
+    uint16_t card = PAPER;
     if (!pressed) round_box(f, x, BY(s) + 3, BW, BH, 6, RGB(3, 3, 3)); /* shadow */
     round_box(f, x, y, BW, BH, 6, pressed ? half(card) + (uint16_t)RGB(6, 6, 6) - 0x8000u : card);
     if (i < 4) { /* the need, as a level inside the icon's box: red when low */
@@ -377,13 +402,13 @@ static void button(frame f, const uint8_t (*font)[8], int i, const char *label, 
         if (h) round_box(f, x + 3, y + 33 - h, BW - 6, h, h < 10 ? h / 2 : 5, c);
         if (h > 2 && h < 29) rect(f, x + 7, y + 33 - h, BW - 14, 1, c | RGB(10, 10, 10)); /* its surface */
     } else {
-        round_box(f, x + 3, y + 3, BW - 6, 30, 5, soon[i] ? RGB(16, 15, 15) : accent[i]);
+        round_box(f, x + 3, y + 3, BW - 6, 30, 5, accent[i]);
     }
     ok_icons_draw(i == B_SLEEP && p->asleep ? OK_ICON_WAKE : icon[i], f, x + BW / 2, y + 18 - (pressed ? 0 : 1), 32);
-    centred(f, font, x + BW / 2, y + 39, label, soon[i] ? RGB(11, 10, 10) : INK, 2);
-    if (soon[i]) {
-        round_box(f, x + BW - 30, y - 4, 32, 11, 4, RGB(29, 11, 8));
-        centred(f, font, x + BW - 14, y - 2, "soon", PAPER, 1);
+    centred(f, font, x + BW / 2, y + 39, label, INK, 2);
+    if (badge) { /* e.g. the gallery's 2/6 */
+        round_box(f, x + BW - 26, y - 4, 28, 11, 4, RGB(29, 11, 8));
+        centred(f, font, x + BW - 12, y - 2, badge, PAPER, 1);
     }
 }
 
@@ -401,23 +426,111 @@ static void mood_chip(frame f, const uint8_t (*font)[8], const ok_pet *p, int x,
     text(f, font, x + 18, y + 7, word[m], RGB(29, 28, 26), 2);
 }
 
+/* The strip's line, from the facts alone: while a drawing is being posted,
+ * how far it got on Ethereum; otherwise the newest step of its mind on 0G.
+ * kind: 0 a hint, 1 0G, 2 0G verified, 3 0G unreachable, 4 Ethereum. */
+static const char *strip_line(const ok_ui *u, char out[48], int *kind)
+{
+    const ok_facts *fa = &ok_facts_now;
+    uint32_t k;
+    if (u->drawing_sent) {
+        *kind = 4;
+        if (fa->incl_state == 2)
+            snprintf(out, 48, "In block #%llu: it's on the wall!", (unsigned long long)fa->incl_block);
+        else if (fa->tx_handed > 0)
+            snprintf(out, 48, "Sent to %d node%s, %llu blocks checked", fa->tx_handed, fa->tx_handed == 1 ? "" : "s",
+                     (unsigned long long)fa->blocks_checked);
+        else if (fa->reached_status > 0)
+            snprintf(out, 48, "%d node%s listening, handing it over", fa->reached_status, fa->reached_status == 1 ? "" : "s");
+        else if (fa->candidates > 0)
+            snprintf(out, 48, "Posting: %d nodes found, dialling", fa->candidates);
+        else
+            snprintf(out, 48, "Posting: looking for Ethereum nodes");
+        return out;
+    }
+    if (!strcmp(fa->og_state, "napping")) { /* a safe stop: a nap, nothing invented */
+        *kind = 3;
+        snprintf(out, 48, "zzz...");
+        return out;
+    }
+    if (fa->og_state[0]) { /* its last verified decision: what it said, thought, or did, in turn */
+        const char *say_it[3];
+        int m = 0;
+        if (fa->og_said[0]) say_it[m++] = fa->og_said;
+        if (fa->og_thought[0]) say_it[m++] = fa->og_thought;
+        if (fa->og_feature[0]) say_it[m++] = fa->og_feature;
+        if (m) {
+            const char *t = say_it[u->ticks / 240 % (uint32_t)m];
+            *kind = fa->og_verified ? 2 : 1;
+            if (t == fa->og_said) snprintf(out, 48, "\"%.40s\"", t);
+            else if (t == fa->og_thought) snprintf(out, 48, "(%.40s)", t);
+            else snprintf(out, 48, "%.44s", t);
+            return out;
+        }
+    }
+    for (k = fa->log_count; k > 0 && k + OK_FACTS_LOG > fa->log_count; k--) {
+        const char *t = fa->log[(k - 1) % OK_FACTS_LOG].text;
+        if (fa->log[(k - 1) % OK_FACTS_LOG].src != 'G') continue;
+        if (!strncmp(t, "safe stop", 9) || !strncmp(t, "waiting for Wi-Fi", 17) || !strncmp(t, "TCP: no", 7) ||
+            !strncmp(t, "DNS: no", 7) || !strncmp(t, "TLS failed", 10)) {
+            *kind = 3;
+            snprintf(out, 48, "zzz...");
+            return out;
+        }
+        *kind = fa->og_verified ? 2 : 1;
+        snprintf(out, 48, "%.40s", t);
+        return out;
+    }
+    *kind = 0;
+    snprintf(out, 48, "%s", u->net_status[0] ? u->net_status : "Tap to look after your okupa");
+    return out;
+}
+
+static void strip(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    static const char *seal[] = {"", "0G", "0G", "0G", "ETH"};
+    static const uint16_t sc[] = {0, RGB(14, 16, 18), RGB(8, 24, 12), RGB(13, 12, 12), RGB(14, 16, 28)};
+    char line[48], count[16];
+    int kind, x = 12, n, right = 244;
+    strip_line(u, line, &kind);
+    if ((kind == 1 || kind == 2) && ok_facts_now.og_decisions) { /* how many verified decisions so far */
+        snprintf(count, sizeof count, "#%u", (unsigned)ok_facts_now.og_decisions);
+        right = 244 - width(count, 1) - 4;
+    }
+    round_box(f, 6, STRIP_Y, 244, 20, 7, RGB(12, 11, 11));
+    if (right < 244) text(f, font, right + 4, STRIP_Y + 6, count, RGB(14, 24, 14), 1);
+    if (kind) {
+        int w = kind == 4 ? 30 : kind == 2 ? 36 : 22;
+        round_box(f, 9, STRIP_Y + 3, w, 14, 5, sc[kind]);
+        text(f, font, 13, STRIP_Y + 6, seal[kind], PAPER, 1);
+        if (kind == 2) { /* a little tick: the TEE's signature checked here */
+            rect(f, 13 + width(seal[kind], 1) + 3, STRIP_Y + 10, 2, 2, PAPER);
+            rect(f, 13 + width(seal[kind], 1) + 5, STRIP_Y + 11, 2, 2, PAPER);
+            rect(f, 13 + width(seal[kind], 1) + 7, STRIP_Y + 7, 2, 4, PAPER);
+        }
+        x = 9 + w + 6;
+    }
+    if (kind != 3 && kind != 4 && u->ticks / 300 % 4 == 3) snprintf(line, sizeof line, "SELECT: see how it all works"), kind = -1;
+    for (n = (int)strlen(line); n > 3 && x + width(line, 1) > right; n--) { /* clip, with an ellipsis */
+        line[n - 1] = 0;
+        line[n - 4] = line[n - 3] = line[n - 2] = '.';
+    }
+    text(f, font, x, STRIP_Y + 6, line, kind == 3 || kind < 0 ? RGB(19, 17, 15) : RGB(28, 27, 25), 1);
+}
+
 static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, const ok_pet *p)
 {
-    int i;
+    int list[BUTTONS], n = shown(u, list), pages = n > PER_PAGE ? 2 : 1, page = u->page < pages ? u->page : 0, i;
     mood_chip(f, font, p, 8, 8);
-    for (i = 0; i < BUTTONS; i++)
-        if (i / PER_PAGE == u->page)
-            button(f, font, i, i == B_SLEEP && p->asleep ? "Wake" : labels[i], u->pressed == i + 1 && u->pressed_ticks > 0, p);
-    if (u->page == 1) { /* the rest of the second menu: what the console's buttons do */
-        round_box(f, 8, BY(4), 240, BH, 6, RGB(13, 12, 12));
-        centred(f, font, 128, BY(4) + 9, "Hold L: talk to me", RGB(27, 26, 24), 1);
-        centred(f, font, 128, BY(4) + 22, "R: I take a look through the camera", RGB(27, 26, 24), 1);
-        centred(f, font, 128, BY(4) + 35, "X: I guess what you drew", RGB(27, 26, 24), 1);
-    }
-    for (i = 0; i < TABS; i++) {
-        int on = u->page == i, down = u->pressed == 102 + i && u->pressed_ticks;
+    char hung[16];
+    snprintf(hung, sizeof hung, "%d/6", u->wall_count < 6 ? u->wall_count : 6);
+    for (i = page * PER_PAGE; i < n && i < (page + 1) * PER_PAGE; i++)
+        button(f, font, list[i], i % PER_PAGE, list[i] == B_SLEEP && p->asleep ? "Wake" : labels[list[i]],
+               list[i] == B_GALLERY ? hung : NULL, u->pressed == list[i] + 1 && u->pressed_ticks > 0, p);
+    for (i = 0; pages > 1 && i < TABS; i++) {
+        int on = page == i, down = u->pressed == 102 + i && u->pressed_ticks;
         round_box(f, TAB_X(i), TAB_Y + (down ? 1 : 0), TAB_W, TAB_H, 7, on ? RGB(31, 26, 3) : RGB(14, 13, 12));
-        centred(f, font, TAB_X(i) + TAB_W / 2, TAB_Y + 7 + (down ? 1 : 0), i ? "More" : "Care",
+        centred(f, font, TAB_X(i) + TAB_W / 2, TAB_Y + 6 + (down ? 1 : 0), i ? "More" : "Care",
                 on ? INK : RGB(24, 23, 21), 2);
     }
     round_box(f, CLOSET_X, CLOSET_Y + (u->pressed == 100 && u->pressed_ticks ? 1 : 0), CLOSET_W, CLOSET_H, 7,
@@ -429,12 +542,68 @@ static void home_buttons(frame f, const uint8_t (*font)[8], const ok_ui *u, cons
     ok_icons_draw(OK_ICON_HOME, f, OUT_X + 16, OUT_Y + 10 + (u->pressed == 101 && u->pressed_ticks ? 1 : 0), 16);
     centred(f, font, OUT_X + 44, OUT_Y + 7 + (u->pressed == 101 && u->pressed_ticks ? 1 : 0),
             ok_house_where() == OK_PLACE_GARDEN ? "In" : "Out", INK, 2);
-    /* Every few seconds, a pointer to the technical side for anyone watching. */
-    centred(f, font, 128, 178,
-            u->ticks / 300 % 3 == 2 ? "SELECT: how it all works"
-            : u->net_status[0]      ? u->net_status
-                                    : "Tap to look after your okupa",
-            RGB(19, 17, 15), 1);
+    strip(f, font, u);
+}
+
+/* The six frames are the goal: each picture hung unlocks something to wear. */
+static const int unlock_at[OK_WEARS] = {0, 3, 2, 4, 5, 1, 0, 6, 0}; /* none, headphones, bandana, glasses, scarf, flower, leaf, cap, smiley */
+
+static int next_unlock(int hung)
+{
+    int i, best = -1;
+    for (i = 0; i < OK_WEARS; i++)
+        if (unlock_at[i] > hung && (best < 0 || unlock_at[i] < unlock_at[best])) best = i;
+    return best;
+}
+
+/* The gallery: the pictures that arrived (each one seen in a block by this
+ * console), its own drawing, and what the next one unlocks. */
+#define GX(i) (12 + ((i) % 3) * 82)
+#define GY(i) (30 + ((i) / 3) * 68)
+#define BACK_X 192
+#define BACK_Y 166
+
+static void thumb(frame f, int x0, int y0, const uint8_t *pixels)
+{
+    int x, y;
+    rect(f, x0 - 2, y0 - 2, 68, 68, RGB(29, 22, 4));
+    for (y = 0; y < 64; y++)
+        for (x = 0; x < 64; x++) f[(y0 + y) * OK_UI_W + x0 + x] = ok_drawing_get(pixels, (unsigned)x, (unsigned)y) ? INK : PAPER;
+}
+
+static void gallery(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    char line[48];
+    int i, n = u->wall_count < OK_UI_WALL ? u->wall_count : OK_UI_WALL, next = next_unlock(n), own = u->own_set && n < 6;
+    text(f, font, 10, 6, "Gallery", RGB(31, 26, 3), 2);
+    snprintf(line, sizeof line, "%d/6 on the wall", n);
+    text(f, font, 74, 7, line, PAPER, 1);
+    if (next >= 0) snprintf(line, sizeof line, "%d more: %s", unlock_at[next] - n, ok_wear_name(next));
+    else snprintf(line, sizeof line, "Everything unlocked!");
+    text(f, font, 74, 17, line, RGB(24, 23, 21), 1);
+    for (i = 0; i < 6; i++) {
+        if (i < n) {
+            thumb(f, GX(i), GY(i), u->wall[i]);
+        } else if (own && i == n) {
+            thumb(f, GX(i), GY(i), u->own);
+            round_box(f, GX(i) + 4, GY(i) + 52, 56, 11, 4, RGB(29, 22, 4));
+            centred(f, font, GX(i) + 32, GY(i) + 54, "by Okupa", INK, 1);
+        } else {
+            round_box(f, GX(i) - 2, GY(i) - 2, 68, 68, 6, RGB(13, 12, 12));
+            centred(f, font, GX(i) + 32, GY(i) + 24, "Draw", RGB(20, 19, 18), 1);
+            centred(f, font, GX(i) + 32, GY(i) + 34, "one!", RGB(20, 19, 18), 1);
+        }
+    }
+    if (n && ok_facts_now.incl_state == 2)
+        snprintf(line, sizeof line, "Newest: block #%llu, tx %02x%02x%02x%02x..", (unsigned long long)ok_facts_now.incl_block,
+                 ok_facts_now.tx_hash[0], ok_facts_now.tx_hash[1], ok_facts_now.tx_hash[2], ok_facts_now.tx_hash[3]);
+    else if (n)
+        snprintf(line, sizeof line, "Each one seen in a block");
+    else
+        snprintf(line, sizeof line, "Draw, send: it hangs here");
+    text(f, font, 8, 172, line, RGB(24, 23, 21), 1);
+    round_box(f, BACK_X, BACK_Y, 56, 22, 6, RGB(31, 26, 3));
+    centred(f, font, BACK_X + 28, BACK_Y + 7, "Back", INK, 2);
 }
 
 /* The closet: tops, colours, things to wear. */
@@ -461,9 +630,11 @@ static void closet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         round_box(f, x + 3, SWATCH_Y + 3, 20, 16, 4, ok_top_colour(i));
     }
     for (i = 0; i < OK_WEARS; i++) {
-        int on = u->look.wear == i;
-        round_box(f, WEAR_X(i), WEAR_ROW(i), 76, 19, 5, on ? RGB(31, 26, 3) : PAPER);
-        centred(f, font, WEAR_X(i) + 38, WEAR_ROW(i) + 6, ok_wear_name(i), INK, 1);
+        int on = u->look.wear == i, locked = unlock_at[i] > u->wall_count;
+        char need[16];
+        round_box(f, WEAR_X(i), WEAR_ROW(i), 76, 19, 5, on ? RGB(31, 26, 3) : locked ? RGB(13, 12, 12) : PAPER);
+        snprintf(need, sizeof need, "hang %d", unlock_at[i]);
+        centred(f, font, WEAR_X(i) + 38, WEAR_ROW(i) + 6, locked ? need : ok_wear_name(i), locked ? RGB(20, 19, 18) : INK, 1);
     }
     round_box(f, DONE_X, DONE_Y, 72, 20, 5, RGB(10, 25, 12));
     centred(f, font, DONE_X + 36, DONE_Y + 6, "Done", INK, 1);
@@ -674,6 +845,8 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         } else if (u->scene == OK_UI_WALLET) {
             if (draw) wallet(bottom, font, u);
             line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
+        } else if (u->scene == OK_UI_GALLERY) {
+            if (draw) gallery(bottom, font, u);
         } else if (u->scene == OK_UI_CLOSET) {
             if (draw) closet(bottom, font, u);
             if (!u->say) line = "How do I look?";
@@ -874,6 +1047,23 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
         ok_monkey_init(&u->anim, &room, p->asleep, 0x6f6b7570u ^ (uint32_t)p->updated);
         u->ready = 1;
     }
+    /* Posting a drawing: out of the door with the envelope while it is on
+     * its way; once a block has it the wall grows and it comes in to hang
+     * it (below). Not in a block after two minutes: it comes back
+     * empty-handed and waits indoors. Only the platform's real states move it. */
+    if (u->drawing_sent && !u->outing) {
+        u->outing = 1;
+        u->outing_ticks = 0;
+        if (!p->asleep && ok_house_where() == OK_PLACE_ATTIC && !u->going)
+            ok_ui_direct(u, p, OK_MOVE_TO_DOOR, OK_PLACE_GARDEN, OK_POSE_HAPPY, "Off to post it!");
+    } else if (u->drawing_sent && u->outing == 1 && ++u->outing_ticks > 120 * 60) {
+        u->outing = 2;
+        if (!p->asleep && ok_house_where() == OK_PLACE_GARDEN && !u->going)
+            ok_ui_direct(u, p, OK_MOVE_TO_DOOR, OK_PLACE_ATTIC, OK_POSE_LONELY, "No block has it yet... I'll wait.");
+    } else if (!u->drawing_sent && u->outing) {
+        u->outing = 0;
+    }
+    u->anim.carry = u->outing == 1;
     /* The wall: a picture the console just saw in a block gets hung, in
      * the attic, with the okupa there to see it. */
     if (!u->wall_known) {
@@ -896,7 +1086,15 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
             u->happy_ticks = 360;
             if (!p->asleep) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
         }
-        if (u->hang_t == 60) u->sound = 1 + OK_SFX_YAY;
+        if (u->hang_t == 60) {
+            int i;
+            u->sound = 1 + OK_SFX_YAY;
+            for (i = 0; i < OK_WEARS; i++)
+                if (unlock_at[i] && unlock_at[i] == u->wall_count) {
+                    snprintf(u->unlocked, sizeof u->unlocked, "New in the closet: %s!", ok_wear_name(i));
+                    say(u, u->unlocked);
+                }
+        }
         if (++u->hang_t > OK_HOUSE_HANG_TICKS) u->hang_t = 0;
     }
     u->ticks++;
@@ -1066,13 +1264,27 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         }
         return OK_UI_CHANGED;
     }
+    if (u->scene == OK_UI_GALLERY) {
+        if (!held && inside(x, y, BACK_X, BACK_Y, 56, 22)) {
+            u->scene = OK_UI_HOME;
+            u->sound = 1 + OK_SFX_POP;
+            return OK_UI_CHANGED;
+        }
+        return OK_UI_NOTHING;
+    }
     if (u->scene == OK_UI_CLOSET) {
         for (i = 0; i < OK_TOPS; i++)
             if (inside(x, y, 8 + i * 61, TOP_Y, 57, 24)) u->look.top = (uint8_t)i;
         for (i = 0; i < OK_COLOURS; i++)
             if (inside(x, y, 8 + i * 31, SWATCH_Y, 26, 22)) u->look.colour = (uint8_t)i;
-        for (i = 0; i < OK_WEARS; i++)
-            if (inside(x, y, WEAR_X(i), WEAR_ROW(i), 76, 19)) u->look.wear = (uint8_t)i;
+        for (i = 0; i < OK_WEARS; i++) {
+            if (!inside(x, y, WEAR_X(i), WEAR_ROW(i), 76, 19)) continue;
+            if (unlock_at[i] > u->wall_count) { /* hang more pictures first */
+                say(u, "Hang more pictures to unlock it!");
+                return OK_UI_CHANGED;
+            }
+            u->look.wear = (uint8_t)i;
+        }
         u->sound = 1 + OK_SFX_POP;
         if (inside(x, y, DONE_X, DONE_Y, 72, 20)) {
             u->sound = 1 + OK_SFX_HELLO;
@@ -1100,32 +1312,36 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         u->pressed_ticks = 8;
         return OK_UI_CHANGED;
     }
-    for (i = 0; i < TABS; i++) {
-        if (!inside(x, y, TAB_X(i), TAB_Y, TAB_W, TAB_H)) continue;
-        u->page = i;
-        u->pressed = 102 + i;
-        u->pressed_ticks = 8;
-        u->sound = 1 + OK_SFX_POP;
-        return OK_UI_CHANGED;
+    {
+        int list[BUTTONS], n = shown(u, list), pages = n > PER_PAGE ? 2 : 1, page = u->page < pages ? u->page : 0, k;
+        for (i = 0; pages > 1 && i < TABS; i++) {
+            if (!inside(x, y, TAB_X(i), TAB_Y, TAB_W, TAB_H)) continue;
+            u->page = i;
+            u->pressed = 102 + i;
+            u->pressed_ticks = 8;
+            u->sound = 1 + OK_SFX_POP;
+            return OK_UI_CHANGED;
+        }
+        for (k = page * PER_PAGE; k < n && k < (page + 1) * PER_PAGE; k++)
+            if (inside(x, y, BX(k % PER_PAGE), BY(k % PER_PAGE), BW, BH)) break;
+        if (k >= n || k >= (page + 1) * PER_PAGE) return OK_UI_NOTHING;
+        i = list[k];
     }
-    for (i = 0; i < BUTTONS; i++) {
+    {
         int action, ok;
-        if (i / PER_PAGE != u->page || !inside(x, y, BX(i % PER_PAGE), BY(i % PER_PAGE), BW, BH)) continue;
         u->pressed = i + 1;
         u->pressed_ticks = 8;
         u->sound = 1 + OK_SFX_TAP;
         switch (i) {
         case B_DRAW: u->scene = OK_UI_SKETCH; u->eraser = 0; return OK_UI_CHANGED;
+        case B_GALLERY: u->scene = OK_UI_GALLERY; return OK_UI_CHANGED;
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
-        case B_PHOTO: say(u, "Press R and I'll take a look!"); return OK_UI_PHOTO;
-        case B_TALK: say(u, "Hold L and tell me something!"); return OK_UI_TALK;
-        case B_GAMES: say(u, "Draw me something, then press X: I'll guess it!"); return OK_UI_GAMES;
-        case B_MAIL: say(u, "No letters yet. I'll write you one."); return OK_UI_MAIL;
-        case B_FRIEND: say(u, "A friend? Soon, I promise."); return OK_UI_FRIEND;
-        case B_DREAM:
-            if (u->dream_w) u->dream_ticks = 1200;
-            else say(u, "No dreams yet. Let me sleep on it!");
-            return OK_UI_CHANGED;
+        case B_PHOTO: say(u, "Let me take a look!"); return OK_UI_PHOTO;
+        case B_TALK: say(u, "I'm listening!"); return OK_UI_TALK;
+        case B_GAMES: say(u, "Show me a drawing: I'll guess it!"); return OK_UI_GAMES;
+        case B_MAIL: return OK_UI_MAIL;
+        case B_FRIEND: return OK_UI_FRIEND;
+        case B_DREAM: u->dream_ticks = 1200; return OK_UI_CHANGED;
         }
         action = i == B_FEED ? OK_DO_FEED : i == B_PLAY ? OK_DO_PLAY : i == B_PET ? OK_DO_PET
                  : p->asleep ? OK_DO_WAKE : OK_DO_SLEEP;

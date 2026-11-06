@@ -345,13 +345,31 @@ static void dream_cloud(void)
     gem(-60, 58, 10, 9, 9, 6, 4, 2);
 }
 
+static void picture(void)
+{
+    ok_r3d_rotate_y(DEG(-24));
+    ok_r3d_rotate_x(DEG(10));
+    mat(RGB(29, 22, 4)); /* a gilt frame */
+    ok_r3d_box(P(-90, 62, -10), P(90, 84, 12));
+    ok_r3d_box(P(-90, -84, -10), P(90, -62, 12));
+    ok_r3d_box(P(-90, -62, -10), P(-68, 62, 12));
+    ok_r3d_box(P(68, -62, -10), P(90, 62, 12));
+    mat(RGB(16, 24, 31)); /* sky */
+    ok_r3d_box(P(-68, -62, -6), P(68, 62, 2));
+    mat(RGB(10, 24, 9)); /* a hill */
+    gem(-20, -66, 4, 70, 50, 6, 8, 3);
+    gem(46, -62, 3, 40, 30, 5, 6, 3);
+    mat(RGB(31, 27, 6)); /* the sun */
+    gem(38, 34, 6, 16, 16, 5, 6, 3);
+}
+
 /* ------------------------------------------------------------ the sheet */
 
 void ok_icons_build(void)
 {
     static void (*const model[OK_ICONS])(void) = {banana, beach_ball, heart, moon, sun, pencil,
                                                   camera, envelope, gear, shirt, house, note,
-                                                  microphone, dice, friends, dream_cloud};
+                                                  microphone, dice, friends, dream_cloud, picture};
     static int built;
     int i, x, y, k, pass;
     if (built) return; /* once: the platform may build them early */

@@ -5,6 +5,7 @@
 #include "okupa_font.h"
 #include "okupa_ui.h"
 #include "png.h"
+#include "okupa_facts.h"
 #include "okupa_session.h"
 #include "okupa_tech.h"
 #include <stdio.h>
@@ -149,9 +150,39 @@ int main(int argc, char **argv)
     p.need[OK_NEED_ENERGY] = 55;
     u.say = NULL;
     shot(dir, "home-hungry-evening", &u, &p, 19);
+    /* As on the DSi with its mind: hearing, camera, Pictionary; a verified decision in the strip. */
+    ok_facts_now.og_features = 1 | 2 | 4 | 8;
+    snprintf(ok_facts_now.og_state, sizeof ok_facts_now.og_state, "decided");
+    snprintf(ok_facts_now.og_said, sizeof ok_facts_now.og_said, "Is there anything to eat?");
+    ok_facts_now.og_verified = 1;
+    ok_facts_now.og_decisions = 12;
+    shot(dir, "home-wired", &u, &p, 19);
     u.page = 1; /* the second menu */
     shot(dir, "home-more", &u, &p, 19);
     u.page = 0;
+    {   /* the gallery, two pictures hung; posting a third */
+        ok_ui g = u;
+        int k;
+        memset(g.wall, 0, sizeof g.wall);
+        for (k = 0; k < 64 * 64 / 8; k++) g.wall[0][k] = (uint8_t)(k % 8 == 3 ? 0x18 : 0), g.wall[1][k] = (uint8_t)(k / 64 % 2 ? 0x3c : 0);
+        g.wall_count = 2;
+        g.scene = OK_UI_GALLERY;
+        shot(dir, "gallery", &g, &p, 15);
+        g.scene = OK_UI_CLOSET;
+        shot(dir, "closet-locked", &g, &p, 15);
+        g.scene = OK_UI_HOME;
+        g.drawing_sent = 1;
+        ok_facts_now.candidates = 31;
+        ok_facts_now.reached_status = 2;
+        ok_facts_now.tx_handed = 2;
+        ok_facts_now.blocks_checked = 3;
+        for (k = 0; k < 400; k++) ok_ui_tick(&g, &p);
+        shot(dir, "home-posting", &g, &p, 15);
+        g.drawing_sent = 0;
+        snprintf(ok_facts_now.og_state, sizeof ok_facts_now.og_state, "napping");
+        shot(dir, "home-napping", &g, &p, 15);
+        memset(&ok_facts_now, 0, sizeof ok_facts_now);
+    }
     p.asleep = 1;
     u.ready = 0;
     shot(dir, "home-asleep-night", &u, &p, 23);

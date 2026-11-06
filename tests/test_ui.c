@@ -1,6 +1,7 @@
 #include "okupa_act.h"
 #include "okupa_font.h"
 #include "okupa_ui.h"
+#include "okupa_facts.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,13 +30,25 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && p.asleep);
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Zzz... (it's sleeping)"));
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && !p.asleep);
-    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK && u.scene == OK_UI_HOME); /* a hint, the platform listens */
-    assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_CHANGED && u.page == 1);  /* More */
-    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_MAIL && p.need[OK_NEED_HUNGER] == 100);
-    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_FRIEND);
-    assert(ok_ui_touch(&u, &p, 159, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "No dreams yet. Let me sleep on it!"));
-    assert(ok_ui_touch(&u, &p, 35, 118, 0, t) == OK_UI_NOTHING);                 /* the hints card */
-    assert(ok_ui_touch(&u, &p, 95, 160, 0, t) == OK_UI_CHANGED && u.page == 0);   /* Care */
+    /* No mind: one menu (Feed..Sleep, Draw, Gallery, Mail, Dev), no tabs, no dead buttons. */
+    assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_NOTHING);
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_MAIL);
+    assert(ok_ui_touch(&u, &p, 97, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GALLERY);
+    assert(ok_ui_touch(&u, &p, 210, 175, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME); /* Back */
+    /* Everything wired: Talk, Photo on the first menu; Games, Mail, Friend, Dev on More. */
+    u.wired = OK_UI_HAS_PHOTO | OK_UI_HAS_TALK | OK_UI_HAS_GAMES | OK_UI_HAS_MAIL | OK_UI_HAS_FRIEND;
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK && u.scene == OK_UI_HOME);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_PHOTO);
+    assert(ok_ui_touch(&u, &p, 161, 157, 0, t) == OK_UI_CHANGED && u.page == 1); /* More */
+    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_GAMES && p.need[OK_NEED_HUNGER] == 100);
+    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_MAIL);
+    assert(ok_ui_touch(&u, &p, 159, 60, 0, t) == OK_UI_FRIEND);
+    assert(ok_ui_touch(&u, &p, 95, 157, 0, t) == OK_UI_CHANGED && u.page == 0); /* Care */
+    u.wired = 0;
+    ok_facts_now.og_features = 1 | 2 | 8; /* the mind hears and plays, no camera */
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_GAMES);
+    ok_facts_now.og_features = 0;
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 
     /* The line goes back to the mood line after three seconds. */
@@ -66,13 +79,12 @@ int main(void)
     u.scene = OK_UI_HOME;
 
     /* Dev (on the second menu) asks the platform to run the checks; Back returns. */
-    assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_CHANGED && u.page == 1);
-    assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Wi-Fi from Dev: search, pick a secured network, type its password. */
-    assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_RUN_CHECKS);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS);
     assert(ok_ui_touch(&u, &p, 90, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
     u.ap_count = 2;
     strcpy(u.aps[0].ssid, "iPhone de Okupa");
@@ -154,6 +166,25 @@ int main(void)
     u.scene = OK_UI_DEV;
     p.asleep = 1;
     ok_ui_render(&u, &p, 3, 0, ok_font(), top, bottom);
+    /* The closet: what pictures unlock stays locked until they hang. */
+    {
+        ok_ui c;
+        ok_ui_init(&c);
+        c.scene = OK_UI_CLOSET;
+        assert(ok_ui_touch(&c, &p, 120, 110, 0, t) == OK_UI_CHANGED && c.look.wear == OK_WEAR_NONE); /* headphones: 3 */
+        assert(ok_ui_touch(&c, &p, 200, 150, 0, t) == OK_UI_CHANGED && c.look.wear == OK_WEAR_SMILEY);
+        c.wall_count = 3;
+        assert(ok_ui_touch(&c, &p, 120, 110, 0, t) == OK_UI_CHANGED && c.look.wear == OK_WEAR_HEADPHONES);
+        /* Posting: out with the envelope while it is on its way, not any more once it has landed. */
+        c.scene = OK_UI_HOME;
+        p.asleep = 0;
+        c.drawing_sent = 1;
+        ok_ui_tick(&c, &p);
+        assert(c.outing == 1 && c.anim.carry);
+        c.drawing_sent = 0;
+        ok_ui_tick(&c, &p);
+        assert(c.outing == 0 && !c.anim.carry);
+    }
     puts("ui: buttons drive the okupa, sketchbook strokes and eraser, dev and back, all scenes render");
     return 0;
 }
