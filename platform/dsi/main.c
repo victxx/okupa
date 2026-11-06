@@ -1,5 +1,6 @@
 /* Okupa on the Nintendo DSi: the room on the top screen, touch below. The
  * same core and game code as the host; this file only owns the hardware. */
+#include "net.h"
 #include "okupa_checks.h"
 #include "okupa_font.h"
 #include "okupa_save.h"
@@ -11,6 +12,9 @@
 #include <time.h>
 
 static uint16_t back[2][OK_UI_W * OK_UI_H];
+static int top_bg, bottom_bg;
+static ok_ui *shown_ui;
+static ok_pet *shown_pet;
 static char save_path[40], temp_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
@@ -25,6 +29,15 @@ static void present(int top, int bottom)
     DC_FlushRange(back, sizeof back);
     dmaCopyWords(3, back[0], bgGetGfxPtr(top), sizeof back[0]);
     dmaCopyWords(3, back[1], bgGetGfxPtr(bottom), sizeof back[1]);
+}
+
+/* Redraws while a long task (the network test) runs. */
+static void show_now(void)
+{
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    ok_ui_render(shown_ui, shown_pet, tm->tm_hour, tm->tm_min, ok_font(), back[0], back[1]);
+    present(top_bg, bottom_bg);
 }
 
 /* The DSi's own SD slot first, then a flashcart; never the internal memory. */
@@ -86,12 +99,14 @@ int main(void)
     videoSetModeSub(MODE_5_2D);
     vramSetBankA(VRAM_A_MAIN_BG);
     vramSetBankC(VRAM_C_SUB_BG);
-    top = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
-    bottom = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+    top_bg = top = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+    bottom_bg = bottom = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     if (isDSiMode()) setCpuClock(true);
 
     ok_ui_init(&ui);
     ok_pet_init(&pet, (int64_t)now);
+    shown_ui = &ui;
+    shown_pet = &pet;
     storage = open_storage();
     if (storage) {
         if (load_file(save_path, &pet, ui.drawing) || load_file(temp_path, &pet, ui.drawing)) {
@@ -131,6 +146,11 @@ int main(void)
                 snprintf(ui.dev[OK_UI_DEV_LINES - 2], sizeof ui.dev[0], "Build: %.20s", OKUPA_BUILD_ID);
                 snprintf(ui.dev[OK_UI_DEV_LINES - 1], sizeof ui.dev[0], "%.32s", save_status);
                 (void)fails;
+            }
+            if (r == OK_UI_RUN_NETWORK) {
+                cpuStartTiming(0);
+                ok_dsi_network_test(ui.dev, OK_UI_DEV_LINES, show_now);
+                cpuEndTiming();
             }
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {

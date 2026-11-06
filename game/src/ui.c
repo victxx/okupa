@@ -245,6 +245,8 @@ static void dev(frame f, const uint8_t (*font)[8], const ok_ui *u)
     int i;
     centred(f, font, 128, 6, "Dev: the core on this console", PAPER, 1);
     for (i = 0; i < OK_UI_DEV_LINES; i++) text(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
+    frame_box(f, 6, 166, 100, 22, PAPER, INK);
+    centred(f, font, 56, 173, "Network", INK, 1);
     frame_box(f, 176, 166, 74, 22, PAPER, INK);
     centred(f, font, 213, 173, "Back", INK, 1);
 }
@@ -342,6 +344,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (held) return OK_UI_NOTHING;
     if (u->scene == OK_UI_DEV) {
+        if (inside(x, y, 6, 166, 100, 22)) return OK_UI_RUN_NETWORK;
         if (!inside(x, y, 176, 166, 74, 22)) return OK_UI_NOTHING;
         u->scene = OK_UI_HOME;
         return OK_UI_CHANGED;

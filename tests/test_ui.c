@@ -52,6 +52,7 @@ int main(void)
 
     /* Dev asks the platform to run the checks; Back returns. */
     assert(ok_ui_touch(&u, &p, 221, 130, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
+    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Every scene renders, with and without a font. */

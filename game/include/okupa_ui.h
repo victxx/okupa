@@ -9,7 +9,7 @@
 #define OK_UI_W 256
 #define OK_UI_H 192
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV };
-enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS };
+enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK };
 #define OK_UI_DEV_LINES 14
 
 typedef struct {
