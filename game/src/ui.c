@@ -1,5 +1,6 @@
 #include "okupa_ui.h"
 #include "okupa_act.h"
+#include "okupa_text.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -35,7 +36,8 @@ static void frame_box(frame f, int x, int y, int w, int h, uint16_t fill, uint16
     rect(f, x + 1, y + 2, w - 2, h - 4, fill);
 }
 
-static void text(frame f, const uint8_t (*font)[8], int x, int y, const char *s, uint16_t c, int scale)
+/* Monospace 8x8, for the Dev screen's columns of numbers. */
+static void mono(frame f, const uint8_t (*font)[8], int x, int y, const char *s, uint16_t c, int scale)
 {
     int row, col;
     if (!font) return;
@@ -47,9 +49,22 @@ static void text(frame f, const uint8_t (*font)[8], int x, int y, const char *s,
     }
 }
 
-static void centred(frame f, const uint8_t (*font)[8], int cx, int y, const char *s, uint16_t c, int scale)
+/* Everything else in the sans: weight 1 regular, 2 bold. y is where an 8x8
+ * line would start, so the capitals sit in the same place. */
+static void text(frame f, const uint8_t (*font)[8], int x, int y, const char *s, uint16_t c, int weight)
 {
-    text(f, font, cx - (int)strlen(s) * 4 * scale, y, s, c, scale);
+    (void)font;
+    ok_text_draw(f, weight >= 2 ? &ok_sans_bold : &ok_sans_regular, x, y - 2, s, c);
+}
+
+static int width(const char *s, int weight)
+{
+    return ok_text_width(weight >= 2 ? &ok_sans_bold : &ok_sans_regular, s);
+}
+
+static void centred(frame f, const uint8_t (*font)[8], int cx, int y, const char *s, uint16_t c, int weight)
+{
+    text(f, font, cx - width(s, weight) / 2, y, s, c, weight);
 }
 
 /* ------------------------------------------------------------ drawing kit */
@@ -150,40 +165,42 @@ static void clock_pill(frame f, const uint8_t (*font)[8], int hour, int minute)
     text(f, font, 18, 7, clock, RGB(30, 29, 27), 1);
 }
 
-/* What it says, in a bubble above its head with a tail pointing at it. */
+/* What it says, in a bubble above its head with a tail pointing at it:
+ * up to two lines of at most 200 pixels, broken at spaces. */
 static void bubble(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy)
 {
-    char line[2][29] = {{0}};
-    size_t n = strlen(s), cut = n, longest;
-    int w, h, x, y, tx, lines;
-    if (n > 28) {
-        for (cut = 28; cut > 0 && s[cut] != ' '; cut--) {}
-        if (cut == 0) cut = 28;
+    char line[2][48] = {{0}};
+    size_t n = strlen(s), cut = n;
+    int w, h, x, y, tx, lines, k;
+    while (cut > 0 && cut < n + 1) {
+        char head[48];
+        snprintf(head, sizeof head, "%.*s", (int)cut, s);
+        if (width(head, 1) <= 200 || cut == 1) break;
+        for (cut--; cut > 0 && s[cut] != ' '; cut--) {}
     }
-    memcpy(line[0], s, cut > 28 ? 28 : cut);
-    if (cut < n) strncpy(line[1], s + cut + (s[cut] == ' '), 28);
+    if (cut == 0) cut = n > 40 ? 40 : n;
+    snprintf(line[0], sizeof line[0], "%.*s", (int)cut, s);
+    if (cut < n) snprintf(line[1], sizeof line[1], "%s", s + cut + (s[cut] == ' '));
     lines = line[1][0] ? 2 : 1;
-    longest = strlen(line[0]) > strlen(line[1]) ? strlen(line[0]) : strlen(line[1]);
-    w = (int)longest * 8 + 14;
-    h = lines * 10 + 9;
+    w = (width(line[0], 1) > width(line[1], 1) ? width(line[0], 1) : width(line[1], 1)) + 16;
+    h = lines * 11 + 9;
     if (hx < -50) hx = 128, hy = 110;
     x = hx - w / 2;
     x = x < 4 ? 4 : x + w > OK_UI_W - 4 ? OK_UI_W - 4 - w : x;
     y = hy - h - 12;
     if (y < 20) y = 20;
-    tx = hx < x + 10 ? x + 10 : hx > x + w - 10 ? x + w - 10 : hx;
-    round_box(f, x - 1, y - 1, w + 2, h + 2, 5, INK);
-    round_box(f, x, y, w, h, 4, PAPER);
-    {
-        int k;
-        for (k = 0; k < 6; k++) {
-            rect(f, tx - 4 + k / 2 + (hx > tx ? k / 2 : 0), y + h + k, 8 - k, 1, PAPER);
-            rect(f, tx - 5 + k / 2 + (hx > tx ? k / 2 : 0), y + h + k, 1, 1, INK);
-            rect(f, tx + 4 - k + k / 2 + (hx > tx ? k / 2 : 0), y + h + k, 1, 1, INK);
-        }
+    tx = hx < x + 12 ? x + 12 : hx > x + w - 12 ? x + w - 12 : hx;
+    round_box(f, x - 1, y + 1, w + 2, h + 2, 6, RGB(2, 2, 3)); /* a soft drop shadow */
+    round_box(f, x - 1, y - 1, w + 2, h + 2, 6, INK);
+    round_box(f, x, y, w, h, 5, PAPER);
+    for (k = 0; k < 6; k++) { /* the tail, leaning towards the head */
+        int lean = (hx - tx) * k / 24;
+        rect(f, tx - 4 + k / 2 + lean, y + h + k, 8 - k, 1, PAPER);
+        rect(f, tx - 5 + k / 2 + lean, y + h + k, 1, 1, INK);
+        rect(f, tx + 4 - k / 2 + lean, y + h + k, 1, 1, INK);
     }
-    centred(f, font, x + w / 2, y + 5, line[0], INK, 1);
-    if (lines == 2) centred(f, font, x + w / 2, y + 15, line[1], INK, 1);
+    centred(f, font, x + w / 2, y + 6, line[0], INK, 1);
+    if (lines == 2) centred(f, font, x + w / 2, y + 17, line[1], INK, 1);
 }
 
 static uint16_t skin[OK_SKIN * OK_SKIN];
@@ -339,7 +356,7 @@ static void dev(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
     int i;
     centred(f, font, 128, 6, "Dev: the core on this console", PAPER, 1);
-    for (i = 0; i < OK_UI_DEV_LINES; i++) text(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
+    for (i = 0; i < OK_UI_DEV_LINES; i++) mono(f, font, 6, 20 + i * 10, u->dev[i], PAPER, 1);
     frame_box(f, 6, 166, 80, 22, PAPER, INK);
     centred(f, font, 46, 173, "Network", INK, 1);
     frame_box(f, 92, 166, 78, 22, PAPER, INK);
