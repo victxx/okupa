@@ -55,6 +55,15 @@ static int recent_count;
 /* What it keeps for good (memory.txt), the question it is waiting on, and
  * what its senses brought since the last decision. */
 static ok_memory facts;
+/* The slow mind's goal and plan, the day so far, and yesterday's entry. */
+static ok_mind_plan aim;
+static uint32_t aimed_at;
+static int aimed;
+static char today[24][81];
+static int today_count;
+static char today_date[11];
+static char yesterday[OK_MIND_DIARY + 1];
+static int diary_written; /* today's entry is in diary.txt */
 static char asked[OK_MIND_NOTE + 1];
 static uint32_t asked_at;
 static char heard_text[OK_MIND_TEXT + 1], saw_text[OK_MIND_TEXT + 1];
@@ -623,6 +632,47 @@ static void save_facts(void)
     fclose(f);
 }
 
+/* What happened today, for the diary (the oldest goes when it is full). */
+static void today_add(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void today_add(const char *fmt, ...)
+{
+    va_list ap;
+    if (today_count == 24) {
+        memmove(today[0], today[1], sizeof today[0] * 23);
+        today_count--;
+    }
+    va_start(ap, fmt);
+    vsnprintf(today[today_count++], sizeof today[0], fmt, ap);
+    va_end(ap);
+}
+
+/* diary.txt: "YYYY-MM-DD entry" a line; the last one is yesterday. */
+static void load_diary(void)
+{
+    char path[64], text[OK_MIND_DIARY + 16];
+    FILE *f;
+    snprintf(path, sizeof path, "%sdiary.txt", dir_path);
+    yesterday[0] = 0;
+    if (!(f = fopen(path, "r"))) return;
+    while (fgets(text, sizeof text, f))
+        if (strlen(text) > 11) {
+            text[strcspn(text, "\r\n")] = 0;
+            snprintf(yesterday, sizeof yesterday, "%.240s", text + 11);
+            if (!strncmp(text, today_date, 10)) diary_written = 1;
+        }
+    fclose(f);
+}
+
+static void save_diary(const char *date, const char *entry)
+{
+    char path[64];
+    FILE *f;
+    snprintf(path, sizeof path, "%sdiary.txt", dir_path);
+    if (!(f = fopen(path, "a"))) return;
+    fprintf(f, "%.10s %s\n", date, entry);
+    fclose(f);
+}
+
 /* Waits, but not when the player has just spoken or asked it to look. */
 static void rest_frames(int frames)
 {
@@ -700,6 +750,11 @@ static int thinker(void *arg)
     }
     load_chain();
     load_facts();
+    {
+        time_t now = time(NULL);
+        strftime(today_date, sizeof today_date, "%Y-%m-%d", localtime(&now));
+    }
+    load_diary();
     line(1, "%.20s%s", cfg.model, cfg.have_ear ? " + ears" : "");
     feed("mind on: %.22s%s", cfg.model, cfg.have_ear ? " + ears" : "");
     p.host = cfg.host;
@@ -752,6 +807,7 @@ static int thinker(void *arg)
                     snprintf(heard_text, sizeof heard_text, "%s", t.heard);
                     line(3, "Heard: %.25s", t.heard);
                     feed("heard: \"%.30s\"", t.heard);
+                    today_add("heard the player say: %.56s", t.heard);
                 } else if (r == OK_OK) {
                     failed();
                 }
@@ -782,6 +838,7 @@ static int thinker(void *arg)
                     snprintf(saw_text, sizeof saw_text, "%s", t.saw);
                     line(3, "Saw: %.27s", t.saw);
                     feed("saw: %.33s", t.saw);
+                    today_add("saw: %.75s", t.saw);
                 } else if (r == OK_OK) {
                     failed();
                 }
@@ -805,6 +862,7 @@ static int thinker(void *arg)
                     feed_verified(ms);
                     snprintf(guess_text, sizeof guess_text, "%s", t.saw);
                     feed("guess: %.32s", t.saw);
+                    today_add("guessed the player's drawing: %.48s", t.saw);
                     line(3, "Guess: %.25s", t.saw);
                     guess_state = 1;
                 } else {
@@ -832,7 +890,11 @@ static int thinker(void *arg)
             memcpy(did, seen_did, sizeof did);
             seen_did[0] = 0;
             obs.player_did = did;
+            if (strncmp(did, "touched", 7)) today_add("the player %.66s", did);
         }
+        if (aim.goal[0]) obs.goal = aim.goal;
+        if (aim.plan[0]) obs.plan = aim.plan;
+        if (yesterday[0]) obs.diary = yesterday;
         if (heard_text[0]) obs.heard = heard_text;
         if (saw_text[0]) obs.saw = saw_text;
         if (asked[0] && frames_alive - asked_at > 60u * 180u) asked[0] = 0; /* nobody answered in 3 minutes */
@@ -870,7 +932,10 @@ static int thinker(void *arg)
             ok_facts_now.og_error[0] = 0;
             feed_verified(ms);
             feed("chose: %s, %s", ok_mind_activity_name(t.decision.activity), ok_mind_mood_name(t.decision.mood));
-            if (t.decision.line[0]) feed("says: %.32s", t.decision.line);
+            if (t.decision.line[0]) {
+                feed("says: %.32s", t.decision.line);
+                today_add("%s and said: %.50s", ok_mind_activity_name(t.decision.activity), t.decision.line);
+            }
             if (t.decision.thought[0]) feed("thinks: %.30s", t.decision.thought);
             if (t.decision.ask[0]) feed("asks: %.32s", t.decision.ask);
             remember(&t.decision);
@@ -885,6 +950,7 @@ static int thinker(void *arg)
                 save_facts();
                 line(13, "Keeps: %.25s", t.decision.remember);
                 feed("keeps: %.32s", t.decision.remember);
+                today_add("learned: %.70s", t.decision.remember);
             }
             mailbox = t.decision;
             mailbox_new = 1;
@@ -898,6 +964,69 @@ static int thinker(void *arg)
         line(3, "#%u: HTTP %d in %lu ms, %d known", count, t.http_status, (unsigned long)ms, facts.count);
         line(0, "0G mind: alive, %u/%u verified", verified, count);
         save_episode(&p, now_ms, count);
+
+        /* The slow mind: a goal and a plan every five minutes. */
+        if (t.stage == OK_THINK_DECIDED && (!aimed || frames_alive - aimed_at > 60u * 300u)) {
+            aimed = 1;
+            aimed_at = frames_alive;
+            now_ms = (uint64_t)utc_now() * 1000u;
+            draw(nonce, sizeof nonce);
+            feed("slow mind: thinking ahead...");
+            t0 = cpuGetTiming();
+            r = ok_think_plan(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
+            ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
+            if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                feed_verified(ms);
+                aim = t.plan;
+                feed("goal: %.32s", aim.goal);
+                feed("plan: %.32s", aim.plan);
+                line(2, "Goal: %.26s", aim.goal);
+                today_add("decided: %.70s", aim.goal);
+            } else if (r == OK_OK) {
+                failed();
+            }
+            save_episode(&p, now_ms, count);
+        }
+
+        /* The diary: once the day is over (a new date) or after 23:00. */
+        {
+            char date[11];
+            time_t now = time(NULL);
+            struct tm *lt = localtime(&now);
+            strftime(date, sizeof date, "%Y-%m-%d", lt);
+            if (strcmp(date, today_date) && !diary_written && today_count >= 3) diary_written = -1; /* yesterday's is owed */
+            if (strcmp(date, today_date) && diary_written != -1) {
+                snprintf(today_date, sizeof today_date, "%s", date); /* a new day */
+                today_count = 0;
+                diary_written = 0;
+            }
+            if (today_count >= 3 && (diary_written == -1 || (!diary_written && lt->tm_hour >= 23))) {
+                for (j = 0; j < today_count; j++) obs.today[j] = today[j];
+                obs.today_count = today_count;
+                obs.date = today_date;
+                now_ms = (uint64_t)utc_now() * 1000u;
+                draw(nonce, sizeof nonce);
+                feed("diary: writing %s...", today_date);
+                r = ok_think_diary(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
+                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+                    feed_verified(0);
+                    save_diary(today_date, t.diary);
+                    snprintf(yesterday, sizeof yesterday, "%s", t.diary);
+                    feed("diary: %.31s", t.diary);
+                    diary_written = 1;
+                } else if (r == OK_OK) {
+                    failed();
+                }
+                save_episode(&p, now_ms, count);
+                if (diary_written == -1 || strcmp(date, today_date)) { /* written or not, the new day starts */
+                    snprintf(today_date, sizeof today_date, "%s", date);
+                    today_count = 0;
+                    diary_written = 0;
+                } else if (diary_written != 1) {
+                    diary_written = 1; /* tonight's failed: one try a night, the day goes on */
+                }
+            }
+        }
 
         /* Every 12 s while the player is around, every 30 s otherwise, so
          * each thing it does has time to play out; after failures it backs
