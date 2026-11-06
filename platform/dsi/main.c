@@ -259,6 +259,40 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
 }
 
+/* ---- Watchdog: if the game loop stops for 2 s, the vertical blank
+ * interrupt (which still runs) writes on the bottom screen where the
+ * network and the mind threads are, so a freeze explains itself. ----------- */
+static volatile uint32_t heartbeat;
+static void watch_text(uint16_t *fb, int x, int y, const char *s)
+{
+    const uint8_t (*font)[8] = ok_font();
+    int row, col;
+    for (; *s && x < 248; s++, x += 8)
+        for (row = 0; row < 8; row++)
+            for (col = 0; col < 8; col++)
+                fb[(y + row) * 256 + x + col] = (font[(unsigned char)*s & 127][row] >> col & 1) ? 0xffff : 0x801f;
+}
+
+static void watchdog(void)
+{
+    static uint32_t seen, still;
+    if (heartbeat != seen) {
+        seen = heartbeat;
+        still = 0;
+        return;
+    }
+    if (++still == 120 || (still > 120 && still % 60 == 0)) {
+        uint16_t *fb = bgGetGfxPtr(bottom_bg);
+        char t[40];
+        snprintf(t, sizeof t, "STUCK %lus", (unsigned long)(still / 60));
+        watch_text(fb, 0, 0, t);
+        snprintf(t, sizeof t, "net: %.24s", ok_dsi_net_where ? ok_dsi_net_where : "-");
+        watch_text(fb, 0, 10, t);
+        snprintf(t, sizeof t, "mind: %.23s", ok_dsi_mind_where ? ok_dsi_mind_where : "-");
+        watch_text(fb, 0, 20, t);
+    }
+}
+
 int main(void)
 {
     int top, bottom, held = 0, redraw = 1, storage, fails, show_net = 0, tech_on = 0, show_mind = 0, threads_on = 0;
@@ -327,6 +361,8 @@ int main(void)
         load_wall(&ui);
     }
     machine_facts(0);
+    irqSet(IRQ_VBLANK, watchdog);
+    irqEnable(IRQ_VBLANK);
     cpuStartTiming(0); /* runs for good: the checks, the network's entropy and the music read it */
     ok_r3d_divider(hw_divide);
     ok_house_clock = now_us;
@@ -344,6 +380,7 @@ int main(void)
         int ticks = 0;
         uint32_t t;
         cothread_yield_irq(IRQ_VBLANK); /* not swiWaitForVBlank: Wi-Fi runs in another thread */
+        heartbeat++;
         scanKeys();
         ok_dsi_audio_pump();
         now = time(NULL);

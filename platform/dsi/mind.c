@@ -152,7 +152,9 @@ static int resolve(const char *host, struct in_addr *out)
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
+    ok_dsi_mind_where = "getaddrinfo";
     if (getaddrinfo(host, "443", &hints, &ai) || !ai) return 0;
+    ok_dsi_mind_where = "resolved";
     *out = ((struct sockaddr_in *)ai->ai_addr)->sin_addr;
     freeaddrinfo(ai);
     return 1;
@@ -161,6 +163,7 @@ static int resolve(const char *host, struct in_addr *out)
 /* One HTTPS round trip for the shared core, on the connection the last one
  * left open when the server keeps it; a stale one is reopened once. */
 static int fd = -1;
+volatile const char *ok_dsi_mind_where = "not started";
 
 static void hang_up(void)
 {
@@ -183,6 +186,7 @@ static int dial(const char *host)
         return -2;
     }
     line(2, "TCP %s:443", inet_ntoa(addr.sin_addr));
+    ok_dsi_mind_where = "tcp connect";
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -3;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     if ((connect(fd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(fd, POLLOUT, 8000) ||
@@ -461,7 +465,9 @@ static int thinker(void *arg)
         now_ms = ((uint64_t)rtc - (uint64_t)(cfg.tz_minutes * 60)) * 1000u;
         draw(nonce, sizeof nonce);
         t0 = cpuGetTiming();
+        ok_dsi_mind_where = "thinking (TLS)";
         r = ok_think_run(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
+        ok_dsi_mind_where = "after thinking";
         ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
         count++;
         if (r != OK_OK) {
