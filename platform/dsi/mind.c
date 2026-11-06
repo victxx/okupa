@@ -98,19 +98,31 @@ static uint32_t asked_at;
 static char heard_text[OK_MIND_TEXT + 1], saw_text[OK_MIND_TEXT + 1];
 static const uint8_t *clip;
 static size_t clip_len;
-static volatile int clip_waiting, look_wanted, ear_state;
 static uint32_t looked_at;
-TWL_BSS static uint8_t photo_twl[64 * 1024]; /* a camera PNG (37 KB) or a drawing (49 KB) */
+TWL_BSS static uint8_t photo_twl[64 * 1024]; /* a camera PNG (37 KB) or a drawing */
 static uint8_t *photo;
 static size_t photo_cap;
-/* Pictionary: the drawing to guess, and the guess once 0G has made it. */
-static uint8_t doodle[512];
-static volatile int guess_wanted, guess_state; /* guess_state: 1 new guess, -1 it could not */
-static char guess_text[OK_MIND_TEXT + 1];
-/* Its reaction to a drawing the player sent: asked of the vision model. */
-static uint8_t gift[512];
-static volatile int gift_wanted, gift_state;
-static char gift_text[OK_MIND_TEXT + 1];
+/* Pictionary: the drawing to guess; a drawing to comment on. */
+static uint8_t doodle[512], gift[512];
+
+/* What the player asked for, served before anything the mind does on its
+ * own. Each request is queued once, goes through its stages (for the screen
+ * meanwhile) and ends with a verified answer or the reason it failed, never
+ * with a made-up one. */
+typedef struct {
+    volatile int wanted; /* queued, not yet taken by the thread */
+    volatile int stage;  /* OK_DSI_* stage, 0 when idle */
+    volatile int result; /* 1 verified, -1 failed, 0 nothing new */
+    char text[OK_MIND_TEXT + 1];
+    char why[48];
+    uint32_t ms; /* the 0G round trip, measured here */
+} request;
+static request req[OK_DSI_ASKS];
+static request *serving; /* the one whose call is under way: fetch() moves its stage */
+static volatile int alive;
+static const char *not_alive = "my 0G mind is off (no mind.txt / mind.key)";
+static int read_ms = 60000; /* how long a reply may take; shorter while the player waits */
+static int reply_due;       /* the player just spoke: answer it before anything else */
 TWL_BSS static char sense_twl[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
 static char *sense_buf;
 static size_t sense_cap;
@@ -176,19 +188,77 @@ void ok_dsi_mind_observe(const ok_pet *p, int outside, uint32_t seconds_since_pl
 
 void ok_dsi_mind_toggle(void) { paused = !paused; }
 
-int ok_dsi_mind_ear_busy(void) { return clip_waiting; }
-int ok_dsi_mind_ear_state(void) { return ear_state; }
+/* A request from the game loop: queued, or failed at once (with the reason)
+ * when the mind is not running, so nothing ever waits for an answer that
+ * cannot come. One of each kind at a time. */
+static int queue(int kind)
+{
+    request *q = &req[kind];
+    if (q->wanted || q->stage) return 0;
+    q->result = 0;
+    q->text[0] = q->why[0] = 0;
+    if (!alive) {
+        snprintf(q->why, sizeof q->why, "%s", not_alive);
+        q->result = -1;
+        return 0;
+    }
+    q->wanted = 1;
+    q->stage = OK_DSI_QUEUED;
+    return 1;
+}
+
+static void finish(request *q, int ok, const char *text)
+{
+    if (ok) snprintf(q->text, sizeof q->text, "%s", text);
+    else snprintf(q->why, sizeof q->why, "%s", text);
+    q->wanted = 0;
+    q->stage = 0;
+    q->result = ok ? 1 : -1;
+}
+
+/* Every request still waiting fails with this reason (paused, no Wi-Fi). */
+static void drop_requests(const char *why_not)
+{
+    int k;
+    for (k = 0; k < OK_DSI_ASKS; k++)
+        if (req[k].wanted || req[k].stage) finish(&req[k], 0, why_not);
+}
+
+static int player_waiting(void)
+{
+    int k;
+    for (k = 0; k < OK_DSI_ASKS; k++)
+        if (req[k].wanted) return 1;
+    return 0;
+}
+
+int ok_dsi_mind_alive(void) { return alive; }
+const char *ok_dsi_mind_why_not(void) { return alive ? "" : not_alive; }
+int ok_dsi_mind_stage(int kind) { return kind >= 0 && kind < OK_DSI_ASKS ? req[kind].stage : 0; }
+
+int ok_dsi_mind_result(int kind, char *text, size_t cap, char why[48], uint32_t *ms)
+{
+    request *q;
+    int s;
+    if (kind < 0 || kind >= OK_DSI_ASKS || !(s = (q = &req[kind])->result)) return 0;
+    q->result = 0;
+    if (text && cap) snprintf(text, cap, "%s", s > 0 ? q->text : "");
+    if (why) snprintf(why, 48, "%s", s < 0 ? q->why : "");
+    if (ms) *ms = q->ms;
+    return s;
+}
+
+int ok_dsi_mind_ear_busy(void) { return req[OK_DSI_HEAR].wanted || req[OK_DSI_HEAR].stage; }
 
 void ok_dsi_mind_hear(const uint8_t *wav, size_t len)
 {
-    if (clip_waiting || !wav) return;
-    clip = wav;
+    if (ok_dsi_mind_ear_busy() || !wav) return;
+    clip = wav; /* the clip stays put until the mind has sent it */
     clip_len = len;
-    clip_waiting = 1; /* the clip stays put until the mind has sent it */
-    ear_state = 2;
+    queue(OK_DSI_HEAR);
 }
 
-void ok_dsi_mind_look(void) { look_wanted = 1; }
+void ok_dsi_mind_look(void) { queue(OK_DSI_LOOK); }
 
 void ok_dsi_mind_letters(int allowed) { letters_ok = allowed; }
 
@@ -229,34 +299,16 @@ const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about)
 
 void ok_dsi_mind_guess(const uint8_t pixels[512])
 {
-    if (guess_wanted) return;
+    if (req[OK_DSI_GUESS].wanted || req[OK_DSI_GUESS].stage) return;
     memcpy(doodle, pixels, sizeof doodle);
-    guess_wanted = 1;
+    queue(OK_DSI_GUESS);
 }
 
 void ok_dsi_mind_comment(const uint8_t pixels[512])
 {
-    if (gift_wanted) return;
+    if (req[OK_DSI_COMMENT].wanted || req[OK_DSI_COMMENT].stage) return;
     memcpy(gift, pixels, sizeof gift);
-    gift_wanted = 1;
-}
-
-int ok_dsi_mind_take_comment(char *out, size_t cap)
-{
-    int s = gift_state;
-    if (!s) return 0;
-    gift_state = 0;
-    if (s > 0) snprintf(out, cap, "%s", gift_text);
-    return s;
-}
-
-int ok_dsi_mind_take_guess(char *out, size_t cap)
-{
-    int s = guess_state;
-    if (!s) return 0;
-    guess_state = 0;
-    if (s > 0) snprintf(out, cap, "%s", guess_text);
-    return s;
+    queue(OK_DSI_COMMENT);
 }
 
 int ok_dsi_mind_take(ok_mind *d)
@@ -297,11 +349,18 @@ static void draw(uint8_t *out, size_t n)
     }
 }
 
+/* Real time on the bus clock (timers 0 and 1, 33.513982 MHz, started by the
+ * game loop): every wait below is in milliseconds that really pass, however
+ * slowly the game draws its frames (at 8 fps a "frame" is 125 ms). The clock
+ * wraps every 128 s; no single wait here is that long. */
+#define BUS_PER_MS 33514u
+static uint32_t elapsed_ms(uint32_t t0) { return (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u); }
+
 /* ---- Sockets: never trust a blocking call; ask once per frame. */
 static int wait_for(int fd, short events, int ms)
 {
-    int frames;
-    for (frames = 0; frames <= ms * 60 / 1000; frames++) {
+    uint32_t start = cpuGetTiming(), limit = (uint32_t)ms * BUS_PER_MS;
+    for (;;) {
         struct pollfd p = {fd, events, 0};
         int rc = poll(&p, 1, 0);
         stir();
@@ -309,16 +368,15 @@ static int wait_for(int fd, short events, int ms)
          * 0G reply keeps the socket readable for the whole transfer. */
         cothread_yield();
         if (rc > 0) return (p.revents & events) != 0;
-        if (rc < 0) return 0;
+        if (rc < 0 || cpuGetTiming() - start > limit) return 0;
         cothread_yield_irq(IRQ_VBLANK);
     }
-    return 0;
 }
 
 static int sock_read(void *ctx, unsigned char *buf, size_t len)
 {
     int fd = *(int *)ctx, n;
-    if (!wait_for(fd, POLLIN, 60000)) return -1; /* yields every time, data or not */ /* inference can take a while */
+    if (!wait_for(fd, POLLIN, read_ms)) return -1; /* yields every time, data or not; inference can take a while */
     n = recv(fd, buf, len, 0);
     return n > 0 ? n : -1;
 }
@@ -357,8 +415,9 @@ static int resolve(const char *host, struct in_addr *out)
 
 static int64_t clock_offset; /* add to time(NULL) for UTC */
 static int clock_synced;
-static uint32_t clock_synced_at; /* frames, for a resync every half hour */
-static uint32_t frames_alive;
+static uint32_t clock_synced_at; /* seconds, for a resync every half hour */
+/* Seconds since boot, for "every so often" (frames are not time at 8 fps). */
+static uint32_t now_s(void) { return ok_dsi_uptime(); }
 
 static int64_t utc_now(void)
 {
@@ -411,7 +470,7 @@ static int clock_sync(void)
         if (n > 0 && ok_sntp_read(r, (size_t)n, stamp, &utc) == OK_OK && utc >= CLOCK_FLOOR) {
             clock_offset = utc - (int64_t)time(NULL);
             clock_synced = 1;
-            clock_synced_at = frames_alive;
+            clock_synced_at = now_s();
             describe_offset(ok_facts_now.og_clock, sizeof ok_facts_now.og_clock, clock_offset);
             line(4, "Clock: %.25s", ok_facts_now.og_clock);
             feed("clock: %.32s", ok_facts_now.og_clock);
@@ -517,6 +576,9 @@ static int fetch(void *ctx, const char *host, const char *req, size_t n, const c
     int e, tries;
     uint32_t t0;
     (void)ctx;
+    /* The first round trip of a call is the question, the next one the TEE's
+     * signature: the screen says which. */
+    if (serving) serving->stage = serving->stage < OK_DSI_ASKING ? OK_DSI_ASKING : OK_DSI_CHECKING;
     if (fd >= 0 && strcmp(open_host, host)) hang_up(); /* another provider: another connection */
     for (tries = 0; tries < 2; tries++) {
         int reused = fd >= 0;
@@ -641,8 +703,10 @@ static int write_slowly(FILE *f, const void *data, size_t n)
     return 1;
 }
 
-/* The episode goes to the SD card as the next link of the chain. */
-static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned count)
+/* The episode goes to the SD card as the next link of the chain, and (batch
+ * set) into the next 0G Storage batch. Photos and drawings stay on the SD
+ * card only: a few of them would fill a batch and send it on its way. */
+static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned count, int to_batch)
 {
     char path[160];
     uint8_t hash[32];
@@ -678,7 +742,7 @@ static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned c
     }
     /* And into the batch for 0G Storage (one that would not fit waits for
      * the next batch; one bigger than a batch stays on the SD card only). */
-    if (cfg.store_on && n + 1 < BATCH_MAX / 2) {
+    if (cfg.store_on && to_batch && n + 1 < BATCH_MAX / 2) {
         if (batch_len + n + 1 > BATCH_MAX - 256) want_store = 1;
         else {
             memcpy(batch + batch_len, episode, n);
@@ -762,17 +826,22 @@ static void record_facts(const ok_think_provider *p, uint32_t ms)
         snprintf(f->og_thought, sizeof f->og_thought, "%.63s", t.decision.thought);
         f->og_decisions++;
     } else {
-        snprintf(f->og_decision, sizeof f->og_decision, "sleep (safe stop: %.20s)", ok_think_stage_name(t.stage));
-        snprintf(f->og_state, sizeof f->og_state, "napping"); /* a nap, never an invented line */
+        snprintf(f->og_decision, sizeof f->og_decision, "none (safe stop: %.20s)", ok_think_stage_name(t.stage));
+        snprintf(f->og_state, sizeof f->og_state, "no answer"); /* nothing decided, nothing invented */
         f->og_said[0] = f->og_thought[0] = 0;
     }
 }
 
-static void wait_frames(int frames)
+/* Waits ms of real time, letting the game run; cut short when the player
+ * asks for something (or the mind wants to make or draw) if early is set. */
+static void wait_real(uint32_t ms, int early)
 {
-    while (frames-- > 0) {
+    uint32_t start = cpuGetTiming(), limit;
+    if (ms > 60000) ms = 60000;
+    limit = ms * BUS_PER_MS;
+    while (cpuGetTiming() - start < limit) {
+        if (early && (player_waiting() || want_make[0] || want_draw[0])) return;
         cothread_yield_irq(IRQ_VBLANK);
-        frames_alive++;
     }
 }
 
@@ -878,12 +947,6 @@ static void save_made(const char *folder, const char *name, const char *ext, con
     }
 }
 
-/* Waits, but not when the player has just spoken or asked it to look. */
-static void rest_frames(int frames)
-{
-    while (frames-- > 0 && !clip_waiting && !look_wanted && !guess_wanted && !gift_wanted && !want_make[0] && !want_draw[0])
-        wait_frames(1);
-}
 
 /* A failed call: say why on both screens. */
 static void failed(void)
@@ -954,7 +1017,7 @@ static int http_fetch(void *ctx, const char *host, const char *head, size_t n, c
     return *got ? 0 : -1;
 }
 
-static void wait_ms(int ms) { wait_frames(ms * 60 / 1000 + 1); }
+static void wait_ms(int ms) { wait_real((uint32_t)(ms < 0 ? 0 : ms), 0); }
 static void store_step(const char *step) { feed("storage: %.29s", step); }
 
 /* The batch so far goes to 0G Storage: a first line says what it is, then
@@ -1039,21 +1102,464 @@ static void feed_verified(uint32_t ms)
     }
 }
 
-static int thinker(void *arg)
+/* ---- The thread's own state, shared by the steps below. */
+static uint8_t key[32];
+static ok_think_provider chat, ear, dreamer;
+static unsigned count, verified, fails;
+static uint32_t ms_last; /* the last decision's round trip */
+static ok_mind_obs obs;  /* the last observation, for the slow mind and the diary */
+static ok_pet obs_pet;
+static char obs_did[64];
+static int decided_ok;   /* the last decision was verified */
+
+/* A call for the player: its stage follows the round trips, and a reply may
+ * take 40 s instead of a minute. */
+static void begin_serving(request *q)
 {
-    uint8_t key[32], nonce[16], mac[6];
-    char did[64], why_cam[33];
-    ok_think_provider p, ear, dreamer;
-    ok_mind_obs obs;
-    ok_pet pet;
-    time_t rtc;
-    struct tm *tm;
+    serving = q;
+    read_ms = 40000;
+    if (q) q->stage = OK_DSI_ASKING;
+}
+
+static void end_serving(void)
+{
+    serving = NULL;
+    read_ms = 60000;
+}
+
+/* After a call that did not verify: why, on the screens and for the player. */
+static void call_failed(request *q, ok_result r)
+{
+    char w[48];
+    if (r != OK_OK) {
+        stopped("setup: %s", ok_result_name(r));
+        snprintf(w, sizeof w, "could not build the request (%s)", ok_result_name(r));
+    } else {
+        failed();
+        snprintf(w, sizeof w, "%.47s", ok_facts_now.og_error);
+    }
+    if (q) finish(q, 0, w);
+}
+
+/* 1. Ears: what the player said, in words, checked. */
+static void hear(void)
+{
+    request *q = &req[OK_DSI_HEAR];
+    uint8_t nonce[16];
+    uint64_t now_ms;
+    uint32_t t0;
+    ok_result r;
+    q->wanted = 0;
+    q->stage = OK_DSI_PREPARING;
+    if (!cfg.have_ear) {
+        stopped("no ears: ear_* in mind.txt");
+        finish(q, 0, "no ears: ear_* lines missing in mind.txt");
+        return;
+    }
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    line(3, "Listening: %lu bytes to 0G", (unsigned long)clip_len);
+    feed("hearing: %lu KB to %.20s", (unsigned long)(clip_len / 1024), cfg.ear_model);
+    ok_dsi_mind_where = "hearing (TLS)";
+    begin_serving(q);
+    t0 = cpuGetTiming();
+    r = ok_think_hear(&t, &ear, key, now_ms, nonce, clip, clip_len, sense_buf, sense_cap, fetch, NULL);
+    q->ms = elapsed_ms(t0);
+    end_serving();
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        feed_verified(q->ms);
+        if (t.heard[0]) {
+            snprintf(heard_text, sizeof heard_text, "%s", t.heard);
+            line(3, "Heard: %.25s", t.heard);
+            feed("heard: \"%.30s\"", t.heard);
+            snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "heard: %.32s", t.heard);
+            today_add("heard the player say: %.56s", t.heard);
+            reply_due = 1; /* the next decision answers it, before anything else */
+            finish(q, 1, t.heard);
+        } else {
+            feed("heard: no words in the clip");
+            finish(q, 0, "0G found no words in it");
+        }
+    } else {
+        call_failed(q, r);
+    }
+    save_episode(&ear, now_ms, count, 1);
+}
+
+/* 2. Eyes: through the camera when the player asks (q), or now and then
+ * while the player is there (q NULL: only the next decision hears of it). */
+static void look(request *q)
+{
+    char why_cam[33];
+    uint8_t nonce[16];
     uint64_t now_ms;
     uint32_t t0, ms;
-    unsigned count = 0, verified = 0, fails = 0;
     size_t n;
-    int j, rest;
     ok_result r;
+    if (q) {
+        q->wanted = 0;
+        q->stage = OK_DSI_PREPARING;
+    }
+    looked_at = now_s();
+    ok_dsi_mind_where = "camera";
+    if (!ok_dsi_eye_snap(photo, photo_cap, &n, why_cam)) {
+        stopped("%s", why_cam);
+        feed("%.38s", why_cam);
+        if (q) finish(q, 0, why_cam);
+        return;
+    }
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    line(3, "Looking: %lu B photo to 0G", (unsigned long)n);
+    feed("looking: %lu KB photo to vision", (unsigned long)(n / 1024));
+    ok_dsi_mind_where = "vision (TLS)";
+    begin_serving(q);
+    t0 = cpuGetTiming();
+    r = ok_think_see(&t, &chat, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
+    ms = elapsed_ms(t0);
+    end_serving();
+    if (q) q->ms = ms;
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        feed_verified(ms);
+        snprintf(saw_text, sizeof saw_text, "%s", t.saw);
+        line(3, "Saw: %.27s", t.saw);
+        feed("saw: %.33s", t.saw);
+        snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "saw: %.34s", t.saw);
+        today_add("saw: %.75s", t.saw);
+        if (q) finish(q, 1, t.saw);
+    } else {
+        call_failed(q, r);
+    }
+    save_episode(&chat, now_ms, count, 0); /* a photo: on the SD card, not in the 0G Storage batch */
+}
+
+/* A drawing for the vision model: Pictionary (guess) or its reaction to a
+ * drawing the player made (comment). */
+static void picture(int kind)
+{
+    request *q = &req[kind];
+    const uint8_t *pixels = kind == OK_DSI_GUESS ? doodle : gift;
+    uint8_t nonce[16];
+    uint64_t now_ms;
+    uint32_t t0;
+    size_t n;
+    ok_result r;
+    q->wanted = 0;
+    q->stage = OK_DSI_PREPARING;
+    if (ok_png_drawing(pixels, 2, photo, photo_cap, &n) != OK_OK) {
+        finish(q, 0, "drawing: PNG did not fit");
+        return;
+    }
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    if (kind == OK_DSI_GUESS) feed("guessing your drawing (%lu KB)", (unsigned long)(n / 1024));
+    else feed("looking at your drawing (%lu KB)", (unsigned long)(n / 1024));
+    ok_dsi_mind_where = "drawing (TLS)";
+    begin_serving(q);
+    t0 = cpuGetTiming();
+    r = kind == OK_DSI_GUESS
+            ? ok_think_guess(&t, &chat, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL)
+            : ok_think_comment(&t, &chat, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
+    q->ms = elapsed_ms(t0);
+    end_serving();
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        feed_verified(q->ms);
+        if (kind == OK_DSI_GUESS) {
+            feed("guess: %.32s", t.saw);
+            snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "guessed: %.30s", t.saw);
+            today_add("guessed the player's drawing: %.48s", t.saw);
+            line(3, "Guess: %.25s", t.saw);
+        } else {
+            feed("says: %.32s", t.saw);
+            snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "your drawing: %.24s", t.saw);
+            today_add("looked at the player's drawing and said: %.36s", t.saw);
+        }
+        finish(q, 1, t.saw);
+    } else {
+        call_failed(q, r);
+    }
+    save_episode(&chat, now_ms, count, 0);
+}
+
+/* Whatever the player is waiting for, first. */
+static void serve_player(void)
+{
+    if (req[OK_DSI_HEAR].wanted) hear();
+    if (req[OK_DSI_GUESS].wanted) picture(OK_DSI_GUESS);
+    if (req[OK_DSI_COMMENT].wanted) picture(OK_DSI_COMMENT);
+    if (req[OK_DSI_LOOK].wanted) look(&req[OK_DSI_LOOK]);
+}
+
+/* 3. What it notices, copied from the game loop, and what it does. */
+static void decide(void)
+{
+    uint8_t nonce[16];
+    uint64_t now_ms;
+    uint32_t t0;
+    time_t rtc;
+    struct tm *tm;
+    ok_result r;
+    int j;
+    obs_pet = seen_pet;
+    memset(&obs, 0, sizeof obs);
+    rtc = time(NULL); /* the RTC is local time: it gives the hour the okupa lives in */
+    tm = localtime(&rtc);
+    obs.pet = &obs_pet;
+    obs.hour = tm->tm_hour;
+    obs.minute = tm->tm_min;
+    obs.outside = seen_outside;
+    obs.seconds_since_player = seen_idle;
+    if (seen_did[0]) {
+        memcpy(obs_did, seen_did, sizeof obs_did);
+        seen_did[0] = 0;
+        obs.player_did = obs_did;
+        if (strncmp(obs_did, "touched", 7)) today_add("the player %.66s", obs_did);
+    }
+    if (aim.goal[0]) obs.goal = aim.goal;
+    if (aim.plan[0]) obs.plan = aim.plan;
+    if (yesterday[0]) obs.diary = yesterday;
+    if (heard_text[0]) obs.heard = heard_text;
+    if (saw_text[0]) obs.saw = saw_text;
+    if (asked[0] && now_s() - asked_at > 180) asked[0] = 0; /* nobody answered in 3 minutes */
+    if (asked[0]) obs.asked = asked;
+    if (cfg.city[0]) obs.city = cfg.city;
+    obs.can_write_letter = letters_ok;
+    ok_memory_tell(&facts, &obs);
+    for (j = 0; j < recent_count; j++) obs.recent[j] = recent[j];
+    obs.recent_count = recent_count;
+    reply_due = 0;
+
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    feed("asking %.24s...", cfg.model);
+    t0 = cpuGetTiming();
+    ok_dsi_mind_where = "thinking (TLS)";
+    r = ok_think_run(&t, &chat, key, now_ms, nonce, &obs, fetch, NULL);
+    ok_dsi_mind_where = "after thinking";
+    ms_last = elapsed_ms(t0);
+    count++;
+    decided_ok = 0;
+    if (r != OK_OK) { /* a request that does not fit: say so, and try again later (never stop for good) */
+        stopped("setup: %s", ok_result_name(r));
+        feed("could not build the request: %s", ok_result_name(r));
+        fails++;
+        return;
+    }
+    record_facts(&chat, ms_last);
+    line(5, "Request id (0G chat id):");
+    line(6, "%.32s", t.chat_id[0] ? t.chat_id : "-");
+    line(7, "%.32s", strlen(t.chat_id) > 32 ? t.chat_id + 32 : "");
+    line(8, "TEE %.6s..%.4s %s", t.signer, t.signer + 38,
+         t.stage == OK_THINK_DECIDED || t.stage == OK_THINK_ANSWER ? "VERIFIED" : "not verified");
+    if (t.stage == OK_THINK_DECIDED) {
+        decided_ok = 1;
+        verified++;
+        fails = 0;
+        line(9, "Does: %s, %s", ok_mind_activity_name(t.decision.activity), ok_mind_mood_name(t.decision.mood));
+        line(10, "\"%.30s\"", t.decision.line);
+        line(11, "%.32s", t.decision.ask[0] ? t.decision.ask : t.decision.thought);
+        line(12, "Decided by 0G, checked here");
+        line(4, "Clock: %.25s", ok_facts_now.og_clock);
+        ok_facts_now.og_error[0] = 0;
+        feed_verified(ms_last);
+        feed("chose: %s, %s", ok_mind_activity_name(t.decision.activity), ok_mind_mood_name(t.decision.mood));
+        if (t.decision.line[0]) {
+            feed("says: %.32s", t.decision.line);
+            today_add("%s and said: %.50s", ok_mind_activity_name(t.decision.activity), t.decision.line);
+        }
+        if (t.decision.thought[0]) feed("thinks: %.30s", t.decision.thought);
+        if (t.decision.ask[0]) feed("asks: %.32s", t.decision.ask);
+        remember(&t.decision);
+        /* What it heard and saw has been told: it moves on. */
+        heard_text[0] = saw_text[0] = 0;
+        if (obs.heard) asked[0] = 0; /* the player answered (or spoke over it) */
+        if (t.decision.ask[0] && !asked[0]) {
+            snprintf(asked, sizeof asked, "%s", t.decision.ask);
+            asked_at = now_s();
+        }
+        if (t.decision.remember[0] && ok_memory_add(&facts, t.decision.remember)) {
+            save_facts();
+            line(13, "Keeps: %.25s", t.decision.remember);
+            feed("keeps: %.32s", t.decision.remember);
+            today_add("learned: %.70s", t.decision.remember);
+        }
+        if (t.decision.make[0] && !want_make[0]) snprintf(want_make, sizeof want_make, "%s", t.decision.make);
+        if (t.decision.draw[0] && !want_draw[0]) snprintf(want_draw, sizeof want_draw, "%s", t.decision.draw);
+        if (t.decision.letter[0] && letters_ok && !letter_new) {
+            snprintf(letter, sizeof letter, "%s", t.decision.letter);
+            letter_new = 1;
+            letters_ok = 0; /* the game loop says again when another is allowed */
+            feed("letter: %.31s", letter);
+            today_add("wrote the player a letter: %.52s", letter);
+        }
+        mailbox = t.decision;
+        mailbox_new = 1;
+    } else {
+        fails++;
+        line(9, "Stopped at: %s", ok_think_stage_name(t.stage));
+        line(10, " ");
+        line(11, "Safe stop: no decision");
+        failed();
+    }
+    line(3, "#%u: HTTP %d in %lu ms, %d known", count, t.http_status, (unsigned long)ms_last, facts.count);
+    line(0, "0G mind: alive, %u/%u verified", verified, count);
+    save_episode(&chat, now_ms, count, 1);
+}
+
+/* What it decided to make: an object, or a drawing of its own. */
+static void make_it(void)
+{
+    uint8_t nonce[16];
+    uint64_t now_ms = (uint64_t)utc_now() * 1000u;
+    uint32_t t0, ms;
+    ok_result r;
+    draw(nonce, sizeof nonce);
+    feed("making: %.30s", want_make);
+    t0 = cpuGetTiming();
+    r = ok_think_make(&t, &chat, key, now_ms, nonce, want_make, fetch, NULL);
+    ms = elapsed_ms(t0);
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        feed_verified(ms);
+        made = t.object;
+        if (!made.name[0]) snprintf(made.name, sizeof made.name, "%.20s", want_make);
+        feed("made: %.20s, %d boxes", made.name, made.count);
+        today_add("made %.60s out of boxes", made.name);
+        save_made("objects", made.name, "bin", &made, sizeof made);
+        made_new = 1;
+    } else {
+        call_failed(NULL, r);
+    }
+    save_episode(&chat, now_ms, count, 1);
+    want_make[0] = 0;
+}
+
+static void draw_it(void)
+{
+    uint8_t nonce[16];
+    uint64_t now_ms = (uint64_t)utc_now() * 1000u;
+    uint32_t t0, ms;
+    size_t n;
+    ok_result r;
+    draw(nonce, sizeof nonce);
+    feed("drawing: %.29s", want_draw);
+    t0 = cpuGetTiming();
+    r = ok_think_draw(&t, &chat, key, now_ms, nonce, want_draw, fetch, NULL);
+    ms = elapsed_ms(t0);
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        feed_verified(ms);
+        memcpy(drew, t.drawing, sizeof drew);
+        snprintf(drew_name, sizeof drew_name, "%.20s", t.drawing_name[0] ? t.drawing_name : want_draw);
+        feed("drew: %.32s", drew_name);
+        today_add("drew %.70s", drew_name);
+        if (ok_png_drawing(drew, 2, photo, photo_cap, &n) == OK_OK) save_made("drawings", drew_name, "png", photo, n);
+        drew_new = 1;
+    } else {
+        call_failed(NULL, r);
+    }
+    save_episode(&chat, now_ms, count, 1);
+    want_draw[0] = 0;
+}
+
+/* The slow mind: a goal and a plan every five minutes. */
+static void plan_it(void)
+{
+    uint8_t nonce[16];
+    uint64_t now_ms;
+    uint32_t t0, ms;
+    ok_result r;
+    if (!decided_ok || (aimed && now_s() - aimed_at <= 300)) return;
+    aimed = 1;
+    aimed_at = now_s();
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    feed("slow mind: thinking ahead...");
+    t0 = cpuGetTiming();
+    r = ok_think_plan(&t, &chat, key, now_ms, nonce, &obs, fetch, NULL);
+    ms = elapsed_ms(t0);
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        feed_verified(ms);
+        aim = t.plan;
+        feed("goal: %.32s", aim.goal);
+        feed("plan: %.32s", aim.plan);
+        line(2, "Goal: %.26s", aim.goal);
+        today_add("decided: %.70s", aim.goal);
+    } else {
+        call_failed(NULL, r);
+    }
+    save_episode(&chat, now_ms, count, 1);
+}
+
+/* The diary: once the day is over (a new date) or after 23:00, and the
+ * night's dream drawn by the image model. */
+static void diary_it(void)
+{
+    char date[11];
+    uint8_t nonce[16];
+    uint64_t now_ms;
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    ok_result r;
+    int j;
+    strftime(date, sizeof date, "%Y-%m-%d", lt);
+    if (strcmp(date, today_date) && !diary_written && today_count >= 3) diary_written = -1; /* yesterday's is owed */
+    if (strcmp(date, today_date) && diary_written != -1) {
+        snprintf(today_date, sizeof today_date, "%s", date); /* a new day */
+        today_count = 0;
+        diary_written = 0;
+    }
+    if (!(today_count >= 3 && (diary_written == -1 || (!diary_written && lt->tm_hour >= 23)))) return;
+    for (j = 0; j < today_count; j++) obs.today[j] = today[j];
+    obs.today_count = today_count;
+    obs.date = today_date;
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    feed("diary: writing %s...", today_date);
+    r = ok_think_diary(&t, &chat, key, now_ms, nonce, &obs, fetch, NULL);
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        feed_verified(0);
+        save_diary(today_date, t.diary);
+        snprintf(yesterday, sizeof yesterday, "%s", t.diary);
+        feed("diary: %.31s", t.diary);
+        diary_written = 1;
+        if (t.dream[0] && cfg.have_dream) { /* and tonight's dream, drawn by the image model */
+            char about[OK_MIND_DREAM + 1];
+            snprintf(about, sizeof about, "%s", t.dream);
+            save_episode(&chat, now_ms, count, 1);
+            now_ms = (uint64_t)utc_now() * 1000u;
+            draw(nonce, sizeof nonce);
+            feed("dreaming: %.28s", about);
+            r = ok_think_dream(&t, &dreamer, key, now_ms, nonce, about, dream_png, sizeof dream_png, sense_buf, sense_cap,
+                               fetch, NULL);
+            if (r == OK_OK && t.stage == OK_THINK_DECIDED &&
+                ok_png_read_rgb15(dream_png, t.image_len, dream_px, 128 * 128, &dream_w, &dream_h, dream_scratch,
+                                  sizeof dream_scratch) == OK_OK) {
+                feed_verified(0);
+                feed("dream: %dx%d picture, decoded here", dream_w, dream_h);
+                snprintf(dream_about, sizeof dream_about, "%s", about);
+                save_made("dreams", "dream", "png", dream_png, t.image_len);
+                dream_new = 1;
+            } else {
+                call_failed(NULL, r);
+            }
+            if (r == OK_OK) save_episode(&dreamer, now_ms, count, 0);
+        }
+    } else {
+        call_failed(NULL, r);
+    }
+    save_episode(&chat, now_ms, count, 1);
+    if (diary_written == -1 || strcmp(date, today_date)) { /* written or not, the new day starts */
+        snprintf(today_date, sizeof today_date, "%s", date);
+        today_count = 0;
+        diary_written = 0;
+    } else if (diary_written != 1) {
+        diary_written = 1; /* tonight's failed: one try a night, the day goes on */
+    }
+}
+
+static int thinker(void *arg)
+{
+    uint8_t mac[6];
+    int rest;
     (void)arg;
 
     memset(lines, 0, sizeof lines);
@@ -1064,6 +1570,8 @@ static int thinker(void *arg)
     if (!dir_path[0] || !load_settings(key)) {
         line(1, "No mind.txt / mind.key on SD");
         stopped("no mind.txt / mind.key");
+        not_alive = "my 0G mind is off (mind.txt / mind.key)";
+        drop_requests(not_alive);
         return 0;
     }
     load_chain();
@@ -1077,11 +1585,11 @@ static int thinker(void *arg)
     load_diary();
     line(1, "%.20s%s", cfg.model, cfg.have_ear ? " + ears" : "");
     feed("mind on: %.22s%s", cfg.model, cfg.have_ear ? " + ears" : "");
-    p.host = cfg.host;
-    p.provider = cfg.provider;
-    p.model = cfg.model;
-    memcpy(p.signer, cfg.signer, 20);
-    p.generation = 0;
+    chat.host = cfg.host;
+    chat.provider = cfg.provider;
+    chat.model = cfg.model;
+    memcpy(chat.signer, cfg.signer, 20);
+    chat.generation = 0;
     ear.host = cfg.ear_host;
     ear.provider = cfg.ear_provider;
     ear.model = cfg.ear_model;
@@ -1094,392 +1602,58 @@ static int thinker(void *arg)
     dreamer.generation = 0;
 
     for (;;) {
-        if ((paused || !wifi_ready()) && guess_wanted) { /* no guess without its mind */
-            guess_wanted = 0;
-            guess_state = -1;
-        }
-        if ((paused || !wifi_ready()) && gift_wanted) gift_wanted = 0; /* the drawing still goes; no comment */
-        if (paused) {
-            line(0, "0G mind: paused (Y resumes)");
+        if (paused || !wifi_ready() || !have_pet) {
+            alive = 0;
+            not_alive = paused ? "my 0G mind is paused (Dev > Y)" : "my 0G mind is waiting for Wi-Fi";
+            drop_requests(not_alive); /* never leave the player waiting on an answer that cannot come */
+            if (paused) {
+                line(0, "0G mind: paused (Y resumes)");
+            } else {
+                line(0, "0G mind: waiting for Wi-Fi");
+                if (strcmp(ok_facts_now.og_error, "waiting for Wi-Fi")) feed("waiting for Wi-Fi");
+                snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "waiting for Wi-Fi");
+            }
             hang_up();
-            wait_frames(30);
+            wait_real(paused ? 500 : 1000, 0);
             continue;
         }
-        if (!wifi_ready() || !have_pet) {
-            line(0, "0G mind: waiting for Wi-Fi");
-            if (strcmp(ok_facts_now.og_error, "waiting for Wi-Fi")) feed("waiting for Wi-Fi");
-            snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "waiting for Wi-Fi");
-            hang_up();
-            wait_frames(60);
-            continue;
-        }
+        alive = 1;
         Wifi_GetData(WIFIGETDATA_MACADDRESS, sizeof mac, mac);
         ok_keccak_update(&pool, mac, sizeof mac);
-        if (!clock_synced || frames_alive - clock_synced_at > 60u * 1800u) clock_sync();
+        if (!clock_synced || now_s() - clock_synced_at > 1800) clock_sync();
 
-        /* 1. Ears: what the player said, in words, checked. */
-        if (clip_waiting) {
-            if (cfg.have_ear) {
-                now_ms = (uint64_t)utc_now() * 1000u;
-                draw(nonce, sizeof nonce);
-                line(3, "Listening: %lu bytes to 0G", (unsigned long)clip_len);
-                feed("hearing: %lu KB to %.20s", (unsigned long)(clip_len / 1024), cfg.ear_model);
-                t0 = cpuGetTiming();
-                r = ok_think_hear(&t, &ear, key, now_ms, nonce, clip, clip_len, sense_buf, sense_cap, fetch,
-                                  NULL);
-                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-                if (r == OK_OK && t.stage == OK_THINK_DECIDED) feed_verified(ms);
-                if (r == OK_OK && t.stage == OK_THINK_DECIDED && t.heard[0]) {
-                    snprintf(heard_text, sizeof heard_text, "%s", t.heard);
-                    line(3, "Heard: %.25s", t.heard);
-                    feed("heard: \"%.30s\"", t.heard);
-                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "heard: %.32s", t.heard);
-                    today_add("heard the player say: %.56s", t.heard);
-                } else if (r == OK_OK) {
-                    failed();
-                }
-                save_episode(&ear, now_ms, count);
-            } else {
-                stopped("no ears: ear_* in mind.txt");
-            }
-            clip_waiting = 0;
-            ear_state = 0;
-        }
+        /* The player first: what they said, a guess, a look, a comment. */
+        serve_player();
+        if (!player_waiting() && cfg.look_every > 0 && seen_idle < 60 && now_s() - looked_at > (uint32_t)cfg.look_every)
+            look(NULL);
 
-        /* 2. Eyes: through the camera when asked, or now and then while the
-         * player is there. */
-        if (look_wanted || (cfg.look_every > 0 && seen_idle < 60 &&
-                            frames_alive - looked_at > (uint32_t)cfg.look_every * 60u)) {
-            look_wanted = 0;
-            looked_at = frames_alive;
-            if (ok_dsi_eye_snap(photo, photo_cap, &n, why_cam)) {
-                now_ms = (uint64_t)utc_now() * 1000u;
-                draw(nonce, sizeof nonce);
-                line(3, "Looking: %lu B photo to 0G", (unsigned long)n);
-                feed("looking: %lu KB photo to vision", (unsigned long)(n / 1024));
-                t0 = cpuGetTiming();
-                r = ok_think_see(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
-                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
-                    feed_verified(ms);
-                    snprintf(saw_text, sizeof saw_text, "%s", t.saw);
-                    line(3, "Saw: %.27s", t.saw);
-                    feed("saw: %.33s", t.saw);
-                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "saw: %.34s", t.saw);
-                    today_add("saw: %.75s", t.saw);
-                } else if (r == OK_OK) {
-                    failed();
-                }
-                save_episode(&p, now_ms, count);
-            } else {
-                stopped("%s", why_cam);
-                feed("%.38s", why_cam);
-            }
-        }
-
-        /* A drawing the player sent: the okupa looks at it and says something. */
-        if (gift_wanted) {
-            if (ok_png_drawing(gift, 2, photo, photo_cap, &n) == OK_OK) {
-                now_ms = (uint64_t)utc_now() * 1000u;
-                draw(nonce, sizeof nonce);
-                feed("looking at your drawing...");
-                t0 = cpuGetTiming();
-                r = ok_think_comment(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
-                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
-                    feed_verified(ms);
-                    snprintf(gift_text, sizeof gift_text, "%.40s", t.saw);
-                    feed("says: %.32s", gift_text);
-                    snprintf(ok_facts_now.og_said, sizeof ok_facts_now.og_said, "%.47s", gift_text);
-                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "your drawing");
-                    today_add("the player sent a drawing; it said: %.40s", gift_text);
-                    gift_state = 1;
-                } else {
-                    if (r == OK_OK) failed();
-                    gift_state = -1;
-                }
-                save_episode(&p, now_ms, count);
-            } else {
-                gift_state = -1;
-            }
-            gift_wanted = 0;
-        }
-
-        /* Pictionary: the player's drawing, guessed by 0G's vision model. */
-        if (guess_wanted) {
-            if (ok_png_drawing(doodle, 2, photo, photo_cap, &n) == OK_OK) {
-                now_ms = (uint64_t)utc_now() * 1000u;
-                draw(nonce, sizeof nonce);
-                feed("guessing your drawing (%lu KB)", (unsigned long)(n / 1024));
-                t0 = cpuGetTiming();
-                r = ok_think_guess(&t, &p, key, now_ms, nonce, photo, n, sense_buf, sense_cap, fetch, NULL);
-                ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
-                    feed_verified(ms);
-                    snprintf(guess_text, sizeof guess_text, "%s", t.saw);
-                    feed("guess: %.32s", t.saw);
-                    snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "guessed: %.30s", t.saw);
-                    today_add("guessed the player's drawing: %.48s", t.saw);
-                    line(3, "Guess: %.25s", t.saw);
-                    guess_state = 1;
-                } else {
-                    if (r == OK_OK) failed();
-                    guess_state = -1;
-                }
-                save_episode(&p, now_ms, count);
-            } else {
-                guess_state = -1;
-            }
-            guess_wanted = 0;
-        }
-
-        /* 3. What it notices, copied from the game loop, and what it does. */
-        pet = seen_pet;
-        memset(&obs, 0, sizeof obs);
-        rtc = time(NULL); /* the RTC is local time: it gives the hour the okupa lives in */
-        tm = localtime(&rtc);
-        obs.pet = &pet;
-        obs.hour = tm->tm_hour;
-        obs.minute = tm->tm_min;
-        obs.outside = seen_outside;
-        obs.seconds_since_player = seen_idle;
-        if (seen_did[0]) {
-            memcpy(did, seen_did, sizeof did);
-            seen_did[0] = 0;
-            obs.player_did = did;
-            if (strncmp(did, "touched", 7)) today_add("the player %.66s", did);
-        }
-        if (aim.goal[0]) obs.goal = aim.goal;
-        if (aim.plan[0]) obs.plan = aim.plan;
-        if (yesterday[0]) obs.diary = yesterday;
-        if (heard_text[0]) obs.heard = heard_text;
-        if (saw_text[0]) obs.saw = saw_text;
-        if (asked[0] && frames_alive - asked_at > 60u * 180u) asked[0] = 0; /* nobody answered in 3 minutes */
-        if (asked[0]) obs.asked = asked;
-        if (cfg.city[0]) obs.city = cfg.city;
-        obs.can_write_letter = letters_ok;
-        ok_memory_tell(&facts, &obs);
-        for (j = 0; j < recent_count; j++) obs.recent[j] = recent[j];
-        obs.recent_count = recent_count;
-
-        now_ms = (uint64_t)utc_now() * 1000u;
-        draw(nonce, sizeof nonce);
-        feed("asking %.24s...", cfg.model);
-        t0 = cpuGetTiming();
-        ok_dsi_mind_where = "thinking (TLS)";
-        r = ok_think_run(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
-        ok_dsi_mind_where = "after thinking";
-        ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-        count++;
-        if (r != OK_OK) {
-            line(12, "Setup failed: %s", ok_result_name(r));
-            break;
-        }
-        record_facts(&p, ms);
-        line(5, "Request id (0G chat id):");
-        line(6, "%.32s", t.chat_id[0] ? t.chat_id : "-");
-        line(7, "%.32s", strlen(t.chat_id) > 32 ? t.chat_id + 32 : "");
-        line(8, "TEE %.6s..%.4s %s", t.signer, t.signer + 38,
-             t.stage == OK_THINK_DECIDED || t.stage == OK_THINK_ANSWER ? "VERIFIED" : "not verified");
-        if (t.stage == OK_THINK_DECIDED) {
-            verified++;
-            fails = 0;
-            line(9, "Does: %s, %s", ok_mind_activity_name(t.decision.activity), ok_mind_mood_name(t.decision.mood));
-            line(10, "\"%.30s\"", t.decision.line);
-            line(11, "%.32s", t.decision.ask[0] ? t.decision.ask : t.decision.thought);
-            line(12, "Decided by 0G, checked here");
-            line(4, "Clock: %.25s", ok_facts_now.og_clock);
-            ok_facts_now.og_error[0] = 0;
-            feed_verified(ms);
-            feed("chose: %s, %s", ok_mind_activity_name(t.decision.activity), ok_mind_mood_name(t.decision.mood));
-            if (t.decision.line[0]) {
-                feed("says: %.32s", t.decision.line);
-                today_add("%s and said: %.50s", ok_mind_activity_name(t.decision.activity), t.decision.line);
-            }
-            if (t.decision.thought[0]) feed("thinks: %.30s", t.decision.thought);
-            if (t.decision.ask[0]) feed("asks: %.32s", t.decision.ask);
-            remember(&t.decision);
-            /* What it heard and saw has been told: it moves on. */
-            heard_text[0] = saw_text[0] = 0;
-            if (obs.heard) asked[0] = 0; /* the player answered (or spoke over it) */
-            if (t.decision.ask[0] && !asked[0]) {
-                snprintf(asked, sizeof asked, "%s", t.decision.ask);
-                asked_at = frames_alive;
-            }
-            if (t.decision.remember[0] && ok_memory_add(&facts, t.decision.remember)) {
-                save_facts();
-                line(13, "Keeps: %.25s", t.decision.remember);
-                feed("keeps: %.32s", t.decision.remember);
-                today_add("learned: %.70s", t.decision.remember);
-            }
-            if (t.decision.make[0] && !want_make[0]) snprintf(want_make, sizeof want_make, "%s", t.decision.make);
-            if (t.decision.draw[0] && !want_draw[0]) snprintf(want_draw, sizeof want_draw, "%s", t.decision.draw);
-            if (t.decision.letter[0] && letters_ok && !letter_new) {
-                snprintf(letter, sizeof letter, "%s", t.decision.letter);
-                letter_new = 1;
-                letters_ok = 0; /* the game loop says again when another is allowed */
-                feed("letter: %.31s", letter);
-                today_add("wrote the player a letter: %.52s", letter);
-            }
-            mailbox = t.decision;
-            mailbox_new = 1;
-        } else {
-            fails++;
-            line(9, "Stopped at: %s", ok_think_stage_name(t.stage));
-            line(10, " ");
-            line(11, "Safe stop: no decision");
-            failed();
-        }
-        line(3, "#%u: HTTP %d in %lu ms, %d known", count, t.http_status, (unsigned long)ms, facts.count);
-        line(0, "0G mind: alive, %u/%u verified", verified, count);
-        save_episode(&p, now_ms, count);
-
-        /* What it decided to make: an object, or a drawing of its own. */
-        if (want_make[0]) {
-            now_ms = (uint64_t)utc_now() * 1000u;
-            draw(nonce, sizeof nonce);
-            feed("making: %.30s", want_make);
-            t0 = cpuGetTiming();
-            r = ok_think_make(&t, &p, key, now_ms, nonce, want_make, fetch, NULL);
-            ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-            if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
-                feed_verified(ms);
-                made = t.object;
-                if (!made.name[0]) snprintf(made.name, sizeof made.name, "%.20s", want_make);
-                feed("made: %.20s, %d boxes", made.name, made.count);
-                today_add("made %.60s out of boxes", made.name);
-                save_made("objects", made.name, "bin", &made, sizeof made);
-                made_new = 1;
-            } else if (r == OK_OK) {
-                failed();
-            }
-            save_episode(&p, now_ms, count);
-            want_make[0] = 0;
-        }
-        if (want_draw[0]) {
-            now_ms = (uint64_t)utc_now() * 1000u;
-            draw(nonce, sizeof nonce);
-            feed("drawing: %.29s", want_draw);
-            t0 = cpuGetTiming();
-            r = ok_think_draw(&t, &p, key, now_ms, nonce, want_draw, fetch, NULL);
-            ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-            if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
-                feed_verified(ms);
-                memcpy(drew, t.drawing, sizeof drew);
-                snprintf(drew_name, sizeof drew_name, "%.20s", t.drawing_name[0] ? t.drawing_name : want_draw);
-                feed("drew: %.32s", drew_name);
-                today_add("drew %.70s", drew_name);
-                if (ok_png_drawing(drew, 2, photo, photo_cap, &n) == OK_OK) save_made("drawings", drew_name, "png", photo, n);
-                drew_new = 1;
-            } else if (r == OK_OK) {
-                failed();
-            }
-            save_episode(&p, now_ms, count);
-            want_draw[0] = 0;
-        }
-
-        /* The slow mind: a goal and a plan every five minutes. */
-        if (t.stage == OK_THINK_DECIDED && (!aimed || frames_alive - aimed_at > 60u * 300u)) {
-            aimed = 1;
-            aimed_at = frames_alive;
-            now_ms = (uint64_t)utc_now() * 1000u;
-            draw(nonce, sizeof nonce);
-            feed("slow mind: thinking ahead...");
-            t0 = cpuGetTiming();
-            r = ok_think_plan(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
-            ms = (uint32_t)((uint64_t)(cpuGetTiming() - t0) * 1000u / 33513982u);
-            if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
-                feed_verified(ms);
-                aim = t.plan;
-                feed("goal: %.32s", aim.goal);
-                feed("plan: %.32s", aim.plan);
-                line(2, "Goal: %.26s", aim.goal);
-                today_add("decided: %.70s", aim.goal);
-            } else if (r == OK_OK) {
-                failed();
-            }
-            save_episode(&p, now_ms, count);
-        }
-
-        /* The diary: once the day is over (a new date) or after 23:00. */
-        {
-            char date[11];
-            time_t now = time(NULL);
-            struct tm *lt = localtime(&now);
-            strftime(date, sizeof date, "%Y-%m-%d", lt);
-            if (strcmp(date, today_date) && !diary_written && today_count >= 3) diary_written = -1; /* yesterday's is owed */
-            if (strcmp(date, today_date) && diary_written != -1) {
-                snprintf(today_date, sizeof today_date, "%s", date); /* a new day */
-                today_count = 0;
-                diary_written = 0;
-            }
-            if (today_count >= 3 && (diary_written == -1 || (!diary_written && lt->tm_hour >= 23))) {
-                for (j = 0; j < today_count; j++) obs.today[j] = today[j];
-                obs.today_count = today_count;
-                obs.date = today_date;
-                now_ms = (uint64_t)utc_now() * 1000u;
-                draw(nonce, sizeof nonce);
-                feed("diary: writing %s...", today_date);
-                r = ok_think_diary(&t, &p, key, now_ms, nonce, &obs, fetch, NULL);
-                if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
-                    feed_verified(0);
-                    save_diary(today_date, t.diary);
-                    snprintf(yesterday, sizeof yesterday, "%s", t.diary);
-                    feed("diary: %.31s", t.diary);
-                    diary_written = 1;
-                    if (t.dream[0] && cfg.have_dream) { /* and tonight's dream, drawn by the image model */
-                        char about[OK_MIND_DREAM + 1];
-                        snprintf(about, sizeof about, "%s", t.dream);
-                        save_episode(&p, now_ms, count);
-                        now_ms = (uint64_t)utc_now() * 1000u;
-                        draw(nonce, sizeof nonce);
-                        feed("dreaming: %.28s", about);
-                        r = ok_think_dream(&t, &dreamer, key, now_ms, nonce, about, dream_png, sizeof dream_png,
-                                           sense_buf, sense_cap, fetch, NULL);
-                        if (r == OK_OK && t.stage == OK_THINK_DECIDED &&
-                            ok_png_read_rgb15(dream_png, t.image_len, dream_px, 128 * 128, &dream_w, &dream_h, dream_scratch,
-                                              sizeof dream_scratch) == OK_OK) {
-                            feed_verified(0);
-                            feed("dream: %dx%d picture, decoded here", dream_w, dream_h);
-                            snprintf(dream_about, sizeof dream_about, "%s", about);
-                            save_made("dreams", "dream", "png", dream_png, t.image_len);
-                            dream_new = 1;
-                        } else if (r == OK_OK) {
-                            failed();
-                        }
-                        if (r == OK_OK) save_episode(&dreamer, now_ms, count);
-                    }
-                } else if (r == OK_OK) {
-                    failed();
-                }
-                save_episode(&p, now_ms, count);
-                if (diary_written == -1 || strcmp(date, today_date)) { /* written or not, the new day starts */
-                    snprintf(today_date, sizeof today_date, "%s", date);
-                    today_count = 0;
-                    diary_written = 0;
-                } else if (diary_written != 1) {
-                    diary_written = 1; /* tonight's failed: one try a night, the day goes on */
-                }
-            }
-        }
-
-        /* 0G Storage: the batch every store_every minutes, or when it is full. */
-        if (cfg.store_on && batch_len &&
-            (want_store || frames_alive - stored_at > (uint32_t)cfg.store_every * 60u * 60u)) {
-            stored_at = frames_alive;
+        decide();
+        serve_player();
+        if (!reply_due && want_make[0]) make_it();
+        serve_player();
+        if (!reply_due && want_draw[0]) draw_it();
+        serve_player();
+        /* The slow mind, the diary and the storage batch only when nobody waits. */
+        if (!reply_due && !player_waiting()) plan_it();
+        if (!reply_due && !player_waiting()) diary_it();
+        if (!reply_due && !player_waiting() && cfg.store_on && batch_len &&
+            (want_store || now_s() - stored_at > (uint32_t)cfg.store_every * 60u)) {
+            stored_at = now_s();
             want_store = 0;
             flush_batch(key);
         }
+        if (reply_due || player_waiting()) continue; /* the player spoke or asked: answer now */
 
-        /* Every 12 s while the player is around, every 30 s otherwise, so
-         * each thing it does has time to play out; after failures it backs
-         * off up to a minute. Speaking or R cuts the wait short. */
-        rest = seen_idle < 60 ? 12 : 30;
+        /* Every 20 s while the player is around, every minute otherwise, 90 s
+         * while it sleeps alone, so each thing it does has time to play out;
+         * after failures it backs off up to a minute. Speaking, a photo or a
+         * game cuts the wait short. */
+        rest = seen_idle < 60 ? 20 : 60;
+        if (seen_pet.asleep && seen_idle >= 60) rest = 90;
         if (fails) rest = fails >= 3 ? 60 : 10 << fails; /* each try costs a TLS handshake the game waits for */
-        rest = rest * 60 - (int)(ms * 60 / 1000);
-        rest_frames(rest > 60 * 3 ? rest : 60 * 3);
+        rest = rest * 1000 - (int)ms_last;
+        wait_real((uint32_t)(rest > 3000 ? rest : 3000), 1);
     }
-    ok_wipe(key, sizeof key);
     return 0;
 }
 
@@ -1545,7 +1719,13 @@ void ok_dsi_mind_start(const char *dir)
     if (!buffers()) {
         line(0, "0G mind: not enough memory");
         stopped("not enough memory (DS mode)");
+        not_alive = "my 0G mind is off (not enough memory)";
         return;
     }
-    if (cothread_create(thinker, NULL, MIND_STACK, COTHREAD_DETACHED) < 0) line(0, "0G mind: no thread");
+    if (cothread_create(thinker, NULL, MIND_STACK, COTHREAD_DETACHED) < 0) {
+        line(0, "0G mind: no thread");
+        not_alive = "my 0G mind could not start (no thread)";
+        return;
+    }
+    not_alive = "my 0G mind is starting";
 }

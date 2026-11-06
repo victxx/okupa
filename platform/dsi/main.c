@@ -730,7 +730,8 @@ int main(void)
             }
         }
         {
-            int g = ok_dsi_mind_take_guess(game_guess, sizeof game_guess);
+            static char failed_why[48], said[80];
+            int g = ok_dsi_mind_result(OK_DSI_GUESS, game_guess, sizeof game_guess, failed_why, NULL);
             if (g) {
                 ok_ui_listening(&ui, 0);
                 game_waiting = 0;
@@ -741,8 +742,9 @@ int main(void)
                 ok_ui_ask(&ui, q);
                 game_asked = 1;
             } else if (g < 0) {
-                ui.say = "My head is foggy... no guess this time.";
-                ui.say_ticks = 60 * 3;
+                snprintf(said, sizeof said, "No guess from 0G: %.47s", failed_why);
+                ui.say = said;
+                ui.say_ticks = 60 * 6;
             }
         }
         if (!tech_on && game_asked && (keysDown() & (KEY_A | KEY_B))) {
@@ -776,7 +778,7 @@ int main(void)
         if (ok_dsi_mind_take(&thought)) obey(&ui, &pet, &thought, (int64_t)now);
         {
             static char comment[OK_MIND_TEXT + 1];
-            if (ok_dsi_mind_take_comment(comment, sizeof comment) > 0) /* its verified reaction to the drawing */
+            if (ok_dsi_mind_result(OK_DSI_COMMENT, comment, sizeof comment, NULL, NULL) > 0) /* its verified reaction to the drawing */
                 ok_ui_direct(&ui, &pet, OK_MOVE_WAVE, OK_PLACE_ATTIC, OK_POSE_HAPPY, comment);
         }
         /* What its mind made, drew, dreamed or wrote. */

@@ -91,7 +91,7 @@ typedef struct {
     char og_clock[32];       /* where UTC came from, e.g. "NTP, RTC 4d 2h slow" */
     char og_error[32];       /* why the last attempt stopped, "" if it did not */
     /* For the thought strip: the last verified decision as the okupa lived
-     * it. og_state "decided" or "napping" (a safe stop: nothing invented). */
+     * it. og_state "decided" or "no answer" (a safe stop: nothing invented). */
     char og_state[12];
     char og_said[48];        /* its line, or "" if it said nothing */
     char og_thought[64];     /* what it thought, or "" */

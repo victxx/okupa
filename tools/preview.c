@@ -179,8 +179,8 @@ int main(int argc, char **argv)
         for (k = 0; k < 400; k++) ok_ui_tick(&g, &p);
         shot(dir, "home-posting", &g, &p, 15);
         g.drawing_sent = 0;
-        snprintf(ok_facts_now.og_state, sizeof ok_facts_now.og_state, "napping");
-        shot(dir, "home-napping", &g, &p, 15);
+        snprintf(ok_facts_now.og_state, sizeof ok_facts_now.og_state, "no answer");
+        shot(dir, "home-no-answer", &g, &p, 15);
         memset(&ok_facts_now, 0, sizeof ok_facts_now);
     }
     p.asleep = 1;

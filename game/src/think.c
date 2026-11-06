@@ -96,7 +96,7 @@ static ok_think_stage stop(ok_think *t, ok_think_stage s)
 {
     t->stage = s;
     memset(&t->decision, 0, sizeof t->decision);
-    t->decision.activity = OK_MIND_SLEEP; /* the safe stop: no answer, the okupa sleeps */
+    t->decision.activity = OK_MIND_SLEEP; /* the safe stop: never handed to the game, recorded as "none" */
     t->decision.mood = OK_FEEL_SLEEPY;
     return s;
 }
@@ -653,7 +653,7 @@ ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64
                      ok_mind_gaze_name(t->decision.gaze), t->decision.energy);
             if (!put(out, cap, &o, head))
                 return OK_RANGE;
-        } else if (!put(out, cap, &o, "{\"activity\":\"sleep\",\"safe_stop\":true}")) {
+        } else if (!put(out, cap, &o, "{\"activity\":\"none\",\"safe_stop\":true}")) {
             return OK_RANGE;
         }
     } else if (!strcmp(kind, "hearing")) {

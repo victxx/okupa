@@ -448,9 +448,9 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
             snprintf(out, 48, "Posting: looking for Ethereum nodes");
         return out;
     }
-    if (!strcmp(fa->og_state, "napping")) { /* a safe stop: a nap, nothing invented */
+    if (!strcmp(fa->og_state, "no answer")) { /* a safe stop: nothing decided, nothing invented, and it says why */
         *kind = 3;
-        snprintf(out, 48, "zzz...");
+        snprintf(out, 48, "No answer from 0G: %.28s", fa->og_error[0] ? fa->og_error : "safe stop");
         return out;
     }
     if (fa->og_state[0]) { /* its last verified decision: what it said, thought, or did, in turn */
@@ -471,10 +471,15 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
     for (k = fa->log_count; k > 0 && k + OK_FACTS_LOG > fa->log_count; k--) {
         const char *t = fa->log[(k - 1) % OK_FACTS_LOG].text;
         if (fa->log[(k - 1) % OK_FACTS_LOG].src != 'G') continue;
-        if (!strncmp(t, "safe stop", 9) || !strncmp(t, "waiting for Wi-Fi", 17) || !strncmp(t, "TCP: no", 7) ||
-            !strncmp(t, "DNS: no", 7) || !strncmp(t, "TLS failed", 10)) {
+        if (!strncmp(t, "waiting for Wi-Fi", 17)) {
             *kind = 3;
-            snprintf(out, 48, "zzz...");
+            snprintf(out, 48, "0G: waiting for Wi-Fi");
+            return out;
+        }
+        if (!strncmp(t, "safe stop", 9) || !strncmp(t, "TCP: no", 7) || !strncmp(t, "DNS: no", 7) ||
+            !strncmp(t, "TLS failed", 10)) {
+            *kind = 3;
+            snprintf(out, 48, "No answer from 0G: %.28s", fa->og_error[0] ? fa->og_error : t);
             return out;
         }
         *kind = fa->og_verified ? 2 : 1;

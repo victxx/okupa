@@ -18,7 +18,7 @@
  *   4. the signature is checked against the TEE signer we were given, over
  *      the bytes we sent and received ourselves;
  *   5. only then is the answer read, and only from the closed sets.
- * Any failure is a safe stop: stage says where, and the okupa naps. Nothing
+ * Any failure is a safe stop: stage says where, and nothing is decided. Nothing
  * here opens sockets: the platform gives one HTTPS round trip per call. */
 
 #define OK_THINK_REQUEST 8192   /* the decision's own request */
