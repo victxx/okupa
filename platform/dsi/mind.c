@@ -4,6 +4,7 @@
 #include "okupa_memory.h"
 #include "okupa_png.h"
 #include "senses.h"
+#include "okupa_store.h"
 #include "okupa_facts.h"
 #include "okupa_ui.h"
 #include "okupa_keccak.h"
@@ -51,11 +52,11 @@ static ok_think t;
 /* One TLS state per provider host, so each keeps its session for the next
  * connection: a resumed handshake skips the certificate chain and the key
  * exchange, the part that would hold the ARM9 for hundreds of ms. */
-#define TLS_HOSTS 3
+#define TLS_HOSTS 4 /* chat, ears, dreams, the 0G chain */
 static ok_tls tls_by_host[TLS_HOSTS];
 static ok_tls *tlsp = &tls_by_host[0];
 #define tls (*tlsp)
-static char episode[320 * 1024]; /* a hearing keeps its audio, in base64 */
+static char episode[224 * 1024]; /* a hearing keeps its audio in base64 (~110 KB); a batch's upload body */
 static char recent[OK_MIND_RECENT][OK_MIND_LINE + 24];
 static int recent_count;
 
@@ -82,8 +83,8 @@ static volatile int made_new, drew_new, letter_new, dream_new, letters_ok;
 static uint16_t dream_px[128 * 128];
 static int dream_w, dream_h;
 static char dream_about[OK_MIND_DREAM + 1];
-static uint8_t dream_png[160 * 1024];
-static uint8_t dream_scratch[200 * 1024];
+static uint8_t dream_png[64 * 1024];      /* a 128x128 PNG is 25..50 KB */
+static uint8_t dream_scratch[120 * 1024]; /* the PNG's data plus 128 rows of 385 bytes */
 static char asked[OK_MIND_NOTE + 1];
 static uint32_t asked_at;
 static char heard_text[OK_MIND_TEXT + 1], saw_text[OK_MIND_TEXT + 1];
@@ -96,8 +97,18 @@ static uint8_t photo[64 * 1024]; /* a camera PNG (37 KB) or a drawing (49 KB) */
 static uint8_t doodle[512];
 static volatile int guess_wanted, guess_state; /* guess_state: 1 new guess, -1 it could not */
 static char guess_text[OK_MIND_TEXT + 1];
-static char sense_buf[OK_EAR_RATE * OK_EAR_SECONDS + 64 * 1024];
+static char sense_buf[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
 static char chain[65]; /* sha256 of the last episode written */
+
+/* Episodes waiting to go to 0G Storage together, one JSON object a line: one
+ * submission for many keeps the gas down. */
+#define BATCH_MAX (160 * 1024) /* its upload body, 4/3 of it, fits in episode[] */
+static char batch[BATCH_MAX];
+static size_t batch_len;
+static int batch_count;
+static uint32_t stored_at;
+static int want_store;
+static ok_store store; /* its request bodies go in episode[], free while a batch is stored */
 
 static struct {
     char host[96], provider[48], model[64], ip[20];
@@ -115,6 +126,12 @@ static struct {
      * is there (0 = only when asked with R). */
     long look_every;
     char city[41];
+    /* 0G Storage: store=mainnet turns it on; store_every= minutes between
+     * batches (10); store_node= "ip:port:shard" lines override the nodes. */
+    int store_on;
+    long store_every;
+    char store_node[8][32];
+    int store_nodes;
 } cfg;
 
 static void line(int i, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -518,6 +535,7 @@ static int load_settings(uint8_t key[32])
     FILE *f;
     memset(&cfg, 0, sizeof cfg);
     cfg.look_every = 120;
+    cfg.store_every = 10;
     snprintf(path, sizeof path, "%smind.txt", dir_path);
     if (!(f = fopen(path, "r"))) return 0;
     while (fgets(text, sizeof text, f)) {
@@ -542,6 +560,10 @@ static int load_settings(uint8_t key[32])
         else if (!strcmp(text, "dream_ip")) snprintf(cfg.dream_ip, sizeof cfg.dream_ip, "%.19s", v);
         else if (!strcmp(text, "dream_signer")) cfg.have_dream = unhex(v, cfg.dream_signer, 20);
         else if (!strcmp(text, "city")) snprintf(cfg.city, sizeof cfg.city, "%.40s", v);
+        else if (!strcmp(text, "store")) cfg.store_on = !strcmp(v, "mainnet");
+        else if (!strcmp(text, "store_every")) cfg.store_every = strtol(v, NULL, 10);
+        else if (!strcmp(text, "store_node") && cfg.store_nodes < 8)
+            snprintf(cfg.store_node[cfg.store_nodes++], sizeof cfg.store_node[0], "%.31s", v);
     }
     fclose(f);
     if (!cfg.host[0] || !cfg.provider[0] || !cfg.model[0] || !have_signer) return 0;
@@ -612,6 +634,17 @@ static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned c
             cothread_yield();
         }
         br_sha256_out(&c, hash);
+    }
+    /* And into the batch for 0G Storage (one that would not fit waits for
+     * the next batch; one bigger than a batch stays on the SD card only). */
+    if (cfg.store_on && n + 1 < BATCH_MAX / 2) {
+        if (batch_len + n + 1 > BATCH_MAX - 256) want_store = 1;
+        else {
+            memcpy(batch + batch_len, episode, n);
+            batch_len += n;
+            batch[batch_len++] = '\n';
+            batch_count++;
+        }
     }
     hex32(hash, chain);
     snprintf(path, sizeof path, "%sepisodes/chain.txt", dir_path);
@@ -816,6 +849,118 @@ static void failed(void)
     hang_up();
     /* A certificate the clock cannot place: ask NTP again first. */
     if (t.net_error == BR_ERR_X509_EXPIRED || t.net_error == BR_ERR_X509_TIME_UNKNOWN) clock_synced = 0;
+}
+
+/* Plain HTTP to a storage node, host "ip:port". */
+static int http_fetch(void *ctx, const char *host, const char *head, size_t n, const char *body, size_t len, char *resp,
+                      size_t cap, size_t *got)
+{
+    struct sockaddr_in addr;
+    char name[32], *colon;
+    int nfd, error = 0, k;
+    socklen_t elen = sizeof error;
+    size_t sent;
+    (void)ctx;
+    snprintf(name, sizeof name, "%s", host);
+    if (!(colon = strchr(name, ':'))) return -2;
+    *colon = 0;
+    memset(&addr, 0, sizeof addr);
+    addr.sin_len = sizeof addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)atoi(colon + 1));
+    if (!inet_aton(name, &addr.sin_addr)) return -2;
+    if ((nfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -3;
+    fcntl(nfd, F_SETFL, fcntl(nfd, F_GETFL, 0) | O_NONBLOCK);
+    if ((connect(nfd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(nfd, POLLOUT, 8000) ||
+        getsockopt(nfd, SOL_SOCKET, SO_ERROR, &error, &elen) || error) {
+        close(nfd);
+        return -3;
+    }
+    for (k = 0; k < 2; k++) {
+        const char *p = k ? body : head;
+        size_t total = k ? len : n;
+        for (sent = 0; sent < total;) {
+            int w;
+            if (!wait_for(nfd, POLLOUT, 10000)) {
+                close(nfd);
+                return -1;
+            }
+            w = send(nfd, p + sent, total - sent > 4096 ? 4096 : total - sent, 0);
+            if (w <= 0) {
+                close(nfd);
+                return -1;
+            }
+            sent += (size_t)w;
+        }
+    }
+    *got = 0;
+    while (*got < cap && wait_for(nfd, POLLIN, 20000)) {
+        int r = recv(nfd, resp + *got, cap - *got, 0);
+        if (r <= 0) break;
+        *got += (size_t)r;
+        if (ok_think_complete(resp, *got)) break;
+    }
+    close(nfd);
+    resp[*got < cap ? *got : cap - 1] = 0;
+    return *got ? 0 : -1;
+}
+
+static void wait_ms(int ms) { wait_frames(ms * 60 / 1000 + 1); }
+static void store_step(const char *step) { feed("storage: %.29s", step); }
+
+/* The batch so far goes to 0G Storage: a first line says what it is, then
+ * one episode a line. */
+static void flush_batch(const uint8_t key[32])
+{
+    static const char *mainnet[4] = {"34.71.110.60:5678:0", "34.66.131.173:5678:0", "34.169.236.186:5678:1",
+                                     "34.60.163.4:5678:1"};
+    static char node_host[8][24];
+    ok_store_net net;
+    char head[160], path[64];
+    size_t hl;
+    FILE *f;
+    int i, shards = 0;
+    if (!batch_len) return;
+    memset(&net, 0, sizeof net);
+    net.rpc_host = "evmrpc.0g.ai";
+    net.chain_id = 16661;
+    unhex("62d4144db0f0a6fbbaeb6296c785c71b3d57c526", net.flow, 20);
+    unhex("f574ff1fd8602f0131baab74f9f7cf24993321de", net.market, 20);
+    for (i = 0; i < (cfg.store_nodes ? cfg.store_nodes : 4) && i < 8; i++) {
+        const char *spec = cfg.store_nodes ? cfg.store_node[i] : mainnet[i];
+        const char *last = strrchr(spec, ':');
+        if (!last) continue;
+        snprintf(node_host[net.node_count], sizeof node_host[0], "%.*s", (int)(last - spec), spec);
+        net.node[net.node_count] = node_host[net.node_count];
+        net.node_shard[net.node_count] = atoi(last + 1);
+        if (net.node_shard[net.node_count] + 1 > shards) shards = net.node_shard[net.node_count] + 1;
+        net.node_count++;
+    }
+    net.shards = shards;
+    hl = (size_t)snprintf(head, sizeof head, "{\"okupa_batch\":1,\"episodes\":%d,\"last_sha256\":\"%s\"}\n", batch_count, chain);
+    if (hl + batch_len > sizeof batch) return;
+    memmove(batch + hl, batch, batch_len);
+    memcpy(batch, head, hl);
+    feed("storage: %d episodes, %lu KB", batch_count, (unsigned long)((hl + batch_len) / 1024));
+    if (ok_store_put(&store, &net, key, (const uint8_t *)batch, hl + batch_len, episode, sizeof episode, fetch,
+                     http_fetch, NULL, wait_ms, store_step) == OK_OK &&
+        store.stage == OK_STORE_DONE) {
+        feed("stored on 0G: %.26s", store.root);
+        if (store.tx[0]) feed("tx %.35s", store.tx);
+        snprintf(ok_facts_now.og_storage_root, sizeof ok_facts_now.og_storage_root, "%s", store.root);
+        snprintf(path, sizeof path, "%sepisodes/stored.txt", dir_path);
+        if ((f = fopen(path, "a"))) {
+            fprintf(f, "%s %s %llu %d %s\n", store.root, store.tx[0] ? store.tx : "-", (unsigned long long)store.seq,
+                    batch_count, chain);
+            fclose(f);
+        }
+        batch_len = 0;
+        batch_count = 0;
+    } else {
+        feed("storage failed: %.24s", store.error[0] ? store.error : "?");
+        /* the batch stays (without its first line) for the next try */
+        memmove(batch, batch + hl, batch_len);
+    }
 }
 
 /* A number member of an object, or -1. */
@@ -1231,6 +1376,14 @@ static int thinker(void *arg)
                     diary_written = 1; /* tonight's failed: one try a night, the day goes on */
                 }
             }
+        }
+
+        /* 0G Storage: the batch every store_every minutes, or when it is full. */
+        if (cfg.store_on && batch_len &&
+            (want_store || frames_alive - stored_at > (uint32_t)cfg.store_every * 60u * 60u)) {
+            stored_at = frames_alive;
+            want_store = 0;
+            flush_batch(key);
         }
 
         /* Every 12 s while the player is around, every 30 s otherwise, so
