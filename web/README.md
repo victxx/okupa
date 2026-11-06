@@ -40,9 +40,9 @@ Open two monkeys. Two origins means two separate keys:
 
 1. On each monkey, press **Fund from local dev chains**. The dev nodes' unlocked accounts send it 1 coin each, on Geth and on Arkiv.
 2. On B, copy the **Friend code** (`0xADDRESS:PUBLICKEY`).
-3. On A, draw, paste B's code in **To**, then press **Gift via Swarm + Arkiv**. What really happened is listed at the bottom of the page.
-4. On B, press **Check mailbox**. The gift is found in Arkiv, checked on chain, its seal opened, fetched from Swarm, hash-checked, then hung on the wall.
-5. **Inline gift (DSi format)** puts a 64×64 one-bit drawing inside the transaction (`OKPA 01 03`). The DSi reads that form.
+3. On A, draw, paste B's code in **To**, then press **Send privately**. What really happened is listed at the bottom of the page.
+4. On B, press **Check**. The gift is found in Arkiv, checked on chain, its seal opened, fetched from Swarm, hash-checked, then hung on the wall.
+5. **Send small gift** puts a 64×64 one-bit drawing inside the transaction (`OKPA 01 03`). The DSi reads that form.
 6. **Visit a monkey** shows any address's hellos, drawings and gifts:
    - On local, it scans recent blocks.
    - On Sepolia/mainnet, Blockscout finds the transactions and RPC checks each one.
@@ -86,12 +86,30 @@ sh scripts/stack.sh down
 
 Stops the local stack.
 
-## Public testnets
+## Public run (Ethereum mainnet + Swarm mainnet + Arkiv Rabdi)
 
-Choose **Sepolia** in the page. This is not done yet. The code is in place, but each monkey needs:
-- Sepolia ETH;
-- tGLM on Arkiv's testnet Rabdi, from its faucet (wallet sign-in and a CAPTCHA, done by a person);
-- a Bee light node on the Swarm testnet at `http://127.0.0.1:1633`, with a usable postage batch.
+Choose **Ethereum** in the page. Each act shows its cost and asks before signing. You need:
+
+1. **A Bee light node on Swarm mainnet** (Gnosis), with its API on `:1733`. The password file and data directory live under `local/`:
+
+   ```bash
+   docker run -d --name okupa-bee-mainnet --restart unless-stopped -p 127.0.0.1:1733:1633 -p 1734:1634 -v "$PWD/../../local/swarm-mainnet/data:/home/bee/.bee" -v "$PWD/../../local/swarm-mainnet/password:/run/bee-password:ro" ethersphere/bee:2.8.3 start --api-addr=:1633 --full-node=false --swap-enable=true --swap-initial-deposit=0 --blockchain-rpc-endpoint=https://gnosis-rpc.publicnode.com --password-file=/run/bee-password --cors-allowed-origins='*'
+   ```
+
+   Fund its Gnosis address with a little xDAI (gas) and xBZZ, then buy one postage batch. At depth 17, for 30 days, that is ≈ 1.4 xBZZ:
+
+   ```bash
+   curl -X POST localhost:1733/stamps/<amount>/17
+   ```
+
+2. **A little mainnet ETH for each monkey.** A gift costs about €0.01–0.02 at 0.15 gwei.
+3. **tGLM on Rabdi for each monkey**, from the Arkiv faucet.
+
+Check what is funded:
+
+```bash
+node scripts/funding.mjs <monkey>... --bee <bee address>
+```
 
 ## Files
 
@@ -105,5 +123,6 @@ Choose **Sepolia** in the page. This is not done yet. The code is in place, but 
 | `src/chain.js` | Send through RPC; independent checks of a transaction |
 | `src/anon.js` | anon-rpc reads |
 | `src/app.js` | The page |
+| `src/scene.js`, `scene/scene.c` | The attic: the console's renderer compiled to WebAssembly. `sh scene/build.sh` rebuilds `public/scene.wasm` (needs clang's wasm32 target and `wasm-ld`, e.g. `brew install lld`) |
 
 Keys live only in the browser's local storage. Run data goes in `../run/`, never in Git.

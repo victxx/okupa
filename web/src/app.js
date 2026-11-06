@@ -13,6 +13,7 @@ import * as swarm from './swarm.js';
 import * as arkiv from './arkiv.js';
 import { clients, sendAct, quoteAct, waitIncluded, verifiedAct } from './chain.js';
 import { ANON, anonFetch } from './anon.js';
+import { startScene } from './scene.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -80,6 +81,27 @@ function setupSketch() {
   paint(c, pixels, 2);
 }
 
+function paintBig(canvas, px) {
+  const W = okupa.BIG_W, H = okupa.BIG_H, g = canvas.getContext('2d'), img = g.createImageData(W, H);
+  const rgb = TONES.map((t) => [1, 3, 5].map((i) => parseInt(t.slice(i, i + 2), 16)));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const c = rgb[okupa.tone2(px, W, x, y)], o = 4 * (y * W + x); img.data.set([c[0], c[1], c[2], 255], o); }
+  canvas.width = W; canvas.height = H; g.putImageData(img, 0, 0);
+}
+
+// ---------- big gift: a photo the DSi could never fetch itself, kept on Swarm ----------
+let bigPixels = null;
+async function loadPhoto(file) {
+  const bmp = await createImageBitmap(file);
+  const W = okupa.BIG_W, H = okupa.BIG_H, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d'), k = Math.max(W / bmp.width, H / bmp.height); // cover, centred
+  g.drawImage(bmp, (W - bmp.width * k) / 2, (H - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
+  bigPixels = okupa.ditherFour(g.getImageData(0, 0, W, H).data, W, H);
+  paintBig($('bigPreview'), bigPixels);
+  $('sendBig').disabled = false;
+  log(`Photo "${file.name}" turned into 256×192, four tones (12 KB). It stays in this browser until you send it.`, 'dim');
+}
+
 // ---------- friends ----------
 function parseFriend(code) {
   const m = code.trim().match(/^(0x[0-9a-fA-F]{40})(?::(?:0x|04)?([0-9a-fA-F]{128}))?$/);
@@ -102,10 +124,20 @@ function frame(px, bpp, lines) {
   for (const l of lines) { const p = document.createElement('span'); p.className = 'mono'; p.textContent = l; f.append(p); }
   return f;
 }
-function renderWall() {
+let scene = null;
+const as1bpp = (h) => (h.bpp === 1 ? hexToBytes(h.pixels) : okupa.toDrawing(hexToBytes(h.pixels)));
+// The attic has six frames: the six newest gifts, oldest first, like the console's wall.
+function hangInAttic(animateNewest) {
+  if (!scene) return;
+  const hung = store.get(wallKey(), []).slice(0, 6).reverse();
+  hung.forEach((h, i) => scene.hang(i, as1bpp(h), animateNewest && i === hung.length - 1));
+  if (animateNewest && hung.length) scene.cheer();
+}
+function renderWall(animateNewest = false) {
   const w = $('wall'); w.replaceChildren();
   const hung = store.get(wallKey(), []);
-  if (!hung.length) { w.textContent = 'Nothing hung yet.'; w.className = 'wall muted'; return; }
+  hangInAttic(animateNewest);
+  if (!hung.length) { w.textContent = 'Nothing on the wall yet.'; w.className = 'wall muted'; return; }
   w.className = 'wall';
   for (const h of hung) w.append(frame(hexToBytes(h.pixels), h.bpp, [`from ${h.from.slice(0, 10)}…`, `${h.how}`, `tx ${h.tx.slice(0, 12)}…`]));
 }
@@ -140,7 +172,7 @@ function setupNet() {
   $('net').onchange = () => { netId = $('net').value; store.set('net', netId); showNet(); };
   showNet();
 }
-function showNet() { if ($('fund')) $('fund').hidden = !net().devFaucet; $('netlabel').textContent = net().label + ' A browser cannot open TCP, so this monkey reads and sends through JSON-RPC (the DSi talks devp2p directly).'; renderWall(); refreshBalance(); }
+function showNet() { if ($('fund')) $('fund').hidden = !net().devFaucet; $('netlabel').textContent = net().label; renderWall(); renderCave(); refreshBalance(); }
 
 // ---------- sending ----------
 async function busy(btn, fn) {
@@ -160,25 +192,31 @@ async function quoteOrAsk(n, size, what) {
   return q;
 }
 
-async function sendSwarmGift() {
+async function sendSwarmGift() { return sendViaSwarm(okupa.photo(pixels), 'small'); }
+async function sendBigGift() {
+  if (!bigPixels) throw new Error('choose a photo first');
+  return sendViaSwarm(okupa.bigPhoto(bigPixels), 'big');
+}
+
+// Picture to Swarm (encrypted), reference sealed to the friend, one small transaction, one Arkiv entry.
+async function sendViaSwarm(picture, size) {
   const n = net(), friend = parseFriend($('to').value);
   if (!friend.pub) throw new Error('a Swarm gift needs the full friend code (address and public key)');
-  const picture = okupa.photo(pixels);
-  const q = await quoteOrAsk(n, 6 + okupa.SEALED_REF_BYTES, 'A Swarm gift: one transaction');
-  log(`Picture: 64×64, four tones, ${picture.length} B (OKPA 01 02).`, 'dim');
+  const q = await quoteOrAsk(n, 6 + okupa.SEALED_REF_BYTES, `A ${size} gift via Swarm: one transaction`);
+  log(size === 'big' ? `Big picture: 256×192, four tones, ${picture.length} B (OKPA 01 06). Far too big for a transaction; Swarm keeps it.` : `Picture: 64×64, four tones, ${picture.length} B (OKPA 01 02).`, 'dim');
   const batch = await swarm.postageBatch(n.bee);
   const ref = await swarm.uploadEncrypted(n.bee, picture, batch);
   log(`Swarm: uploaded encrypted through ${n.bee}, batch ${batch.slice(0, 10)}…. Chunk address ${bytesToHex(ref.subarray(0, 32)).slice(0, 16)}…; its key half stays secret.`, 'ok');
   const sealed = seal(friend.pub, friend.address, ref, picture);
   const data = okupa.giftSwarm(sealed);
-  log(`Sealed the reference to ${friend.address.slice(0, 10)}… with ECIES: ${sealed.length} B. Calldata ${data.length} B (OKPA 01 05).`, 'dim');
+  log(`Sealed the reference to ${friend.address.slice(0, 10)}… with ECIES: ${sealed.length} B. Calldata ${data.length} B (OKPA 01 05), the same size for a small or a big gift.`, 'dim');
   const { hash, nonce } = await sendAct(n, priv, friend.address, data, q);
   log(`Ethereum: signed here, sent through RPC. tx ${hash} (nonce ${nonce}).`, 'ok');
   const { block, status } = await waitIncluded(n, hash);
   log(`Ethereum: included in block ${block} (${status}), as the RPC reports it.`, status === 'success' ? 'ok' : 'bad');
   const a = await arkiv.postGift(n.arkiv, priv, { to: friend.address, kind: okupa.KIND.GIFT_SWARM, chainId: n.chainId, tx: hash, block, sealed });
   log(`Arkiv: mailbox entry ${a.entityKey} (Arkiv tx ${a.txHash}).`, 'ok');
-  record({ act: 'gift-swarm', from: me, to: friend.address, tx: hash, block: String(block), swarmUpload: 'encrypted', sealedBytes: sealed.length, arkivEntity: a.entityKey, arkivTx: a.txHash, bee: n.bee, postageBatch: batch, swarmAddress: bytesToHex(ref.subarray(0, 32)), swarmKey: 'withheld (sealed to the recipient)' });
+  record({ act: `gift-swarm-${size}`, from: me, to: friend.address, tx: hash, block: String(block), pictureBytes: picture.length, sealedBytes: sealed.length, arkivEntity: a.entityKey, arkivTx: a.txHash, bee: n.bee, postageBatch: batch, swarmAddress: bytesToHex(ref.subarray(0, 32)), swarmKey: 'withheld (sealed to the recipient)' });
 }
 
 async function sendInlineGift() {
@@ -206,7 +244,8 @@ async function checkMailbox() {
   list.replaceChildren();
   const entries = await arkiv.giftsFor(n.arkiv, me, n.chainId);
   log(`Arkiv: ${entries.length} mailbox entr${entries.length === 1 ? 'y' : 'ies'} name this monkey. Checking each against the chain.`, 'dim');
-  const hung = store.get(wallKey(), []);
+  const hung = store.get(wallKey(), []), cave = store.get(caveKey(), []);
+  let newOnes = 0, caveNew = 0;
   for (const e of entries) {
     const li = document.createElement('li'); li.className = 'mono'; list.append(li);
     const say = (t) => { li.textContent = `${e.key.slice(0, 12)}… ${t}`; };
@@ -218,15 +257,23 @@ async function checkMailbox() {
       if (v.to !== me) throw new Error('transaction is not addressed to this monkey');
       if (v.act.kind !== e.kind) throw new Error('kind differs from the entry');
       if (v.act.kind === okupa.KIND.GIFT_SWARM && !equal(v.act.sealed, e.sealed)) throw new Error('sealed bytes differ from the transaction');
-      if (hung.some((h) => h.tx === e.tx)) { say('checked, already on the wall'); continue; }
+      if (hung.some((h) => h.tx === e.tx) || cave.some((h) => h.tx === e.tx)) { say('checked, already hung'); continue; }
       let px, bpp, how;
       if (v.act.kind === okupa.KIND.GIFT_SWARM) {
         const { ref, pictureHash } = open(hexToBytes(priv), me, v.act.sealed);
         const picture = await swarm.download(n.bee, ref);
         if (!checkPicture(picture, pictureHash)) throw new Error('Swarm returned other bytes than the sender sealed');
         const p = okupa.decode(picture);
-        if (!p || p.kind !== okupa.KIND.PHOTO) throw new Error('not a picture');
+        if (!p || (p.kind !== okupa.KIND.PHOTO && p.kind !== okupa.KIND.BIG_PHOTO)) throw new Error('not a picture');
         px = p.pixels; bpp = 2; how = 'via Swarm';
+        if (p.kind === okupa.KIND.BIG_PHOTO) {
+          cave.unshift({ tx: e.tx, from: v.from, pixels: bytesToHex(px), block: String(v.block) });
+          store.set(caveKey(), cave.slice(0, 8));
+          log(`✓ ${e.tx.slice(0, 12)}…: big picture from ${v.from.slice(0, 10)}…, block ${v.block}, ${picture.length} B from Swarm match the sealed keccak. Into the cave.`, 'ok');
+          record({ act: 'received-swarm-big', from: v.from, to: me, tx: e.tx, block: String(v.block), arkivEntity: e.key, swarmAddress: bytesToHex(ref.subarray(0, 32)), pictureKeccak: bytesToHex(pictureHash), pictureBytes: picture.length });
+          say('into the cave (big, via Swarm)'); caveNew++;
+          continue;
+        }
         log(`✓ ${e.tx.slice(0, 12)}…: sender ${v.from.slice(0, 10)}… recovered from the signature, block ${v.block}, seal opened, ${picture.length} B from Swarm match the sealed keccak.`, 'ok');
         record({ act: 'received-swarm', from: v.from, to: me, tx: e.tx, block: String(v.block), arkivEntity: e.key, swarmAddress: bytesToHex(ref.subarray(0, 32)), pictureKeccak: bytesToHex(pictureHash), pictureBytes: picture.length });
       } else if (v.act.kind === okupa.KIND.GIFT_PICTURE) {
@@ -236,13 +283,30 @@ async function checkMailbox() {
       } else throw new Error('unknown gift kind');
       hung.unshift({ tx: e.tx, from: v.from, pixels: bytesToHex(px), bpp, how });
       store.set(wallKey(), hung.slice(0, 12));
-      say(`hung (${how})`);
+      say(`hung (${how})`); newOnes++;
     } catch (err) {
       say(`rejected: ${err.message}`);
       log(`✗ Arkiv entry ${e.key.slice(0, 12)}… rejected: ${err.message}`, 'bad');
     }
   }
-  renderWall();
+  renderWall(newOnes > 0); renderCave();
+  if (caveNew) scene?.cheer();
+}
+
+// ---------- the cave: where big pictures live ----------
+const caveKey = () => `cave.${net().chainId}`;
+function renderCave() {
+  const w = $('cave'); w.replaceChildren();
+  const items = store.get(caveKey(), []);
+  if (!items.length) { w.textContent = 'Empty. Big pictures from friends end up here.'; w.className = 'cave muted'; return; }
+  w.className = 'cave';
+  for (const it of items) {
+    const f = document.createElement('button'); f.className = 'bigframe';
+    const c = document.createElement('canvas'); paintBig(c, hexToBytes(it.pixels)); f.append(c);
+    const t = document.createElement('span'); t.className = 'mono'; t.textContent = `from ${it.from.slice(0, 10)}… · block ${it.block}`; f.append(t);
+    f.onclick = () => { paintBig($('lookCanvas'), hexToBytes(it.pixels)); $('lookInfo').textContent = `from ${it.from} · tx ${it.tx}`; $('look').showModal(); };
+    w.append(f);
+  }
 }
 
 // ---------- visiting a monkey (e.g. a DSi) ----------
@@ -308,12 +372,19 @@ async function devFund() {
 
 // ---------- boot ----------
 $('addr').textContent = account.address;
+startScene($('scene')).then((sc) => { scene = sc; hangInAttic(false); })
+  .catch((e) => { log(`The attic could not start here (${e.message}).`, 'bad'); });
 $('mycode').value = friendCode;
 $('mycode').onclick = () => { $('mycode').select(); navigator.clipboard?.writeText(friendCode).catch(() => {}); };
 setupSketch();
 setupNet();
 $('sendSwarm').onclick = (e) => busy(e.target, sendSwarmGift);
 $('sendInline').onclick = (e) => busy(e.target, sendInlineGift);
+$('sendBig').onclick = (e) => busy(e.target, sendBigGift);
+$('photo').onchange = (e) => { const f = e.target.files?.[0]; if (f) loadPhoto(f).catch((err) => log(`✗ ${err.message}`, 'bad')); };
+$('to').value = store.get('to', '');
+$('to').oninput = () => store.set('to', $('to').value.trim());
+$('lookClose').onclick = () => $('look').close();
 $('check').onclick = (e) => busy(e.target, checkMailbox);
 $('visit').onclick = (e) => busy(e.target, visit);
 $('fund').onclick = (e) => busy(e.target, devFund);

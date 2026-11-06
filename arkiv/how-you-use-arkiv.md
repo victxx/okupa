@@ -2,7 +2,7 @@
 
 | Arkiv feature | Use | What the user sees |
 |---|---|---|
-| Indexed `to` + `chain` | "Gifts for me" without scanning the chain | **Check mailbox** lists gifts in about a second |
+| Indexed `to` + `chain` | "Gifts for me" without scanning the chain | **Check** fills the wall (small gifts) and **the cave** (big photos) |
 | Indexed `from`, `kind` | Possible later: filter by friend or by gift type | Not used yet |
 | `$owner` (chain-set) | Must equal `from`, so a third party cannot post in someone's name | Forged entries show as "rejected" in the mailbox |
 | Expiry, 7 days | A mailbox is a notification; the gift stays on Ethereum | Old entries disappear, the picture stays on the wall |

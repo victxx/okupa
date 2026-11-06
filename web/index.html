@@ -3,66 +3,80 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Okupa web</title>
+  <title>Okupa</title>
   <link rel="stylesheet" href="./src/style.css">
 </head>
 <body>
-  <header>
-    <div class="brand"><svg class="face" viewBox="0 0 32 32" aria-hidden="true"><circle cx="6" cy="14" r="5" class="t2"/><circle cx="26" cy="14" r="5" class="t2"/><circle cx="16" cy="16" r="11" class="t2"/><ellipse cx="16" cy="19" rx="8" ry="6.5" class="t1"/><circle cx="12.5" cy="13" r="1.6" class="t3"/><circle cx="19.5" cy="13" r="1.6" class="t3"/><path d="M12.5 21 q3.5 2.5 7 0" class="stroke"/></svg><span>Okupa</span><small>web</small></div>
+  <header class="top">
+    <a class="brand" href="#home">Okupa</a>
+    <nav aria-label="Sections">
+      <a href="#gift">Give</a><a href="#mailbox">Mailbox</a><a href="#cave-room">Cave</a><a href="#visit-room">Visit</a><a href="#log-room">Log</a>
+    </nav>
     <select id="net" aria-label="Network"></select>
   </header>
-  <p id="netlabel" class="band"></p>
 
-  <main>
-    <section id="me" class="card">
-      <h2>Your monkey</h2>
-      <p class="mono" id="addr">…</p>
-      <p class="muted">Its key was made in this browser and stays here (local storage of this origin). Another browser profile is another monkey.</p>
+  <section id="home" class="hero">
+    <canvas id="scene" width="256" height="192" aria-label="Your okupa in its attic. Click to pet it."></canvas>
+    <aside class="who">
+      <p class="eyebrow">Your okupa</p>
+      <h1 id="addr" class="mono">…</h1>
       <label>Friend code <input id="mycode" readonly class="mono"></label>
       <p class="muted" id="balance"></p>
       <button id="fund" class="ghost" hidden>Fund from local dev chains</button>
-    </section>
+      <p id="netlabel" class="muted small"></p>
+    </aside>
+  </section>
 
-    <section class="card">
-      <h2>Sketchbook</h2>
-      <canvas id="sketch" width="256" height="256" aria-label="64 by 64 drawing"></canvas>
-      <div class="row" id="tones"></div>
-      <div class="row"><button id="clear" class="ghost">New page</button></div>
-    </section>
-
-    <section class="card">
-      <h2>Send a gift</h2>
-      <label>To (friend code, or a DSi address for an inline gift) <input id="to" class="mono" placeholder="0x…:04… or 0x…"></label>
-      <div class="row">
-        <button id="sendSwarm">Gift via Swarm + Arkiv</button>
-        <button id="sendInline" class="ghost">Inline gift (DSi format)</button>
+  <main>
+    <section id="gift" class="card span2">
+      <h2>Give a gift</h2>
+      <label>To <input id="to" class="mono" placeholder="friend code 0x…:04…, or a DSi address"></label>
+      <div class="two">
+        <div>
+          <h3>Small <span class="tag">64×64 · on Ethereum</span></h3>
+          <canvas id="sketch" width="256" height="256" aria-label="64 by 64 drawing"></canvas>
+          <div class="row" id="tones"></div>
+          <div class="row">
+            <button id="sendInline">Send small gift</button>
+            <button id="sendSwarm" class="ghost">Send privately</button>
+            <button id="clear" class="ghost">New page</button>
+          </div>
+        </div>
+        <div>
+          <h3>Big <span class="tag">a photo · to the cave</span></h3>
+          <canvas id="bigPreview" class="big" width="256" height="192" aria-label="Big picture preview, 256 by 192"></canvas>
+          <div class="row">
+            <label class="file">Choose a photo<input id="photo" type="file" accept="image/*"></label>
+            <button id="sendBig" disabled>Send big gift</button>
+          </div>
+        </div>
       </div>
-      <p class="muted">Swarm gift: four tones, picture encrypted on Swarm, its reference sealed to your friend's key, one transaction on Ethereum, one entry in the Arkiv mailbox. Inline gift: the 64×64 one-bit drawing travels inside the transaction, the form the DSi reads.</p>
     </section>
 
-    <section class="card">
-      <h2>Mailbox</h2>
-      <button id="check">Check mailbox</button>
+    <section id="mailbox" class="card">
+      <div class="head"><h2>Mailbox</h2><button id="check" class="ghost">Check</button></div>
       <ol id="mail" class="list"></ol>
-    </section>
-
-    <section class="card wide">
-      <h2>Wall</h2>
       <div id="wall" class="wall"></div>
     </section>
 
-    <section class="card wide">
-      <h2>Visit a monkey</h2>
-      <div class="row"><input id="visitAddr" class="mono" placeholder="0x… (a DSi monkey's address)"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
-      <p class="muted">Reads that address's hellos, drawings and gifts from the chain. An explorer only says where to look; each transaction is fetched and its signature, recipient and calldata checked here. On public networks the reads can go through anon-rpc, so the RPC and the explorer do not see who is visiting.</p>
+    <section id="cave-room" class="card">
+      <h2>The cave</h2>
+      <div id="cave" class="cave"></div>
+    </section>
+
+    <section id="visit-room" class="card span2">
+      <h2>Visit an okupa</h2>
+      <div class="row"><input id="visitAddr" class="mono" placeholder="0x… address"><select id="visitNet" aria-label="Network to visit on"></select><select id="visitVia" aria-label="How to read"></select><button id="visit" class="ghost">Visit</button></div>
       <div id="visitOut" class="wall"></div>
+    </section>
+
+    <section id="log-room" class="card span2">
+      <h2>What really happened</h2>
+      <ol id="log"></ol>
     </section>
   </main>
 
-  <section class="card log">
-    <h2>What really happened</h2>
-    <ol id="log"></ol>
-  </section>
+  <dialog id="look"><canvas id="lookCanvas" width="256" height="192"></canvas><p id="lookInfo" class="mono muted"></p><button id="lookClose" class="ghost">Close</button></dialog>
   <script type="module" src="./src/app.js"></script>
 </body>
 </html>

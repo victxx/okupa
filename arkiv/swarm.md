@@ -2,7 +2,7 @@
 
 | Lives on | What | Why there |
 |---|---|---|
-| Swarm | The picture: 64×64, four tones, 1030 B, uploaded with `Swarm-Encrypt: true` | Content-addressed and censorship-resistant storage. The picture can be bigger than a transaction should carry |
+| Swarm | The picture, uploaded with `Swarm-Encrypt: true`: a small one (64×64, 1030 B) or a big one for the cave (256×192, four tones, 12 KB, made from any photo) | Content-addressed and censorship-resistant storage. The picture can be bigger than a transaction should carry |
 | Arkiv | The mailbox entry, with the **sealed** Swarm reference in the `sealed` field | Queryable by recipient without scanning a chain; signed by the sender |
 | Ethereum | The gift itself: `OKPA 01 05` + the same sealed reference | The permanent record of who gave what to whom |
 
@@ -14,16 +14,16 @@ entities are public. So the reference never appears in the clear:
 
 | Item | Value |
 |---|---|
-| Arkiv entity → Swarm chunk | TBD after the public run (local run: entity `0xd7787e35…6329` → encrypted root chunk `5c310842…0031`) |
-| Postage batch | TBD (local run: `458ec8cb…309e`, bought by a Bee 2.8.0 dev node) |
-| Bee node | TBD (local run: `http://127.0.0.1:1633`) |
+| Arkiv entity → Swarm chunk | Public run, Rabdi → Swarm mainnet: entity `0xcf06a477…3984` → encrypted chunk `dcfcc7af…0f58` (small); entity `0x220b9dd6…4301` → `e1025a3c…99bd` (big, 12294 B). Local run: `0xd7787e35…6329` → `5c310842…0031` |
+| Postage batch | `b7c6193f…5134` on Gnosis (depth 17, tx `0x51ba5b20…58b7`). Local run: `458ec8cb…309e` (Bee 2.8.0 dev node) |
+| Bee node | Bee 2.8.3 light node on Swarm mainnet, `0x5AC1Fd51…16FE`. Local run: `http://127.0.0.1:1633` |
 | Upload / read code | [`web/src/swarm.js`](../web/src/swarm.js); `sendSwarmGift` and `checkMailbox` in [`web/src/app.js`](../web/src/app.js) |
 | Video timestamp | TBD |
 
 **Run one upload and one read yourself.** Follow [`web/README.md`](../web/README.md):
 1. Start two browser monkeys.
-2. A draws and sends **Gift via Swarm + Arkiv**.
-3. B presses **Check mailbox**.
+2. A draws and sends **Send privately**.
+3. B presses **Check**.
 
 You should see:
 - the gift found in Arkiv;
