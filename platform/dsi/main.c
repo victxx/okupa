@@ -540,6 +540,8 @@ int main(void)
 #endif
 #if !defined(OKUPA_NO_NET) && !defined(OKUPA_NO_MIND)
             ok_dsi_mind_start(storage ? net_dir : NULL);
+    /* The buttons this platform really handles; the others stay hidden. */
+    ui.wired = OK_UI_HAS_PHOTO | OK_UI_HAS_TALK | OK_UI_HAS_GAMES | (storage ? OK_UI_HAS_MAIL : 0);
 #endif
         }
         /* SELECT: the technical side, over the same running game. */
