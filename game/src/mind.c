@@ -24,8 +24,13 @@ static const char SYSTEM[] =
     "name, what they like, where they are, how their day was), never while a question is waiting, and use what you "
     "know. When the player answers, react to it and remember what matters. Never repeat a recent line. Keep to its "
     "needs: hungry means eat, tired means sleep. go_outside only from the attic, go_inside only from the garden. "
-    "Act like a living creature, not a remote control: keep doing what you were doing for a while, change only "
-    "for a reason, and flow from one thing to the next (stretch before you wander, look before you go out).";
+    "What each activity looks like: look = turns its head around the room; scratch = scratches its head; stretch "
+    "= big stretch with arms up; hop = little jumps of joy; peek = hides its face and peeks; wander = walks to "
+    "another spot; sigh = shoulders drop; wave = waves at the player; eat = munches a snack; play = plays with a "
+    "toy; sleep = goes to bed; go_outside / go_inside = walks through the door. Act like a living creature, not a "
+    "remote control: let one thing lead to the next (stretch then wander, look then go out, eat then sigh "
+    "happily). Never pick an activity used in your last two decisions unless a need forces it; vary them. Use "
+    "what you know about the player in what you say.";
 
 const char *ok_mind_activity_name(int a) { return a >= 0 && a < OK_ACTIVITIES ? activities[a] : "?"; }
 const char *ok_mind_mood_name(int m) { return m >= 0 && m < OK_FEELINGS ? moods[m] : "?"; }
@@ -137,7 +142,7 @@ ok_result ok_mind_request(const char *model, const ok_mind_obs *obs, char *out, 
                            "\"messages\":[{\"content\":") ||
         !quote(out, cap, &o, SYSTEM) || !raw(out, cap, &o, ",\"role\":\"system\"},{\"content\":") ||
         !quote(out, cap, &o, user) || !raw(out, cap, &o, ",\"role\":\"user\"}],\"model\":") ||
-        !quote(out, cap, &o, model) || !raw(out, cap, &o, ",\"temperature\":0.8}"))
+        !quote(out, cap, &o, model) || !raw(out, cap, &o, ",\"temperature\":0.95}"))
         return OK_RANGE;
     out[o] = 0;
     *len = o;
