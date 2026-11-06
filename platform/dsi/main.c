@@ -398,6 +398,11 @@ static int send_letter(const char *text, char sent_day[11], const char *today)
 
 /* The Mail button: the letters the okupa sent (letters.txt: "date hash
  * text" a line), the newest one in the bubble. */
+/* A letter only when the player asks for one (Mail), never by itself: the
+ * mind writes it in its own time, then the console signs and posts it. */
+static int letter_requested, letter_asked_now;
+static time_t letter_asked_at;
+
 static void show_mail(ok_ui *u, const char *dir)
 {
     static char said[200];
@@ -421,13 +426,22 @@ static void show_mail(ok_ui *u, const char *dir)
     last[strcspn(last, "\r\n")] = 0;
     if (letter_to_state < 0)
         snprintf(said, sizeof said, "letters-to.txt has no valid address (check the 0x and its capitals).");
-    else if (count)
-        snprintf(said, sizeof said, "%d letter%s on Ethereum, to %.24s. Last, %.10s: %.100s", count, count > 1 ? "s" : "",
-                 letter_to_label(), last, last + 28);
-    else if (on)
-        snprintf(said, sizeof said, "No letters yet. I'll write to %.24s when something matters.", letter_to_label());
-    else
-        snprintf(said, sizeof said, "No letters yet. Letters are off (letters-on.txt on the SD).");
+    else if (!on)
+        snprintf(said, sizeof said, "Letters are off (letters-on.txt on the SD).");
+    else if (ok_dsi_net_pending(NULL))
+        snprintf(said, sizeof said, "My last letter is still on its way. One at a time!");
+    else if (letter_requested)
+        snprintf(said, sizeof said, "I'm still writing it... good letters take a moment.");
+    else {
+        letter_requested = 1;
+        letter_asked_now = 1;
+        letter_asked_at = time(NULL);
+        if (count)
+            snprintf(said, sizeof said, "Another letter for %.20s? Let me think. (%d sent, last %.10s)", letter_to_label(),
+                     count, last);
+        else
+            snprintf(said, sizeof said, "A letter for %.24s? Let me think what to say...", letter_to_label());
+    }
     u->say = said;
     u->say_ticks = 60 * 8;
 }
@@ -748,8 +762,9 @@ int main(void)
                 FILE *f;
                 last_letter_day(letter_day);
                 letter_day_read = 1;
-                /* The mind may post a letter to mainnet by itself (real gas)
-                 * only if the player opted in: sd:/okupa/letters-on.txt. */
+                /* Letters go to mainnet (real gas): only with the player's
+                 * opt-in (sd:/okupa/letters-on.txt), and each one only when
+                 * asked for through Mail. */
                 snprintf(on_path, sizeof on_path, "%.30sletters-on.txt", net_dir);
                 if ((f = fopen(on_path, "r"))) {
                     letters_allowed = 1;
@@ -757,7 +772,16 @@ int main(void)
                     fclose(f);
                 }
             }
-            ok_dsi_mind_letters(letters_allowed && letter_to_state >= 0 && storage && strcmp(letter_day, today) &&
+            if (letter_asked_now) { /* tell the mind the player asked */
+                ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, "asked you to write them a letter");
+                letter_asked_now = 0;
+            }
+            if (letter_requested && now - letter_asked_at > 180) { /* the mind never wrote it: say so, drop it */
+                letter_requested = 0;
+                ui.say = "I couldn't find the words this time. Ask me again later?";
+                ui.say_ticks = 60 * 5;
+            }
+            ok_dsi_mind_letters(letter_requested && letters_allowed && letter_to_state >= 0 && storage &&
                                 !ok_dsi_net_pending(hash));
             if (ok_dsi_mind_take_object(&obj)) {
                 /* Its colour names onto the house's palette. */
@@ -786,6 +810,7 @@ int main(void)
                 }
             }
             if (ok_dsi_mind_take_letter(text)) {
+                letter_requested = 0;
                 if (send_letter(text, letter_day, today)) {
                     ui.say = "I wrote you a letter, on Ethereum for good!";
                 } else {
