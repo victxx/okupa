@@ -21,7 +21,7 @@ typedef struct {
     ok_voice v[OK_MUSIC_VOICES];
     uint32_t rate, a4, step_len, until_step, swing, seed, sfx_t;
     int step, tune, next_tune, sfx;
-    int32_t level, level_goal, hp;
+    int32_t level, level_goal, hp; /* hp: the low-pass filter's state */
 } ok_music;
 
 void ok_music_init(ok_music *m, uint32_t rate);

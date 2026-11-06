@@ -85,12 +85,12 @@ static void strike(ok_music *m, int i, int kind, int note, int32_t peak, int att
     v->mod_decay = 65536;
     v->sweep = 0;
     if (kind == K_PLUCK || kind == K_BELL) {
-        v->ratio = kind == K_PLUCK ? 1024 : 768; /* the bright overtone of a bar or a tine */
-        v->mod = 4096;
-        v->mod_decay = fall(m, kind == K_PLUCK ? 70 : 400);
+        v->ratio = kind == K_PLUCK ? 512 : 768; /* the overtone of a soft mallet or a tine */
+        v->mod = kind == K_PLUCK ? 1400 : 1600;
+        v->mod_decay = fall(m, kind == K_PLUCK ? 40 : 250);
     } else if (kind == K_EPIANO) {
-        v->mod = 1700;
-        v->mod_decay = fall(m, 300);
+        v->mod = 900;
+        v->mod_decay = fall(m, 220);
     } else if (kind == K_KICK) {
         v->inc = note_inc(m, 52);
         v->sweep = fall(m, 45); /* the pitch drops into a thump */
@@ -110,7 +110,7 @@ static void sweep(ok_music *m, int i, int from, int to, int ms, int32_t peak)
 
 static void set_tempo(ok_music *m)
 {
-    static const uint8_t bpm[OK_TUNES] = {96, 78, 62, 70};
+    static const uint8_t bpm[OK_TUNES] = {88, 72, 58, 70};
     m->step_len = m->rate * 60 / bpm[m->tune] / 4;
     m->swing = m->tune == OK_TUNE_DAY ? m->step_len / 7 : m->step_len / 12;
 }
@@ -156,27 +156,27 @@ static void step(ok_music *m)
     }
     switch (m->tune) {
     case OK_TUNE_DAY:
-        if (melody[s]) strike(m, V_LEAD, K_PLUCK, melody[s], human(m, 15000), 2, 450);
+        if (melody[s]) strike(m, V_LEAD, K_PLUCK, melody[s] - 12, human(m, 13000), 4, 520);
         if (pos == 0 || pos == 6 || pos == 10)
             for (i = 0; i < 4; i++) strike(m, V_CHORD + i, K_EPIANO, chords[bar][i], human(m, pos ? 2600 : 4200), 6, pos ? 260 : 900);
         if (pos == 0) strike(m, V_BASS, K_BASS, roots[bar], 15000, 4, 700);
         if (pos == 8) strike(m, V_BASS, K_BASS, roots[bar] + 7, 11000, 4, 400);
         if (pos == 14) strike(m, V_BASS, K_BASS, roots[bar] + 12, 7000, 4, 160);
         if (pos == 0 || pos == 8) strike(m, V_KICK, K_KICK, 0, 17000, 1, 180);
-        if (pos == 4 || pos == 12) strike(m, V_SNAP, K_SNAP, 0, 5200, 1, 90);
-        if (pos % 2) strike(m, V_HAT, K_HAT, 0, human(m, pos % 4 == 3 ? 2400 : 1500), 1, 40);
+        if (pos == 4 || pos == 12) strike(m, V_SNAP, K_SNAP, 0, 3200, 2, 80);
+        if (pos % 4 == 3) strike(m, V_HAT, K_HAT, 0, human(m, 1100), 1, 30);
         break;
     case OK_TUNE_NIGHT:
-        if (melody[s] && pos % 2 == 0) strike(m, V_LEAD, K_BELL, melody[s] + 12, human(m, 9000), 3, 900);
+        if (melody[s] && pos % 2 == 0) strike(m, V_LEAD, K_BELL, melody[s], human(m, 8000), 6, 900);
         if (pos == 0 || pos == 8)
             for (i = 0; i < 4; i++) strike(m, V_CHORD + i, K_EPIANO, chords[bar][i], human(m, pos ? 2000 : 3200), 25, 1400);
         if (pos == 0) strike(m, V_BASS, K_BASS, roots[bar], 10000, 10, 1200);
-        if (pos % 4 == 2) strike(m, V_HAT, K_HAT, 0, human(m, 900), 1, 30);
+        if (pos % 8 == 6) strike(m, V_HAT, K_HAT, 0, human(m, 600), 1, 25);
         break;
     case OK_TUNE_SLEEP:
         if (pos == 0)
-            for (i = 0; i < 4; i++) strike(m, V_CHORD + i, K_BELL, chords[bar][i] + 12, 1800, 60, 2200);
-        if (melody[s] && pos % 4 == 0 && bar % 2 == 0) strike(m, V_LEAD, K_BELL, melody[s] + 12, 4500, 5, 1600);
+            for (i = 0; i < 4; i++) strike(m, V_CHORD + i, K_BELL, chords[bar][i], 1800, 80, 2200);
+        if (melody[s] && pos % 4 == 0 && bar % 2 == 0) strike(m, V_LEAD, K_BELL, melody[s] - 12, 4500, 8, 1600);
         break;
     default: break;
     }
@@ -299,6 +299,8 @@ void ok_music_render(ok_music *m, int16_t *out, int n)
         if (m->level < m->level_goal) m->level++;
         if (m->level > m->level_goal) m->level--;
         mix = (int32_t)((int64_t)mix * m->level >> 16);
+        m->hp += (mix - m->hp) * 3 / 8; /* a gentle low-pass: warmer, less bright */
+        mix = m->hp;
         if (mix > 20000) mix = 20000 + (mix - 20000) / 4; /* soft knee instead of a hard clip */
         if (mix < -20000) mix = -20000 + (mix + 20000) / 4;
         out[k] = (int16_t)(mix > 32767 ? 32767 : mix < -32767 ? -32767 : mix);
