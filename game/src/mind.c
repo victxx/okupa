@@ -30,8 +30,8 @@ static const char SYSTEM[] =
     "can_write_letter is true, at most once a day. You move its whole body: choose where it goes, where it looks and how it "
     "moves so each decision plays out like a little scene. Speak when the player does or says something, when Okupa sees something or when its "
     "needs change; otherwise stay quiet or just think. Ask rarely, only to learn something about the player (their "
-    "name, what they like, where they are, how their day was), never while a question is waiting, and use what you "
-    "know. When the player answers, react to it and remember what matters. Never repeat a recent line. Keep to its "
+    "name, what they like, where they are, how their day was), never while a question is waiting, never one you asked in recent, and use what "
+    "you know. When the player answers, react to it and remember what matters. Never repeat a recent line. Keep to its "
     "needs: hungry means eat, tired means sleep. go_outside only from the attic, go_inside only from the garden. "
     "What each activity looks like: look = turns its head around the room; scratch = scratches its head; stretch "
     "= big stretch with arms up; hop = little jumps of joy; peek = hides its face and peeks; wander = walks to "
@@ -195,7 +195,8 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
     }
     if (!raw(user, sizeof user, &u, ",\"recent\":[")) return OK_RANGE;
     for (i = 0; i < obs->recent_count && i < OK_MIND_RECENT; i++)
-        if ((i && !raw(user, sizeof user, &u, ",")) || !text(user, sizeof user, &u, obs->recent[i], 64)) return OK_RANGE;
+        if ((i && !raw(user, sizeof user, &u, ",")) || !text(user, sizeof user, &u, obs->recent[i], OK_MIND_MEMORY))
+            return OK_RANGE;
     if (!raw(user, sizeof user, &u, "]}")) return OK_RANGE;
     user[u] = 0;
 
@@ -213,12 +214,11 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
     return OK_OK;
 }
 
-void ok_mind_memory(const ok_mind *d, char out[OK_MIND_LINE + 24])
+void ok_mind_memory(const ok_mind *d, char out[OK_MIND_MEMORY])
 {
-    if (d->line[0])
-        snprintf(out, OK_MIND_LINE + 24, "%s: %s", ok_mind_activity_name(d->activity), d->line);
-    else
-        snprintf(out, OK_MIND_LINE + 24, "%s", ok_mind_activity_name(d->activity));
+    int k = d->line[0] ? snprintf(out, OK_MIND_MEMORY, "%s: %s", ok_mind_activity_name(d->activity), d->line)
+                       : snprintf(out, OK_MIND_MEMORY, "%s", ok_mind_activity_name(d->activity));
+    if (d->ask[0] && k > 0 && k < OK_MIND_MEMORY) snprintf(out + k, OK_MIND_MEMORY - (size_t)k, " (asked: %s)", d->ask);
 }
 
 static int pick(const ok_json *obj, const char *key, const char *const *set, int count)

@@ -2,6 +2,7 @@
 #include "okupa_png.h"
 #include "okupa_wav.h"
 #include <nds.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -12,7 +13,9 @@
 #define MAX_SAMPLES (OK_EAR_RATE * OK_EAR_SECONDS)
 
 static uint8_t ring[2 * HALF] __attribute__((aligned(32)));
-TWL_BSS static uint8_t clip[OK_WAV_HEADER + MAX_SAMPLES]; /* in the DSi's own RAM */
+TWL_BSS static uint8_t clip_twl[OK_WAV_HEADER + MAX_SAMPLES]; /* in the DSi's own RAM */
+static uint8_t *clip;
+static uint32_t clip_max; /* samples: 5 s in DSi mode, 3 s from the heap in DS mode */
 static volatile uint32_t samples;
 static volatile int recording;
 
@@ -20,7 +23,7 @@ static void heard(void *completed, int length)
 {
     uint32_t n = (uint32_t)length;
     if (!recording) return;
-    if (samples + n > MAX_SAMPLES) n = MAX_SAMPLES - samples;
+    if (samples + n > clip_max) n = clip_max - samples;
     DC_InvalidateRange(completed, (uint32_t)length);
     memcpy(clip + OK_WAV_HEADER + samples, completed, n);
     samples += n;
@@ -28,7 +31,15 @@ static void heard(void *completed, int length)
 
 void ok_dsi_ear_start(void)
 {
-    if (recording || !isDSiMode()) return; /* clip[] is in the DSi's own RAM */
+    if (recording) return;
+    if (!clip) {
+        if (isDSiMode()) {
+            clip = clip_twl, clip_max = MAX_SAMPLES;
+        } else {
+            clip_max = OK_EAR_RATE * 3;
+            if (!(clip = malloc(OK_WAV_HEADER + clip_max))) return;
+        }
+    }
     samples = 0;
     recording = 1;
     soundMicRecord(ring, sizeof ring, MicFormat_8Bit, OK_EAR_RATE, heard);
