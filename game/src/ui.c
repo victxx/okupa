@@ -311,23 +311,25 @@ static int wrap_lines(const char *s, int w, char lines[][64], int max)
 static void card(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
     char lines[8][64];
-    int x0 = 6, y0 = 20, w = 244, h = 108, px = 10, py = 26, tx, tw, n, i, x, y;
+    int x0 = 6, y0 = 20, w = 244, h = 112, px = 12, py, tx, tw, n, i, x, y, dw = 0, dh = 0;
     int pw = u->card_w > 0 ? u->card_w : 0, ph = u->card_h > 0 ? u->card_h : 0;
     round_box(f, x0, y0 + 2, w, h, 8, RGB(2, 2, 3));
     round_box(f, x0, y0, w, h, 8, u->card_verified ? RGB(8, 24, 12) : RGB(17, 16, 15));
     round_box(f, x0 + 2, y0 + 2, w - 4, h - 4, 7, PAPER);
-    if (pw && ph) {
-        py = y0 + (h - ph) / 2;
-        for (y = 0; y < ph; y++)
-            for (x = 0; x < pw; x++) f[(py + y) * OK_UI_W + px + x] = u->card_px[y * pw + x] | 0x8000;
+    if (pw && ph) { /* the picture in a 96x84 box, its shape kept (a photo 96x72, a drawing 84x84) */
+        if (pw * 84 > ph * 96) dw = 96, dh = ph * 96 / pw;
+        else dh = 84, dw = pw * 84 / ph;
+        py = y0 + (h - dh) / 2;
+        for (y = 0; y < dh; y++)
+            for (x = 0; x < dw; x++) f[(py + y) * OK_UI_W + px + x] = u->card_px[(y * ph / dh) * pw + x * pw / dw] | 0x8000;
     }
-    tx = pw ? px + pw + 6 : x0 + 10;
+    tx = dw ? px + dw + 8 : x0 + 10;
     tw = x0 + w - 8 - tx;
     text(f, font, tx, y0 + 6, u->card_title, INK, 2);
-    n = wrap_lines(u->card_text, tw, lines, 6);
+    n = wrap_lines(u->card_text, tw, lines, 5);
     for (i = 0; i < n; i++) text(f, font, tx, y0 + 20 + i * 11, lines[i], INK, 1);
     if (u->card_verified) { /* the seal: 0G's TEE signed these words, checked here */
-        round_box(f, tx, y0 + h - 30, 72, 12, 4, RGB(8, 24, 12));
+        round_box(f, tx, y0 + h - 30, 80, 12, 4, RGB(8, 24, 12));
         text(f, font, tx + 4, y0 + h - 28, "0G", PAPER, 1);
         rect(f, tx + 18, y0 + h - 24, 2, 2, PAPER);
         rect(f, tx + 20, y0 + h - 23, 2, 2, PAPER);
@@ -813,7 +815,7 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         text(f, font, 18, WALLET_BAL_Y + 6, "Balance", RGB(24, 23, 21), 1);
         centred(f, font, 128, WALLET_BAL_Y + 22, u->wallet_balance[0] ? u->wallet_balance : "?", PAPER, 2);
         centred(f, font, 128, WALLET_BAL_Y + 38, u->wallet_balance_note[0] ? u->wallet_balance_note : "tap to ask", RGB(24, 23, 21), 1);
-        centred(f, font, 128, WALLET_BAL_Y + 51, "public RPC, display only (tap: refresh)", MUTED, 1);
+        centred(f, font, 128, WALLET_BAL_Y + 51, "a public node's word (tap: ask again)", MUTED, 1);
         if (u->wallet_low && u->wallet_balance[0])
             centred(f, font, 128, 118, "Low: a hello can cost up to 0.00006 ETH", RGB(31, 20, 12), 1);
         centred(f, font, 128, 130, "Sending never uses the RPC: P2P only", MUTED, 1);

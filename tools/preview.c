@@ -213,8 +213,40 @@ int main(int argc, char **argv)
         shot(dir, "home-listening", &w, &p, 11);
         ok_ui_listening(&w, 2);
         shot(dir, "home-thinking", &w, &p, 11);
+        /* The player's words as 0G heard them; the cloud waits for its answer. */
+        ok_ui_heard(&w, "hola okupa, que tal? hoy he dibujado una casa con un arbol");
+        ok_ui_busy(&w, "Thinking what to answer");
+        shot(dir, "home-heard", &w, &p, 11);
+        ok_ui_heard(&w, NULL);
+        ok_ui_busy(&w, NULL);
         ok_ui_listening(&w, 0);
         ok_ui_ask(&w, NULL);
+        {   /* What the camera saw, in 0G's words (a made-up photo: this is a layout render, not the camera). */
+            static uint16_t photo[128 * 96];
+            int x, y;
+            for (y = 0; y < 96; y++)
+                for (x = 0; x < 128; x++) {
+                    int dx = x - 64, dy = y - 44, face = dx * dx + dy * dy < 900;
+                    photo[y * 128 + x] = (uint16_t)(0x8000 | (face ? 26 | 20 << 5 | 16 << 10 : (x / 8) | (y / 6) << 5 | 12 << 10));
+                }
+            ok_ui_card(&w, "I see...", "A smiling person with glasses holding a red mug, a bookshelf behind them", photo, 128,
+                       96, 1, "#2  4.3 s  (tap: stop)");
+            shot(dir, "home-card-photo", &w, &p, 11);
+            ok_ui_card(&w, "My eyes failed", "camera: no frame", NULL, 0, 0, 0, "nothing made up");
+            shot(dir, "home-card-failed", &w, &p, 11);
+            ok_ui_card(&w, NULL, NULL, NULL, 0, 0, 0, NULL);
+        }
+        {   /* Pictionary: its own page, and 0G's guess as a question. */
+            int k;
+            w.scene = OK_UI_SKETCH;
+            w.pictionary = 1;
+            for (k = 10; k < 54; k++) ok_drawing_set(w.doodle, (unsigned)k, 40, 1), ok_drawing_set(w.doodle, 32, (unsigned)(k - 4), 1);
+            ok_ui_ask_hint(&w, "Is it a tree?", "A yes   B no");
+            shot(dir, "pictionary", &w, &p, 11);
+            ok_ui_ask(&w, NULL);
+            w.pictionary = 0;
+            w.scene = OK_UI_HOME;
+        }
         /* What its mind makes: a thing on the floor, its own drawing, a dream. */
         {
             static const uint8_t chair[5][7] = {{0, 0, 0, 2, 6, 2, 11}, {8, 0, 0, 2, 6, 2, 11}, {0, 0, 8, 2, 6, 2, 11},
@@ -259,7 +291,12 @@ int main(int argc, char **argv)
     shot(dir, "wallet-scribble", &u, &p, 15);
     u.wallet_ready = 1;
     strcpy(u.wallet_address, "0x9d8A62f656a8d1615C1294fd71e9CFb3E4855A4F");
+    strcpy(u.wallet_balance, "0.000026 ETH");
+    strcpy(u.wallet_balance_note, "block 21450590, 12:03");
+    u.wallet_low = 1;
     shot(dir, "wallet", &u, &p, 15);
+    u.wallet_qr = 1;
+    shot(dir, "wallet-qr", &u, &p, 15);
     tech_shots(dir);
     return 0;
 }
