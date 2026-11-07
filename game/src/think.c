@@ -404,13 +404,13 @@ ok_result ok_think_dream(ok_think *t, const ok_think_provider *p, const uint8_t 
                 fetch, fetch_ctx);
 }
 
-/* Keeps printable ASCII only: what the okupa heard or saw goes back into its
+/* Keeps printable ASCII only (accents dropped): what the okupa heard or saw goes back into its
  * next request, and onto a small screen. */
 static void plain(const char *in, size_t n, char *out, size_t cap)
 {
-    size_t i, o = 0;
-    for (i = 0; i < n && o + 1 < cap; i++) {
-        unsigned char c = (unsigned char)in[i];
+    size_t i, o = 0, used;
+    for (i = 0; i < n && o + 1 < cap; i += used) {
+        int c = ok_mind_ascii(in + i, n - i, &used); /* accents dropped: "que tal", not "qu tal" */
         if (c >= 0x20 && c < 0x7f && !(c == ' ' && (o == 0 || out[o - 1] == ' '))) out[o++] = (char)c;
     }
     while (o && out[o - 1] == ' ') o--;

@@ -30,11 +30,17 @@ static const char SYSTEM[] =
     "a letter: then write it in this very answer, two or three short sentences under 140 characters, warm in Okupa's own voice, about something real from "
     "its day (what it did, what the player did or said, its plan) or from known, never an event that did not "
     "happen, and say in line that it wrote it; when it is false, letter is always \"\". You move its whole body: choose where it goes, where it looks and how it "
-    "moves so each decision plays out like a little scene. Speak when the player does or says something, when Okupa sees something or when its "
-    "needs change; otherwise stay quiet or just think. Ask rarely, only to learn something about the player (their "
+    "moves so each decision plays out like a little scene. player_said, when present, is what the player just said "
+    "out loud to Okupa (speech to text, accents dropped; they may speak Spanish or English): then line MUST answer it "
+    "directly and specifically in English, so they can tell Okupa understood (refer to what they said), and the "
+    "activity is never sleep or peek. Otherwise speak when the player does something, when Okupa sees something or "
+    "when its needs change, and stay quiet or just think the rest of the time; a touch of the screen is not news. Ask rarely, only to learn something about the player (their "
     "name, what they like, where they are, how their day was), never while a question is waiting, never one you asked in recent, and use what "
-    "you know. When the player answers, react to it and remember what matters. Never repeat a recent line. Keep to its "
-    "needs: hungry means eat, tired means sleep. go_outside only from the attic, go_inside only from the garden. "
+    "you know. When the player answers, react to it and remember what matters. Never say, or paraphrase, any of "
+    "your_recent_lines: say something new. needs go from 0 (empty) to 100 (full): low food means hungry, low energy "
+    "means tired, low fun bored, low love lonely. Choose sleep only when energy is below 30, or late at night while "
+    "the player is away; never right after the player touched, spoke or asked, and never twice in a row. go_outside "
+    "only from the attic, go_inside only from the garden. "
     "What each activity looks like: look = turns its head around the room; scratch = scratches its head; stretch "
     "= big stretch with arms up; hop = little jumps of joy; peek = hides its face and peeks; wander = walks to "
     "another spot; sigh = shoulders drop; wave = waves at the player; eat = munches a snack; play = plays with a "
@@ -84,16 +90,37 @@ static int raw(char *out, size_t cap, size_t *o, const char *s)
     return 1;
 }
 
+/* Latin-1 letters (U+00C0..U+00FF, UTF-8 C3 80..BF) without their accents. */
+static const char latin1[65] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYTsaaaaaaaceeeeiiiidnooooo/ouuuuyty";
+
+int ok_mind_ascii(const char *s, size_t left, size_t *used)
+{
+    unsigned char c = (unsigned char)s[0], d = left > 1 ? (unsigned char)s[1] : 0;
+    *used = 1;
+    if (c >= 0x20 && c < 0x7f) return c;
+    if (c == 0xc3 && d >= 0x80 && d < 0xc0) {
+        *used = 2;
+        return latin1[d - 0x80];
+    }
+    if (c >= 0xc0 && c < 0xe0) *used = 2;       /* another two-byte character (the Spanish marks among them) */
+    else if (c >= 0xe0 && c < 0xf0) *used = 3;
+    else if (c >= 0xf0 && c < 0xf8) *used = 4;
+    if (*used > left) *used = left ? left : 1;
+    return -1;
+}
+
 /* Appends s to the observation as an inner JSON string: quotes and
- * backslashes escaped, control and non-ASCII bytes dropped, cut to max. */
+ * backslashes escaped, accents dropped (qu\u00e9 -> que), other control and
+ * non-ASCII bytes dropped, cut to max. */
 static int text(char *out, size_t cap, size_t *o, const char *s, size_t max)
 {
-    size_t k = 0;
+    size_t k = 0, used, left = s ? strlen(s) : 0;
     if (*o + 2 >= cap) return 0;
     out[(*o)++] = '"';
-    for (; s && *s && k < max; s++) {
-        unsigned char c = (unsigned char)*s;
-        if (c < 0x20 || c >= 0x7f) continue;
+    for (; s && *s && k < max; s += used, left -= used) {
+        int a = ok_mind_ascii(s, left, &used);
+        unsigned char c = (unsigned char)a;
+        if (a < 0x20 || a >= 0x7f) continue;
         if (*o + 3 >= cap) return 0;
         if (c == '"' || c == '\\') out[(*o)++] = '\\';
         out[(*o)++] = (char)c;
@@ -141,14 +168,19 @@ ok_result ok_mind_diary_request(const char *model, const ok_mind_obs *obs, char 
 static ok_result build(const char *model, const char *system, int max_tokens, const ok_mind_obs *obs, int diary,
                        char *out, size_t cap, size_t *len)
 {
-    char user[4096], head[256];
+    char user[6144], head[256];
     const ok_pet *p;
     size_t o = 0, u = 0;
     int i, k;
     if (!model || !obs || !obs->pet || !out || !len) return OK_ARGUMENT;
     p = obs->pet;
+    /* What the player said comes first: it is what the answer is about. */
+    if (!raw(user, sizeof user, &u, "{")) return OK_RANGE;
+    if (obs->heard && (!raw(user, sizeof user, &u, "\"player_said\":") ||
+                       !text(user, sizeof user, &u, obs->heard, OK_MIND_TEXT) || !raw(user, sizeof user, &u, ",")))
+        return OK_RANGE;
     k = snprintf(head, sizeof head,
-                 "{\"time\":\"%02d:%02d\",\"place\":\"%s\",\"needs\":{\"food\":%u,\"sleep\":%u,\"fun\":%u,\"love\":%u},"
+                 "\"time\":\"%02d:%02d\",\"place\":\"%s\",\"needs\":{\"food\":%u,\"energy\":%u,\"fun\":%u,\"love\":%u},"
                  "\"asleep\":%s,\"seconds_since_player\":%lu",
                  obs->hour % 24, obs->minute % 60, obs->outside ? "garden" : "attic", p->need[OK_NEED_HUNGER],
                  p->need[OK_NEED_ENERGY], p->need[OK_NEED_FUN], p->need[OK_NEED_LOVE], p->asleep ? "true" : "false",
@@ -156,9 +188,6 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
     if (k < 0 || (size_t)k >= sizeof head || !raw(user, sizeof user, &u, head)) return OK_RANGE;
     if (obs->player_did && (!raw(user, sizeof user, &u, ",\"player_did\":") ||
                             !text(user, sizeof user, &u, obs->player_did, 60)))
-        return OK_RANGE;
-    if (obs->heard && (!raw(user, sizeof user, &u, ",\"player_said\":") ||
-                       !text(user, sizeof user, &u, obs->heard, OK_MIND_TEXT)))
         return OK_RANGE;
     if (obs->saw && (!raw(user, sizeof user, &u, ",\"okupa_sees\":") ||
                      !text(user, sizeof user, &u, obs->saw, OK_MIND_TEXT)))
@@ -195,6 +224,13 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
                 return OK_RANGE;
         if (!raw(user, sizeof user, &u, "]")) return OK_RANGE;
     }
+    if (obs->line_count) { /* its own last lines, word for word: none of them again */
+        if (!raw(user, sizeof user, &u, ",\"your_recent_lines\":[")) return OK_RANGE;
+        for (i = 0; i < obs->line_count && i < OK_MIND_LINES; i++)
+            if ((i && !raw(user, sizeof user, &u, ",")) || !text(user, sizeof user, &u, obs->lines[i], OK_MIND_LINE))
+                return OK_RANGE;
+        if (!raw(user, sizeof user, &u, "]")) return OK_RANGE;
+    }
     if (!raw(user, sizeof user, &u, ",\"recent\":[")) return OK_RANGE;
     for (i = 0; i < obs->recent_count && i < OK_MIND_RECENT; i++)
         if ((i && !raw(user, sizeof user, &u, ",")) || !text(user, sizeof user, &u, obs->recent[i], OK_MIND_MEMORY))
@@ -214,6 +250,40 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
     out[o] = 0;
     *len = o;
     return OK_OK;
+}
+
+/* A line as letters and digits only, lower case, for comparing. */
+static void fold(const char *s, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (; *s && o + 1 < cap; s++) {
+        char c = *s;
+        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) out[o++] = c;
+    }
+    out[o] = 0;
+}
+
+int ok_mind_dedupe(ok_mind *d, const char *const *lines, int n)
+{
+    char mine[OK_MIND_LINE + 1], other[OK_MIND_LINE + 1];
+    int i;
+    if (!d || !d->line[0]) return 0;
+    fold(d->line, mine, sizeof mine);
+    if (!mine[0]) return 0;
+    for (i = 0; i < n; i++) {
+        size_t a, b;
+        if (!lines[i]) continue;
+        fold(lines[i], other, sizeof other);
+        a = strlen(mine), b = strlen(other);
+        if (!b) continue;
+        /* the same words, or one inside the other ("You touched me again!") */
+        if (!strcmp(mine, other) || (a >= 10 && b >= 10 && (strstr(mine, other) || strstr(other, mine)))) {
+            d->line[0] = 0;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 void ok_mind_memory(const ok_mind *d, char out[OK_MIND_MEMORY])

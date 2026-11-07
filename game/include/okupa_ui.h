@@ -112,6 +112,10 @@ typedef struct {
     uint16_t card_px[128 * 96];
     int card_w, card_h, card_ticks, card_verified, card_live;
     char busy[40]; /* what it is busy with while listening is 2 ("Asking 0G...") */
+    /* What the player said, as 0G's speech to text heard it (verified), in a
+     * caption of the player's own at the foot of the top screen. */
+    char heard[OK_UI_CARD_TEXT + 1];
+    int heard_ticks;
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);
@@ -138,6 +142,9 @@ void ok_ui_listening(ok_ui *u, int state);
 /* The words in the thinking cloud ("Asking 0G..."); NULL or "" for the
  * plain "Thinking...". Up to 39 ASCII characters, copied. */
 void ok_ui_busy(ok_ui *u, const char *text);
+/* What the player said, word for word as 0G heard it, for about 10 s (NULL
+ * clears it). Up to OK_UI_CARD_TEXT ASCII characters, copied. */
+void ok_ui_heard(ok_ui *u, const char *text);
 /* The card for what 0G looked at (see ok_ui.card_*): px a picture of DS
  * colours up to 128x96 (NULL: none), verified 1 for words 0G's TEE signed,
  * 0 for a failure told as it is. Shown for about 10 s or until a tap.

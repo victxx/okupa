@@ -21,7 +21,7 @@
  * Any failure is a safe stop: stage says where, and nothing is decided. Nothing
  * here opens sockets: the platform gives one HTTPS round trip per call. */
 
-#define OK_THINK_REQUEST 8192   /* the decision's own request */
+#define OK_THINK_REQUEST 12288  /* the decision's own request (the prompt, the observation, its last lines) */
 #define OK_THINK_RESPONSE 98304 /* a dream picture (a 128x128 PNG) comes back as base64 */
 #define OK_THINK_SIGNATURE 4096
 #define OK_THINK_CHAT_ID 96

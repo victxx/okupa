@@ -42,7 +42,16 @@ static int started, paused;
 static ok_pet seen_pet;
 static int seen_outside, have_pet;
 static uint32_t seen_idle;
-static char seen_did[64];
+/* What the player did since the last decision, oldest first: a few, so a
+ * tap never pushes out something that matters (a game's score, a letter
+ * asked for); one tap is enough to say they tapped. */
+#define DIDS 3
+static char seen_did[DIDS][64];
+static int did_count;
+/* Its own last lines, newest first, kept on the SD card (recent.txt): told
+ * to the mind so it says something new, and never shown twice. */
+static char said[OK_MIND_LINES][OK_MIND_LINE + 1];
+static int said_count;
 
 /* The newest verified decision, handed out once. */
 static ok_mind mailbox;
@@ -185,7 +194,19 @@ void ok_dsi_mind_observe(const ok_pet *p, int outside, uint32_t seconds_since_pl
     have_pet = 1;
     seen_outside = outside;
     seen_idle = seconds_since_player;
-    if (did) snprintf(seen_did, sizeof seen_did, "%s", did);
+    if (did) {
+        int k, tap = !strncmp(did, "tapped", 6) || !strncmp(did, "touched", 7);
+        for (k = 0; k < did_count; k++)
+            if (!strcmp(seen_did[k], did)) return; /* told already */
+        if (did_count == DIDS) {
+            if (tap) return;
+            for (k = 0; k < did_count && strncmp(seen_did[k], "tapped", 6) && strncmp(seen_did[k], "touched", 7); k++) {}
+            if (k == did_count) k = 0; /* no tap to drop: the oldest goes */
+            memmove(seen_did[k], seen_did[k + 1], sizeof seen_did[0] * (size_t)(did_count - k - 1));
+            did_count--;
+        }
+        snprintf(seen_did[did_count++], sizeof seen_did[0], "%s", did);
+    }
 }
 
 void ok_dsi_mind_toggle(void) { paused = !paused; }
@@ -862,6 +883,35 @@ static void remember(const ok_mind *d)
     if (recent_count < OK_MIND_RECENT) recent_count++;
 }
 
+/* recent.txt: its last lines, newest first. */
+static void load_said(void)
+{
+    char path[64], text[OK_MIND_LINE + 8];
+    FILE *f;
+    said_count = 0;
+    snprintf(path, sizeof path, "%srecent.txt", dir_path);
+    if (!(f = fopen(path, "r"))) return;
+    while (said_count < OK_MIND_LINES && fgets(text, sizeof text, f)) {
+        text[strcspn(text, "\r\n")] = 0;
+        if (text[0]) snprintf(said[said_count++], sizeof said[0], "%.40s", text);
+    }
+    fclose(f);
+}
+
+static void keep_said(const char *text)
+{
+    char path[64];
+    FILE *f;
+    int k;
+    memmove(said[1], said[0], sizeof said[0] * (OK_MIND_LINES - 1));
+    snprintf(said[0], sizeof said[0], "%s", text);
+    if (said_count < OK_MIND_LINES) said_count++;
+    snprintf(path, sizeof path, "%srecent.txt", dir_path);
+    if (!(f = fopen(path, "w"))) return;
+    for (k = 0; k < said_count; k++) fprintf(f, "%s\n", said[k]);
+    fclose(f);
+}
+
 /* memory.txt: one fact a line, the ones its mind chose to keep. */
 static void load_facts(void)
 {
@@ -1113,7 +1163,7 @@ static unsigned count, verified, fails;
 static uint32_t ms_last; /* the last decision's round trip */
 static ok_mind_obs obs;  /* the last observation, for the slow mind and the diary */
 static ok_pet obs_pet;
-static char obs_did[64];
+static char obs_did[DIDS * 66];
 static int decided_ok;   /* the last decision was verified */
 
 /* A call for the player: its stage follows the round trips, and a reply may
@@ -1320,12 +1370,15 @@ static void decide(void)
     obs.minute = tm->tm_min;
     obs.outside = seen_outside;
     obs.seconds_since_player = seen_idle;
-    if (seen_did[0]) {
-        memcpy(obs_did, seen_did, sizeof obs_did);
-        seen_did[0] = 0;
-        obs.player_did = obs_did;
-        if (strncmp(obs_did, "touched", 7)) today_add("the player %.66s", obs_did);
+    obs_did[0] = 0;
+    for (j = 0; j < did_count; j++) {
+        int tap = !strncmp(seen_did[j], "tapped", 6) || !strncmp(seen_did[j], "touched", 7);
+        if (tap && heard_text[0]) continue; /* they spoke: that is the news, not the tap on Talk */
+        if (!tap) today_add("the player %.66s", seen_did[j]);
+        snprintf(obs_did + strlen(obs_did), sizeof obs_did - strlen(obs_did), "%s%s", obs_did[0] ? "; " : "", seen_did[j]);
     }
+    did_count = 0;
+    if (obs_did[0]) obs.player_did = obs_did;
     if (aim.goal[0]) obs.goal = aim.goal;
     if (aim.plan[0]) obs.plan = aim.plan;
     if (yesterday[0]) obs.diary = yesterday;
@@ -1338,6 +1391,8 @@ static void decide(void)
     ok_memory_tell(&facts, &obs);
     for (j = 0; j < recent_count; j++) obs.recent[j] = recent[j];
     obs.recent_count = recent_count;
+    for (j = 0; j < said_count; j++) obs.lines[j] = said[j];
+    obs.line_count = said_count;
     reply_due = 0;
 
     now_ms = (uint64_t)utc_now() * 1000u;
@@ -1403,7 +1458,13 @@ static void decide(void)
             feed("letter: %.31s", letter);
             today_add("wrote the player a letter: %.52s", letter);
         }
-        mailbox = t.decision;
+        mailbox = t.decision; /* the episode keeps what 0G said; the screen never says a line twice */
+        {
+            const char *lines[OK_MIND_LINES];
+            for (j = 0; j < said_count; j++) lines[j] = said[j];
+            if (ok_mind_dedupe(&mailbox, lines, said_count)) feed("said that lately: not shown again");
+        }
+        if (mailbox.line[0]) keep_said(mailbox.line);
         mailbox_new = 1;
     } else {
         fails++;
@@ -1587,6 +1648,7 @@ static int thinker(void *arg)
     }
     load_chain();
     load_facts();
+    load_said();
     ok_facts_now.og_features |= 1 | 8 | (cfg.have_ear ? 2 : 0) | (isDSiMode() && cfg.look_every >= 0 ? 4 : 0) |
                                (cfg.have_dream ? 16 : 0) | (cfg.store_on ? 32 : 0);
     {

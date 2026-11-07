@@ -24,6 +24,7 @@ enum { OK_FEEL_HAPPY, OK_FEEL_HUNGRY, OK_FEEL_SLEEPY, OK_FEEL_BORED, OK_FEEL_LON
 #define OK_MIND_TEXT 160 /* what it heard or saw, cut to this */
 #define OK_MIND_NOTE 60  /* a thought, a question, a fact to keep */
 #define OK_MIND_KNOWN 16 /* facts it keeps about its life and the player */
+#define OK_MIND_LINES 12 /* its own last lines, word for word, so it says something new */
 
 typedef struct {
     int activity, mood;
@@ -42,8 +43,8 @@ typedef struct {
     char letter[141]; /* a letter to the player, sent on Ethereum (printable ASCII) */
 } ok_mind;
 
-/* What the okupa notices right now. Strings may be NULL; non-ASCII bytes
- * (a transcript with accents, say) are dropped. */
+/* What the okupa notices right now. Strings may be NULL; accents are dropped
+ * (que for qu\u00e9) and other non-ASCII bytes too. */
 typedef struct {
     const ok_pet *pet;
     int hour, minute;
@@ -54,6 +55,8 @@ typedef struct {
     const char *saw;               /* what its camera just saw */
     const char *recent[OK_MIND_RECENT]; /* "wave: Hey there!", newest first */
     int recent_count;
+    const char *lines[OK_MIND_LINES];   /* what it said lately, newest first: never again */
+    int line_count;
     const char *known[OK_MIND_KNOWN];   /* facts it remembers for good, oldest first */
     int known_count;
     const char *asked;                  /* the question it is waiting to have answered */
@@ -93,5 +96,12 @@ ok_result ok_mind_parse(const char *body, size_t n, ok_mind *decision);
 /* One memory line for the next request: "activity", "activity: line", and
  * "(asked: ...)" when it asked something, so it does not ask it again. */
 void ok_mind_memory(const ok_mind *d, char out[OK_MIND_MEMORY]);
+/* A line it said lately again (the same words, or one inside the other,
+ * ignoring case and punctuation): the line is blanked (the rest of the
+ * decision stands) and 1 returned. Nothing is ever put in its place. */
+int ok_mind_dedupe(ok_mind *d, const char *const *lines, int n);
+/* One character of UTF-8 text as printable ASCII: accents dropped (e for
+ * e-acute), -1 for anything else that is not ASCII; *used: the bytes it took. */
+int ok_mind_ascii(const char *s, size_t left, size_t *used);
 
 #endif

@@ -226,7 +226,7 @@ int main(void)
         static const uint8_t nonce[16] = {4};
         assert(ok_think_hear(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
                OK_OK);
-        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.heard, "Hola, me llamo Vctor.") && !t.body_json);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.heard, "Hola, me llamo Victor.") && !t.body_json);
         assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
         assert(strstr(episode, "\"kind\":\"hearing\"") && strstr(episode, "\"request_b64\":\"LS1va3Vw"));
         assert(ok_think_hear(&t, &p, device, 1, nonce, wav, sizeof wav, buf, 100, fetch, NULL) == OK_RANGE);

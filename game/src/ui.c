@@ -337,6 +337,25 @@ static void card(frame f, const uint8_t (*font)[8], const ok_ui *u)
     if (u->card_foot[0]) text(f, font, tx, y0 + h - 15, u->card_foot, MUTED, 1);
 }
 
+/* The player's words as 0G heard them: a caption of theirs at the foot of
+ * the top screen, a little microphone and "You said". */
+static void heard_caption(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    static const char *const mic[] = {".kkk.", "kkkkk", "kkwkk", "kkkkk", "k.k.k", ".kkk.", "..k..", "kkkkk"};
+    char lines[2][64], quoted[OK_UI_CARD_TEXT + 3];
+    int n, i, h, y;
+    snprintf(quoted, sizeof quoted, "\"%s\"", u->heard);
+    n = wrap_lines(quoted, 200, lines, 2);
+    h = 16 + n * 11;
+    y = OK_UI_H - h - 6;
+    round_box(f, 6, y + 1, 244, h, 7, RGB(2, 2, 3));
+    round_box(f, 6, y, 244, h, 7, RGB(20, 25, 31));
+    disc(f, 20, y + 12, 8, PAPER);
+    pixels(f, 18, y + 8, mic, 8, 1);
+    text(f, font, 32, y + 4, "You said", RGB(4, 8, 16), 2);
+    for (i = 0; i < n; i++) text(f, font, 32, y + 15 + i * 11, lines[i], INK, 1);
+}
+
 static uint16_t skin[OK_SKIN * OK_SKIN];
 static ok_look skin_look = {255, 255, 255};
 
@@ -404,6 +423,7 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
         disc(f, x0 + w + 14, y0 + h + 12, 3, INK);
         disc(f, x0 + w + 14, y0 + h + 12, 2, RGB(27, 26, 31));
     }
+    if (u->heard_ticks && u->heard[0]) heard_caption(f, font, u);
     if (u->card_ticks) card(f, font, u);
 }
 
@@ -1019,6 +1039,14 @@ void ok_ui_busy(ok_ui *u, const char *text)
     u->busy[i] = 0;
 }
 
+void ok_ui_heard(ok_ui *u, const char *text)
+{
+    int i;
+    for (i = 0; text && i < OK_UI_CARD_TEXT && text[i]; i++) u->heard[i] = text[i] >= 32 && text[i] < 127 ? text[i] : '?';
+    u->heard[i] = 0;
+    u->heard_ticks = i ? 600 : 0;
+}
+
 void ok_ui_card(ok_ui *u, const char *title, const char *text, const uint16_t *px, int w, int h, int verified,
                 const char *foot)
 {
@@ -1238,6 +1266,7 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
     if (u->thought_ticks) u->thought_ticks--;
     if (u->dream_ticks) u->dream_ticks--;
     if (u->card_ticks && !--u->card_ticks) u->card_live = 0;
+    if (u->heard_ticks) u->heard_ticks--;
     if (u->ask_ticks) u->ask_ticks--;
     if (u->happy_ticks) u->happy_ticks--;
     if (u->pressed_ticks) u->pressed_ticks--;

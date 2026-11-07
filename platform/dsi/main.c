@@ -249,6 +249,7 @@ static void machine_facts(int checks)
 /* Set while the player waits on a look, a guess or an answer: a decision
  * landing meanwhile must not clear that wait from the screen. */
 static int player_busy;
+static int busy_look, busy_comment; /* a look or a comment on its way (set by their parts of the loop) */
 static int ask_locked; /* a question of the game's own is on screen (Pictionary): the mind's waits */
 
 /* A verified decision of the okupa's mind becomes what the 3D okupa does:
@@ -474,7 +475,9 @@ int main(void)
      * game's state (the wall alone is 3 KB) plus a deep render could reach
      * past it. */
     static ok_mind thought; /* the mind's latest decision */
-    int listening = 0; /* a clip is with 0G */
+    int listening = 0;  /* a clip is with 0G */
+    int reply_wait = 0; /* 0G heard the player: the next decision is the answer */
+    time_t reply_at = 0;
     int menu_talk = 0, menu_look = 0; /* the menu's Talk (1 start, 2 held, 3 let go), Photo */
     int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0, game_auto = 0; /* Pictionary */
     int game_guess_wanted = 0;         /* Guess! (or X) this frame */
@@ -695,8 +698,9 @@ int main(void)
          * okupa notices, take what it decided. Y on the Dev screen shows it
          * and pauses or resumes it. */
         if (keysDown() || (keysHeld() & KEY_TOUCH)) last_input = now;
-        ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, (uint32_t)(now - last_input),
-                            !tech_on && (keysDown() & KEY_TOUCH) ? "touched the screen" : NULL);
+        /* A tap on a button is that button (it tells the mind itself when it
+         * matters); only a tap on nothing, at most every 30 s, is news. */
+        ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, (uint32_t)(now - last_input), NULL);
         /* Talk to it: hold L and speak, let go, and 0G turns it into words it
          * answers. R: it looks at you through the camera. (On the SELECT
          * screens L and R turn pages instead.) */
@@ -709,20 +713,67 @@ int main(void)
             menu_talk = 0;
         }
         if ((((keysUp() & KEY_L) && menu_talk != 2) || menu_talk == 3) && ok_dsi_ear_recording()) {
-            menu_talk = 0;
+            static char said[96];
+            int level;
             size_t len;
-            const uint8_t *wav = ok_dsi_ear_stop(&len);
-            if (wav) {
+            const uint8_t *wav = ok_dsi_ear_stop(&len, &level);
+            menu_talk = 0;
+            if (level >= 0) ok_facts_log(ok_dsi_uptime(), 'D', "mic: %lu ms, level %d", (unsigned long)(len / 16), level);
+            if (wav && !ok_dsi_mind_alive()) {
+                ok_ui_listening(&ui, 0);
+                snprintf(said, sizeof said, "I can't listen: %s.", ok_dsi_mind_why_not());
+                ui.say = said;
+                ui.say_ticks = 60 * 6;
+            } else if (wav) {
                 ok_dsi_mind_hear(wav, len);
-                ok_ui_listening(&ui, 2); /* "Thinking..." until 0G has turned it into words */
+                listening = 1;
+                ok_ui_busy(&ui, "Sending your words to 0G");
+                ok_ui_listening(&ui, 2); /* until 0G has turned it into words, then until it answers */
             } else {
                 ok_ui_listening(&ui, 0);
-                ui.say = "Hold L while you talk!";
-                ui.say_ticks = 60 * 3;
+                if (level < 0) {
+                    ui.say = "Hold L (or Talk) while you speak!";
+                } else {
+                    snprintf(said, sizeof said, "I heard almost nothing (mic level %d). Speak closer?", level);
+                    ui.say = said;
+                }
+                ui.say_ticks = 60 * 5;
             }
         }
-        if (listening && !ok_dsi_mind_ear_busy() && !ok_dsi_ear_recording()) ok_ui_listening(&ui, 0);
-        listening = ok_dsi_mind_ear_busy();
+        /* What the player said comes back as 0G heard it: shown word for
+         * word, then the okupa's answer (the next verified decision) clears
+         * the cloud. Never an invented transcript: a failure says why. */
+        {
+            static char heard[OK_MIND_TEXT + 1], why[48], said[96];
+            int st = ok_dsi_mind_stage(OK_DSI_HEAR), h;
+            if (listening && st)
+                ok_ui_busy(&ui, st == OK_DSI_CHECKING ? "Checking 0G's signature"
+                                : st == OK_DSI_ASKING ? "0G is turning it into words" : "Sending your words to 0G");
+            h = ok_dsi_mind_result(OK_DSI_HEAR, heard, sizeof heard, why, NULL);
+            if (h > 0) {
+                ok_ui_heard(&ui, heard);
+                ok_ui_busy(&ui, "Thinking what to answer");
+                ok_ui_listening(&ui, 2);
+                reply_wait = 1;
+                reply_at = now;
+                if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now); /* a voice wakes it */
+                ok_facts_log(ok_dsi_uptime(), 'G', "you said: %.30s", heard);
+            } else if (h < 0) {
+                ok_ui_listening(&ui, 0);
+                ok_ui_busy(&ui, NULL);
+                snprintf(said, sizeof said, "I couldn't hear you: %.47s", why);
+                ui.say = said;
+                ui.say_ticks = 60 * 6;
+            }
+            if (h) listening = 0;
+            if (reply_wait && now - reply_at > 60) { /* the answer never came: say so */
+                reply_wait = 0;
+                ok_ui_listening(&ui, 0);
+                ok_ui_busy(&ui, NULL);
+                ui.say = "I heard you, but 0G gave me no answer in time.";
+                ui.say_ticks = 60 * 6;
+            }
+        }
         /* Pictionary against the okupa's mind: Games opens its page in the
          * sketchbook; Guess! (or X) and 0G's vision model guesses it, checked
          * here; A says it is right, B wrong. While the player draws, a pause
@@ -849,7 +900,7 @@ int main(void)
             }
             if (comment_waiting) {
                 int st = ok_dsi_mind_stage(OK_DSI_COMMENT);
-                if (!player_busy && !game_waiting) {
+                if (!busy_look && !game_waiting && !listening && !reply_wait) {
                     ok_ui_busy(&ui, st == OK_DSI_ASKING ? "Showing it to 0G" : st == OK_DSI_CHECKING ? "Checking 0G's signature"
                                                                                                  : "Looking at your drawing");
                     ok_ui_listening(&ui, 2);
@@ -877,7 +928,7 @@ int main(void)
                 snprintf(said, sizeof said, "0G could not look this time: %.47s", why);
                 ok_ui_card_drawing(&ui, "No answer", said, comment_px, 0, "nothing made up");
             }
-            player_busy |= comment_waiting;
+            busy_comment = comment_waiting;
         }
         /* What the camera sees, in 0G's words: R or Photo starts a live look
          * (a new photo each time an answer lands, up to LOOK_ROUNDS); R,
@@ -964,14 +1015,23 @@ int main(void)
                 look_live = 0;
                 ok_dsi_mind_live(0);
             }
-            player_busy = (look_waiting && !ui.card_ticks) || game_waiting;
+            busy_look = look_waiting && !ui.card_ticks;
         }
         if (!tech_on && ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
             if (show_mind) ok_dsi_mind_toggle();
             show_mind = 1;
             show_net = 0;
         }
-        if (ok_dsi_mind_take(&thought)) obey(&ui, &pet, &thought, (int64_t)now);
+        player_busy = busy_look || busy_comment || game_waiting || listening || reply_wait;
+        if (ok_dsi_mind_take(&thought)) {
+            if (reply_wait) { /* its answer to what the player said */
+                reply_wait = 0;
+                player_busy = busy_look || busy_comment || game_waiting || listening;
+                if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now);
+                ok_ui_busy(&ui, NULL);
+            }
+            obey(&ui, &pet, &thought, (int64_t)now);
+        }
         /* What its mind made, drew, dreamed or wrote. */
         {
             static char said[80], letter_day[11];
@@ -1064,7 +1124,15 @@ int main(void)
         if (keysHeld() & KEY_TOUCH) {
             int r;
             touchRead(&touch);
-            r = ok_ui_touch(&ui, &pet, touch.px, touch.py, held, (int64_t)now);
+            {
+                static time_t tap_told;
+                int was_held = held, scene = ui.scene;
+                r = ok_ui_touch(&ui, &pet, touch.px, touch.py, held, (int64_t)now);
+                if (!was_held && r == OK_UI_NOTHING && scene == OK_UI_HOME && now - tap_told >= 30) {
+                    ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, "tapped the screen");
+                    tap_told = now;
+                }
+            }
             held = 1;
             if (r == OK_UI_RUN_CHECKS) {
                 memset(ui.dev, 0, sizeof ui.dev);

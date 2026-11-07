@@ -47,15 +47,19 @@ void ok_dsi_ear_start(void)
 
 int ok_dsi_ear_recording(void) { return recording; }
 
-const uint8_t *ok_dsi_ear_stop(size_t *len)
+const uint8_t *ok_dsi_ear_stop(size_t *len, int *level)
 {
     uint32_t n;
+    *level = -1;
     if (!recording) return NULL;
     soundMicOff();
     recording = 0;
     n = samples;
     if (n < OK_EAR_RATE / 2) return NULL; /* under half a second: not speech */
     ok_wav_unsigned8(clip + OK_WAV_HEADER, n);
+    /* Near silence is not sent: speech to text makes up words ("Thank
+     * you.") out of nothing. */
+    if ((*level = ok_wav_level8(clip + OK_WAV_HEADER, n)) < OK_EAR_QUIET) return NULL;
     ok_wav_header(clip, OK_EAR_RATE, n);
     *len = OK_WAV_HEADER + n;
     return clip;

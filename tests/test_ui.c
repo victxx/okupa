@@ -216,6 +216,11 @@ int main(void)
         assert(u.card_w == 96 && u.card_h == 96);
         for (i = 0; i < 600; i++) ok_ui_tick(&u, &p);
         assert(!u.card_ticks);
+        ok_ui_heard(&u, "hola okupa, que tal? me llamo Victor y hoy he dibujado una casa con un arbol muy grande al lado");
+        assert(u.heard_ticks && !strncmp(u.heard, "hola okupa", 10));
+        ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
+        ok_ui_heard(&u, NULL);
+        assert(!u.heard_ticks);
         ok_ui_busy(&u, "Asking 0G...");
         ok_ui_listening(&u, 2);
         ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);

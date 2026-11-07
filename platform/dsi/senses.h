@@ -13,8 +13,10 @@
 #define OK_EAR_SECONDS 5
 void ok_dsi_ear_start(void);
 /* Stops and returns the clip as a WAV (valid until the next start), or NULL
- * if it was too short to be speech. */
-const uint8_t *ok_dsi_ear_stop(size_t *len);
+ * if it was too short to be speech (level -1) or too quiet (its level, the
+ * mean distance from silence of the 8-bit samples, under OK_EAR_QUIET). */
+#define OK_EAR_QUIET 2
+const uint8_t *ok_dsi_ear_stop(size_t *len, int *level);
 int ok_dsi_ear_recording(void);
 
 /* One photo from the camera facing the player, as a 128x96 PNG. The first
