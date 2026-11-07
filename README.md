@@ -2,44 +2,108 @@
 
 **A tiny squatter living in your Nintendo DSi.**
 
-Someone has moved into your console and refuses to leave. It has a little house,
-its own days and a diary. It asks you for things: a photo of your sky, a drawing,
-something round. You send them from the DSi itself, straight onto Ethereum, and it
-hangs them on its wall, remembers them and sometimes gives you something back.
+A small monkey moved into a 2009 Nintendo DSi without asking. It lives in the
+attic, has needs, sleeps, dreams and talks to you. Its mind runs on 0G Compute,
+and the console checks each answer's TEE signature before it believes it. The
+console is also a small Ethereum peer of its own: it signs your drawings and its
+letters and hands them to mainnet nodes over devp2p. There is no RPC on the
+sending path.
 
-## What makes it different
+Everything is C99 on a 133 MHz ARM9 with 16 MB of RAM and a weak Wi-Fi chip.
+Press **SELECT** on the console to see the real data behind every step:
+discovery, peers, the transaction, blocks, 0G calls and the console itself.
 
-- **Just the console and a Wi-Fi.** No server of ours anywhere: the DSi finds
-  Ethereum nodes, sends, checks its own inclusion and thinks with 0G by itself.
-- **No server in the way.** The DSi signs each picture itself and gossips it to
-  Ethereum peers over devp2p. No RPC provider in the sending path, no relay,
-  nobody to ask permission. (The wallet screen shows the balance as a public
-  JSON-RPC node reports it, publicnode by default, `balance_host=` or `=off` in
-  mind.txt: display only, that node's word, and it learns this IP owns the
-  address. Sending never looks at it.)
-- **A companion with a body.** The DSi is its body: the camera is its eyes, the
-  clock tells it how long you were away, the touch screen is how you reach it.
-  Its mind runs on 0G: each decision is verifiable, logged with a request id, and
-  its diary lives on 0G Storage. When 0G is unreachable it says so (no answer,
-  and why); it never pretends to have decided.
-- **Gifts between companions.** Pictures and tiny 3D objects (an apple, a plushie,
-  at most 200 triangles in four tones) travel from one companion's account to
-  another's. The chain itself records who gave what, and when.
-- **Runs anywhere.** One portable C core. If it fits in a 2009 handheld, it fits
-  in anything.
+## What runs on the console
 
-## Status
+| Piece | How |
+|---|---|
+| Finding Ethereum nodes | EIP-1459 DNS tree (root signature, hashes and every ENR checked), then discv4 |
+| Talking to them | RLPx (ECIES, EIP-8), Hello, Status eth/69 with the mainnet fork id, Ping/Pong, snappy |
+| Signing | EIP-1559 transactions with libsecp256k1; the key is made on the console from stylus timing |
+| Sending | `Transactions` to every node that reaches Status. No RPC, relay or server of ours |
+| Inclusion check | eth/69 `GetBlockHeaders`/`GetBlockBodies`: re-hash each header, rebuild the transactions trie, look for our hash. A drawing only hangs on the wall once a block holds it |
+| The mind | 0G Compute over TLS 1.2 (BearSSL): a token signed by the console's key, the decision, then the TEE signature checked in C over our own request and response bytes. Only then is the closed-set answer used |
+| Senses | Mic → 0G Whisper, camera and drawings → 0G vision (Pictionary, comments), dreams → 0G image model. Each one TEE-verified |
 
-Just started. See [docs/PLAN.md](docs/PLAN.md).
+## CROPS
 
-## Layout (planned)
+- **C (censorship resistance):** the console finds nodes itself (signed DNS
+  list, discv4) and gossips its transaction over devp2p. There is no RPC,
+  relayer or server of ours to switch off. If 0G is down, sending still works.
+- **O (open source):** MIT. Builds from this repo (`make` on a computer,
+  BlocksDS in Docker for the ROM). Dependencies are pinned in `THIRD_PARTY.md`.
+- **P (privacy):** like a home node, not a hosted wallet: no account, API key or
+  provider that sees all your reads. The first peer sees the IP with the
+  transaction, which is public anyway. The 0G provider sees the pet's state it
+  is asked about. The wallet balance on screen comes from a public JSON-RPC node
+  (publicnode by default, `balance_host=off` in `mind.txt` turns it off). It is
+  only for display, and that node learns which IP owns the address.
+- **S (security):** the key is born on the console and never leaves it, but it
+  is stored in plain text on the SD card. Inclusion is checked against the
+  transactions root of a header the peer served. That proves the header lists
+  the transaction; it is not consensus or finality, and it trusts one peer.
+
+## 0G: what breaks without it
+
+- **No decisions.** The pet keeps its needs and instincts, but it stops choosing
+  what to do and say. The screen says "No answer from 0G: reason". It never
+  makes one up.
+- **No hearing, sight, Pictionary or dreams.** Each of these is a 0G call with a
+  TEE signature that the console checks. Without a verified answer the screen
+  says why, and nothing is shown as 0G's.
+- **Sending on Ethereum is unaffected.** It never depends on 0G.
+
+## Status (2026-11-07)
+
+Shown on the real DSi:
+- the core checks pass on the console: sign a transaction in 30 ms, ECDH in 43 ms;
+- DNS discovery and RLPx handshakes with mainnet nodes (Hello from 7 of 25);
+- 0G decisions verified on the console itself.
+
+From a computer with the same C core:
+- a full mainnet session;
+- inclusion checked against live mainnet blocks;
+- 0G hearing, sight and dreams verified on mainnet.
+
+Not yet done on the console:
+- No mainnet node has kept the console long enough to take a transaction:
+  they reply "too many peers". So no transaction from the DSi has been seen
+  in a block yet.
+- The newest camera, Pictionary, hearing and dream screens are built but not yet
+  tried on hardware.
+
+See [docs/STATUS.md](docs/STATUS.md) and [docs/AUDIT.md](docs/AUDIT.md).
+
+## Build
+
+```sh
+make && make test && make sanitize           # core and game on a computer
+R3D_GL=0 sh tools/build_dsi.sh               # build/dsi/okupa.nds (software 3D)
+```
+
+On the SD card, `okupa/mind.txt` names the 0G providers and `okupa/mind.key`
+the key that pays them. `okupa/wifi.txt` holds Wi-Fi networks (plain text).
+
+## Layout
 
 ```text
-core/       portable C: hashing, RLP, keys, transactions, devp2p (RLPx, eth)
-platform/   host (macOS/Linux) and dsi (BlocksDS)
-game/       house, companion, sketchbook, camera, gifts
-tools/      development helpers on a computer, never part of the game
-docs/       plan and design notes
+core/       portable C: Keccak, RLP, keys, tx, ECIES, RLPx, eth/69, discv4, DNS, TLS, blocks, 0G
+game/       the pet, its house, 3D, UI, the mind's prompts, SELECT screens
+platform/   dsi (BlocksDS): main loop, network thread ("postman"), mind thread, senses
+tools/      computer-side checks: peer, crawl, DNS walk, 0G mind, previews, video
+tests/      unit tests with official vectors and real mainnet blocks
 ```
+
+## How AI was used
+
+- **Code:** written with an AI coding assistant under the author's direction.
+  The author chose the design, ran every hardware test on the DSi and reported
+  what broke. The assistant drafted and reviewed code, and the tests check it
+  against official vectors and real mainnet data. This covers `core/`, `game/`,
+  `platform/` and `tools/`. Planning notes are in `docs/`.
+- **Art:** attic, outside, ivy, plant and sky textures were made with ChatGPT
+  image generation. The prompts and hashes are listed in `THIRD_PARTY.md`.
+- **In the game:** every line, guess, description and dream comes from a 0G
+  Compute answer whose TEE signature the console has checked.
 
 Secrets, keys and run data live in `local/` and `run/`, never in Git.
