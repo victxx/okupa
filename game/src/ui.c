@@ -539,7 +539,7 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
          * block whose body holds it says "in block". */
         const char *what = u->drawing_sent ? "Drawing" : fa->tx_kind[0] ? fa->tx_kind : "Tx";
         char cap[12];
-        snprintf(cap, sizeof cap, "%s", what);
+        snprintf(cap, sizeof cap, "%.11s", what);
         if (cap[0] >= 'a' && cap[0] <= 'z') cap[0] = (char)(cap[0] - 32);
         *kind = 4;
         if (fa->incl_state == 2)
