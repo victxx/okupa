@@ -417,7 +417,7 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
         int x0 = 10, y0 = 34, x, y;
         round_box(f, x0 - 5, y0 - 15, w + 10, h + 20, 8, INK);
         round_box(f, x0 - 4, y0 - 14, w + 8, h + 18, 7, RGB(27, 26, 31));
-        text(f, font, x0, y0 - 11, "I dreamt...", INK, 1);
+        text(f, font, x0, y0 - 11, u->dream_old ? "Last dream..." : "I dreamt...", INK, 1);
         for (y = 0; y < h; y++)
             for (x = 0; x < w; x++) f[(y0 + y) * OK_UI_W + x0 + x] = u->dream[(y * u->dream_h / h) * u->dream_w + x * u->dream_w / w] | 0x8000;
         disc(f, x0 + w + 6, y0 + h + 4, 4, INK);
@@ -534,19 +534,25 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
 {
     const ok_facts *fa = &ok_facts_now;
     uint32_t k;
-    if (u->drawing_sent) {
+    if (u->drawing_sent || u->tx_waiting) {
+        /* Honest steps: signed is not sent, sent is not on Ethereum; only a
+         * block whose body holds it says "in block". */
+        const char *what = u->drawing_sent ? "Drawing" : fa->tx_kind[0] ? fa->tx_kind : "Tx";
+        char cap[12];
+        snprintf(cap, sizeof cap, "%s", what);
+        if (cap[0] >= 'a' && cap[0] <= 'z') cap[0] = (char)(cap[0] - 32);
         *kind = 4;
         if (fa->incl_state == 2)
-            snprintf(out, 48, "In block #%llu: it's on the wall!", (unsigned long long)fa->incl_block);
+            snprintf(out, 48, u->drawing_sent ? "In block #%llu: it's on the wall!" : "In block #%llu: on Ethereum",
+                     (unsigned long long)fa->incl_block);
         else if (fa->tx_handed > 0)
-            snprintf(out, 48, "Sent to %d node%s, %llu blocks checked", fa->tx_handed, fa->tx_handed == 1 ? "" : "s",
-                     (unsigned long long)fa->blocks_checked);
+            snprintf(out, 48, "%s: given to %d node%s, no block yet", cap, fa->tx_handed, fa->tx_handed == 1 ? "" : "s");
         else if (fa->reached_status > 0)
-            snprintf(out, 48, "%d node%s listening, handing it over", fa->reached_status, fa->reached_status == 1 ? "" : "s");
+            snprintf(out, 48, "%s signed: %d node%s listening", cap, fa->reached_status, fa->reached_status == 1 ? "" : "s");
         else if (fa->candidates > 0)
-            snprintf(out, 48, "Posting: %d nodes found, dialling", fa->candidates);
+            snprintf(out, 48, "%s signed, waiting for a node (%d found)", cap, fa->candidates);
         else
-            snprintf(out, 48, "Posting: looking for Ethereum nodes");
+            snprintf(out, 48, "%s signed, looking for Ethereum nodes", cap);
         return out;
     }
     if (!strcmp(fa->og_state, "no answer")) { /* a safe stop: nothing decided, nothing invented, and it says why */
@@ -583,7 +589,7 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
             snprintf(out, 48, "No answer from 0G: %.28s", fa->og_error[0] ? fa->og_error : t);
             return out;
         }
-        *kind = fa->og_verified ? 2 : 1;
+        *kind = 0; /* a log line (balance, camera, a nap refused...): no 0G seal */
         snprintf(out, 48, "%.40s", t);
         return out;
     }
@@ -1201,12 +1207,14 @@ void ok_ui_dream(ok_ui *u, const uint16_t *rgb15, int w, int h)
     u->dream_w = w;
     u->dream_h = h;
     u->dream_ticks = 1200;
+    u->dream_old = 0;
 }
 
 void ok_ui_dream_keep(ok_ui *u, const uint16_t *rgb15, int w, int h)
 {
     ok_ui_dream(u, rgb15, w, h);
     u->dream_ticks = 0;
+    u->dream_old = 1; /* read back from the card, not a new one */
 }
 
 /* Out to the terrace or back in: the okupa is placed in the new spot. */
@@ -1580,7 +1588,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         case B_MAIL: return OK_UI_MAIL;
         case B_FRIEND: return OK_UI_FRIEND;
         case B_DREAM:
-            if (u->dream_w) u->dream_ticks = 1200; /* the last one meanwhile */
+            if (u->dream_w) u->dream_ticks = 1200, u->dream_old = 1; /* the last one meanwhile, labelled as such */
             return ok_facts_now.og_features & 16 ? OK_UI_DREAM : OK_UI_CHANGED;
         }
         action = i == B_FEED ? OK_DO_FEED : i == B_PLAY ? OK_DO_PLAY : i == B_PET ? OK_DO_PET

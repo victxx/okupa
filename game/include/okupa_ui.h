@@ -93,6 +93,7 @@ typedef struct {
     uint8_t wall[OK_UI_WALL][64 * 64 / 8];
     int wall_count;
     int drawing_sent; /* the sketchbook's drawing is on its way: not editable until it lands */
+    int tx_waiting;   /* a transaction (hello, letter, drawing) signed and not yet seen in a block */
     /* Pictionary: the sketchbook draws on a page of its own (doodle), so the
      * drawing to send is never touched; gallery_pick: the picture tapped. */
     int pictionary, gallery_pick;
@@ -112,6 +113,7 @@ typedef struct {
     int own_set;
     uint16_t dream[128 * 128];
     int dream_w, dream_h, dream_ticks;
+    int dream_old; /* the dream shown is the saved one, not a new one */
     /* A card on the top screen for what 0G looked at: the picture it was
      * sent (a photo, a drawing), its verified words or why there are none,
      * and a footer (how long it took). card_live: the platform keeps it

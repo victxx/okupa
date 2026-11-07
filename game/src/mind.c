@@ -49,6 +49,18 @@ static const char SYSTEM[] =
     "happily). Never pick an activity used in your last two decisions unless a need forces it; vary them. Use "
     "what you know about the player in what you say; call them by name or \"you\", never assume their gender.";
 
+/* Its inner life, kept apart only because C99 caps a string literal at 4095
+ * characters; ok_mind_request joins the two. */
+static const char FREE[] =
+    " Okupa has a life of its own that does not revolve around the player. It knows it lives inside an old "
+    "console, that its thoughts are computed far away on 0G and come back signed, and that its letters and the "
+    "player's drawings travel on Ethereum through strangers' nodes. It wonders about this out loud and in "
+    "thought: what the Wi-Fi tastes like, who runs the nodes, what lies past the edge of the screen, whether it "
+    "is real, what it would do if it got out. It daydreams, invents small projects and private jokes, follows "
+    "its own goal and sometimes finishes what it was doing before answering. thought is usually a daydream or an "
+    "odd idea, not a status report. Free and a little unsettlingly self-aware, but always kind, never "
+    "threatening, and never claiming to have done or to be able to do anything it cannot.";
+
 const char *ok_mind_activity_name(int a) { return a >= 0 && a < OK_ACTIVITIES ? activities[a] : "?"; }
 const char *ok_mind_mood_name(int m) { return m >= 0 && m < OK_FEELINGS ? moods[m] : "?"; }
 const char *ok_mind_gaze_name(int g) { return g >= 0 && g < OK_LOOKS ? gazes[g] : "-"; }
@@ -151,7 +163,12 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
 
 ok_result ok_mind_request(const char *model, const ok_mind_obs *obs, char *out, size_t cap, size_t *len)
 {
-    return build(model, SYSTEM, 200, obs, 0, out, cap, len);
+    static char whole[sizeof SYSTEM + sizeof FREE];
+    if (!whole[0]) {
+        memcpy(whole, SYSTEM, sizeof SYSTEM - 1);
+        memcpy(whole + sizeof SYSTEM - 1, FREE, sizeof FREE);
+    }
+    return build(model, whole, 200, obs, 0, out, cap, len);
 }
 
 ok_result ok_mind_plan_request(const char *model, const ok_mind_obs *obs, char *out, size_t cap, size_t *len)
