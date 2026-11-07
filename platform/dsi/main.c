@@ -990,7 +990,7 @@ int main(void)
             }
             if (comment_waiting) {
                 int st = ok_dsi_mind_stage(OK_DSI_COMMENT);
-                if (!busy_look && !game_waiting && !listening && !reply_wait) {
+                if (!busy_look && !busy_dream && !game_waiting && !listening && !reply_wait) {
                     ok_ui_busy(&ui, st == OK_DSI_ASKING ? "Showing it to 0G" : st == OK_DSI_CHECKING ? "Checking 0G's signature"
                                                                                                  : "Looking at your drawing");
                     ok_ui_listening(&ui, 2);

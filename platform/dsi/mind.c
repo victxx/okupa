@@ -1904,7 +1904,7 @@ static int thinker(void *arg)
 
         /* The player first: what they said, a guess, a look, a comment. */
         serve_player();
-        if (live) { /* the player is watching what it sees: only looks, one after another */
+        if (live && !reply_due) { /* the player is watching what it sees: only looks (and answers if they speak) */
             wait_real(500, 1);
             continue;
         }
