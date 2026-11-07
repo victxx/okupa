@@ -158,6 +158,32 @@ int main(void)
     for (i = 0; i < 1800; i++) ok_ui_tick(&u, &p);
     assert(!u.ask_ticks);
 
+    /* What 0G looked at: a card with the photo and its words; a tap closes it and ends a live look. */
+    {
+        static uint16_t photo[128 * 96];
+        for (i = 0; i < 128 * 96; i++) photo[i] = (uint16_t)(0x8000 | i);
+        u.scene = OK_UI_HOME;
+        ok_ui_card(&u, "I see...", "A person with glasses holding a red mug, a bookshelf behind them and a lamp on",
+                   photo, 128, 96, 1, "#1  3.4 s");
+        u.card_live = 1;
+        assert(u.card_ticks && u.card_w == 128 && u.card_verified && u.card_px[5] == photo[5]);
+        ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
+        assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !u.card_ticks && !u.card_live);
+        ok_ui_card(&u, "No answer", "0G did not answer: net -3: TCP: no connection", NULL, 0, 0, 0, "nothing made up");
+        assert(!u.card_w && !u.card_verified);
+        ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
+        ok_ui_card_drawing(&u, "Your drawing", "A cat!", u.drawing, 1, NULL);
+        assert(u.card_w == 96 && u.card_h == 96);
+        for (i = 0; i < 600; i++) ok_ui_tick(&u, &p);
+        assert(!u.card_ticks);
+        ok_ui_busy(&u, "Asking 0G...");
+        ok_ui_listening(&u, 2);
+        ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
+        ok_ui_listening(&u, 0);
+        ok_ui_busy(&u, NULL);
+        assert(!u.busy[0]);
+    }
+
     /* Every scene renders, with and without a font. */
     ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
     assert(top[0] & 0x8000 && bottom[OK_UI_W * OK_UI_H - 1] & 0x8000);

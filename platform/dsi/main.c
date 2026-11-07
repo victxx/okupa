@@ -246,6 +246,10 @@ static void machine_facts(int checks)
     }
 }
 
+/* Set while the player waits on a look, a guess or an answer: a decision
+ * landing meanwhile must not clear that wait from the screen. */
+static int player_busy;
+
 /* A verified decision of the okupa's mind becomes what the 3D okupa does:
  * its move, a mood while it is fresh and the line it says. The mind only
  * suggests going to bed; the pet decides whether it is tired enough. */
@@ -284,7 +288,7 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
      * move it makes there. -1 leaves each to its instinct. */
     ok_ui_body(u, d->x, d->z, d->gaze >= 0 && d->gaze < OK_GAZES ? d->gaze : -1, d->energy);
     ok_ui_direct(u, p, move, where, poses[d->mood], said);
-    ok_ui_listening(u, 0);
+    if (!player_busy) ok_ui_listening(u, 0);
     if (d->thought[0]) ok_ui_thought(u, d->thought);
     if (d->ask[0]) ok_ui_ask(u, d->ask);
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
@@ -764,11 +768,92 @@ int main(void)
             game_asked = 0;
         }
         menu_games = 0;
-        if (!tech_on && ((keysDown() & KEY_R) || menu_look)) {
-            menu_look = 0;
-            ok_dsi_mind_look();
-            ui.say = "Let me look at you...";
-            ui.say_ticks = 60 * 3;
+        /* What the camera sees, in 0G's words: R or Photo starts a live look
+         * (a new photo each time an answer lands, up to LOOK_ROUNDS); R,
+         * Photo, B or a tap on the card stops it. Every step is shown as it
+         * happens, and a failure is told as it is. */
+        {
+            enum { LOOK_ROUNDS = 8 };
+            static int look_waiting, look_live, look_rounds;
+            static time_t look_asked_at;
+            static char text[OK_MIND_TEXT + 1], why[48], foot[40], said[96];
+            static uint16_t px[128 * 96];
+            uint32_t ms;
+            int r;
+            if (!tech_on && ((keysDown() & KEY_R) || menu_look || ((keysDown() & KEY_B) && look_live && !game_asked))) {
+                if (look_live || look_waiting) { /* looking already: stop the live look (the answer under way still shows) */
+                    look_live = 0;
+                    ui.card_live = 0;
+                    ok_dsi_mind_live(0);
+                } else if (keysDown() & KEY_B) {
+                } else if (!ok_dsi_mind_alive()) {
+                    snprintf(said, sizeof said, "I can't look: %s.", ok_dsi_mind_why_not());
+                    ok_ui_card(&ui, "My eyes", said, NULL, 0, 0, 0, "Photo needs the 0G mind running");
+                } else {
+                    look_live = 1;
+                    look_rounds = 0;
+                    ok_dsi_mind_live(1);
+                    ok_dsi_mind_look();
+                    look_waiting = 1;
+                    look_asked_at = now;
+                    ok_ui_busy(&ui, "Camera on");
+                    ok_ui_listening(&ui, 2);
+                }
+                menu_look = 0;
+            }
+            if (look_waiting) {
+                int st = ok_dsi_mind_stage(OK_DSI_LOOK);
+                const char *b = st == OK_DSI_PREPARING ? "Camera on" : st == OK_DSI_ASKING ? "Asking 0G what it is"
+                                : st == OK_DSI_CHECKING ? "Checking 0G's signature" : "Waiting for 0G";
+                if (ui.card_ticks) { /* live: the card stays, its footer says what comes next */
+                    snprintf(ui.card_foot, sizeof ui.card_foot, "#%d: %.24s...", (look_rounds + 1) % 100, b);
+                    ui.card_ticks = 600;
+                } else {
+                    ok_ui_busy(&ui, b);
+                    ok_ui_listening(&ui, 2);
+                }
+                if (now - look_asked_at > 60) { /* no answer in a minute: say so, stop looking */
+                    look_waiting = look_live = 0;
+                    ok_dsi_mind_live(0);
+                    ok_ui_listening(&ui, 0);
+                    ok_ui_card(&ui, "Hmm...", "No answer from 0G this time.", NULL, 0, 0, 0, "waited 60 s");
+                }
+            }
+            r = ok_dsi_mind_result(OK_DSI_LOOK, text, sizeof text, why, &ms);
+            if (r) {
+                look_waiting = 0;
+                if (!ui.card_ticks || r < 0) ok_ui_listening(&ui, 0);
+                ok_ui_busy(&ui, NULL);
+            }
+            if (r > 0) {
+                look_rounds++;
+                ok_dsi_mind_look_photo(px);
+                snprintf(foot, sizeof foot, "#%d  %lu.%lu s%s", look_rounds, (unsigned long)(ms / 1000),
+                         (unsigned long)(ms / 100 % 10), look_live && look_rounds < LOOK_ROUNDS ? "  (tap: stop)" : "");
+                ok_ui_card(&ui, "I see...", text, px, 128, 96, 1, foot);
+                if (look_live && look_rounds < LOOK_ROUNDS) { /* and the next photo */
+                    ok_dsi_mind_look();
+                    look_waiting = 1;
+                    look_asked_at = now;
+                } else {
+                    look_live = 0;
+                    ok_dsi_mind_live(0);
+                }
+                ui.card_live = look_live;
+                redraw = 1;
+            } else if (r < 0) {
+                snprintf(said, sizeof said, "%s%.47s", strncmp(why, "camera", 6) ? "0G did not answer: " : "", why);
+                ok_ui_card(&ui, strncmp(why, "camera", 6) ? "No answer" : "My eyes failed", said, NULL, 0, 0, 0,
+                           "nothing made up");
+                look_live = 0;
+                ok_dsi_mind_live(0);
+                redraw = 1;
+            }
+            if (look_live && look_rounds && !ui.card_live) { /* the player closed the card: stop looking */
+                look_live = 0;
+                ok_dsi_mind_live(0);
+            }
+            player_busy = look_waiting && !ui.card_ticks;
         }
         if (!tech_on && ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
             if (show_mind) ok_dsi_mind_toggle();

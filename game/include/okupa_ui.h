@@ -28,6 +28,7 @@ enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
 #define OK_UI_WALL 6 /* framed drawings, each hung only once seen in a block */
+#define OK_UI_CARD_TEXT 160
 
 /* A Wi-Fi network found by the platform's scan. */
 typedef struct {
@@ -95,6 +96,14 @@ typedef struct {
     int own_set;
     uint16_t dream[128 * 128];
     int dream_w, dream_h, dream_ticks;
+    /* A card on the top screen for what 0G looked at: the picture it was
+     * sent (a photo, a drawing), its verified words or why there are none,
+     * and a footer (how long it took). card_live: the platform keeps it
+     * coming (a new photo each round) until the card is closed. */
+    char card_title[24], card_text[OK_UI_CARD_TEXT + 1], card_foot[40];
+    uint16_t card_px[128 * 96];
+    int card_w, card_h, card_ticks, card_verified, card_live;
+    char busy[40]; /* what it is busy with while listening is 2 ("Asking 0G...") */
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);
@@ -113,8 +122,20 @@ void ok_ui_thought(ok_ui *u, const char *text);
  * until ok_ui_ask(u, NULL) or 30 s. Up to 60 ASCII characters, copied. */
 void ok_ui_ask(ok_ui *u, const char *question);
 /* 0 off, 1 listening (a microphone by its head while L is held; it looks
- * up), 2 thinking the answer over (a cloud of dots). Shown over any bubble. */
+ * up), 2 thinking the answer over (a cloud of dots, with u->busy as its
+ * words if set). Shown over any bubble. */
 void ok_ui_listening(ok_ui *u, int state);
+/* The words in the thinking cloud ("Asking 0G..."); NULL or "" for the
+ * plain "Thinking...". Up to 39 ASCII characters, copied. */
+void ok_ui_busy(ok_ui *u, const char *text);
+/* The card for what 0G looked at (see ok_ui.card_*): px a picture of DS
+ * colours up to 128x96 (NULL: none), verified 1 for words 0G's TEE signed,
+ * 0 for a failure told as it is. Shown for about 10 s or until a tap.
+ * card_drawing: the same with a 64x64 drawing (shown at 96x96). */
+void ok_ui_card(ok_ui *u, const char *title, const char *text, const uint16_t *px, int w, int h, int verified,
+                const char *foot);
+void ok_ui_card_drawing(ok_ui *u, const char *title, const char *text, const uint8_t pixels[512], int verified,
+                        const char *foot);
 /* The okupa's mind steers its body: walk to x, z (0..100 across the floor
  * of where it is, left to right and back to front as seen on screen; -1
  * stays) at the next break, look at a thing (OK_GAZE_* from okupa_monkey.h,

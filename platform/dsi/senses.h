@@ -17,9 +17,13 @@ void ok_dsi_ear_start(void);
 const uint8_t *ok_dsi_ear_stop(size_t *len);
 int ok_dsi_ear_recording(void);
 
-/* One photo from the camera facing the player, as a 128x96 PNG. Waits a few
- * frames for the exposure to settle (yielding to the other threads). 0 and
- * a reason if the camera did not deliver. */
+/* One photo from the camera facing the player, as a 128x96 PNG. The first
+ * after the camera is selected waits a few frames for the exposure to
+ * settle (yielding to the other threads). 0 and a reason if the camera did
+ * not deliver. The camera stays selected until ok_dsi_eye_close. */
 int ok_dsi_eye_snap(uint8_t *png, size_t cap, size_t *len, char why[33]);
+void ok_dsi_eye_close(void);
+/* The last photo halved to 128x96 DS colours (bit 15 set): what was sent. */
+const uint16_t *ok_dsi_eye_thumb(void);
 
 #endif

@@ -240,8 +240,12 @@ static void listening(frame f, const uint8_t (*font)[8], const ok_ui *u, int hx,
     static const char *const mic[] = {"..kkk..", ".kkkkk.", ".kkwkk.", ".kkkkk.", ".kkkkk.", "k.kkk.k", ".k...k.", "..kkk..", "...k...", ".kkkkk."};
     if (hx < -50) hx = 128, hy = 110;
     if (u->listening == 2) {
-        static const char *const dots[] = {"Thinking", "Thinking.", "Thinking..", "Thinking..."};
-        bubble_as(f, font, dots[u->ticks / 20 % 4], hx, hy, THINK, u->ticks);
+        char words[48];
+        const char *base = u->busy[0] ? u->busy : "Thinking";
+        size_t n = strlen(base);
+        while (n && base[n - 1] == '.') n--; /* its own dots are replaced by the moving ones */
+        snprintf(words, sizeof words, "%.*s%.*s", (int)n, base, (int)(u->ticks / 20 % 4), "...");
+        bubble_as(f, font, words, hx, hy, THINK, u->ticks);
         return;
     }
     {
@@ -257,6 +261,78 @@ static void listening(frame f, const uint8_t (*font)[8], const ok_ui *u, int hx,
         disc(f, x, y, 10, RGB(31, 26, 8));
         pixels(f, x - 3, y - 5, mic, 10, 1);
     }
+}
+
+/* Breaks s into up to max lines of at most w pixels, at spaces (a word too
+ * long for a line is cut). Returns how many lines; the last one ends in
+ * "..." if the text did not fit. */
+static int wrap_lines(const char *s, int w, char lines[][64], int max)
+{
+    int n = 0;
+    while (*s == ' ') s++;
+    while (*s && n < max) {
+        size_t len = strlen(s), cut = len > 63 ? 63 : len, best = 0;
+        char head[64];
+        for (;;) {
+            snprintf(head, sizeof head, "%.*s", (int)cut, s);
+            if (width(head, 1) <= w) break;
+            cut--;
+            if (!cut) break;
+        }
+        if (cut < len) { /* break at the last space that fits */
+            size_t k;
+            for (k = cut; k > 0; k--)
+                if (s[k] == ' ') {
+                    best = k;
+                    break;
+                }
+            if (best) cut = best;
+        }
+        if (!cut) cut = 1;
+        snprintf(lines[n], 64, "%.*s", (int)cut, s);
+        n++;
+        s += cut;
+        while (*s == ' ') s++;
+    }
+    if (*s && n) { /* more than fits: an ellipsis on the last line */
+        char *l = lines[n - 1];
+        size_t k = strlen(l);
+        while (k && width(l, 1) + width("...", 1) > w) l[--k] = 0;
+        snprintf(l + k, 64 - k, "...");
+    }
+    return n;
+}
+
+/* What 0G looked at, on a card over the room: the picture it was sent on
+ * the left, its words on the right with the seal of a checked answer (or
+ * "not answered" and the reason). */
+static void card(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    char lines[8][64];
+    int x0 = 6, y0 = 20, w = 244, h = 108, px = 10, py = 26, tx, tw, n, i, x, y;
+    int pw = u->card_w > 0 ? u->card_w : 0, ph = u->card_h > 0 ? u->card_h : 0;
+    round_box(f, x0, y0 + 2, w, h, 8, RGB(2, 2, 3));
+    round_box(f, x0, y0, w, h, 8, u->card_verified ? RGB(8, 24, 12) : RGB(17, 16, 15));
+    round_box(f, x0 + 2, y0 + 2, w - 4, h - 4, 7, PAPER);
+    if (pw && ph) {
+        py = y0 + (h - ph) / 2;
+        for (y = 0; y < ph; y++)
+            for (x = 0; x < pw; x++) f[(py + y) * OK_UI_W + px + x] = u->card_px[y * pw + x] | 0x8000;
+    }
+    tx = pw ? px + pw + 6 : x0 + 10;
+    tw = x0 + w - 8 - tx;
+    text(f, font, tx, y0 + 6, u->card_title, INK, 2);
+    n = wrap_lines(u->card_text, tw, lines, 6);
+    for (i = 0; i < n; i++) text(f, font, tx, y0 + 20 + i * 11, lines[i], INK, 1);
+    if (u->card_verified) { /* the seal: 0G's TEE signed these words, checked here */
+        round_box(f, tx, y0 + h - 30, 72, 12, 4, RGB(8, 24, 12));
+        text(f, font, tx + 4, y0 + h - 28, "0G", PAPER, 1);
+        rect(f, tx + 18, y0 + h - 24, 2, 2, PAPER);
+        rect(f, tx + 20, y0 + h - 23, 2, 2, PAPER);
+        rect(f, tx + 22, y0 + h - 27, 2, 4, PAPER);
+        text(f, font, tx + 27, y0 + h - 28, "TEE ok", PAPER, 1);
+    }
+    if (u->card_foot[0]) text(f, font, tx, y0 + h - 15, u->card_foot, MUTED, 1);
 }
 
 static uint16_t skin[OK_SKIN * OK_SKIN];
@@ -326,6 +402,7 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
         disc(f, x0 + w + 14, y0 + h + 12, 3, INK);
         disc(f, x0 + w + 14, y0 + h + 12, 2, RGB(27, 26, 31));
     }
+    if (u->card_ticks) card(f, font, u);
 }
 
 /* --------------------------------------------------------- bottom screen */
@@ -927,6 +1004,52 @@ void ok_ui_ask(ok_ui *u, const char *question)
     u->ask_ticks = 1800;
 }
 
+void ok_ui_busy(ok_ui *u, const char *text)
+{
+    int i;
+    for (i = 0; text && i < (int)sizeof u->busy - 1 && text[i]; i++) u->busy[i] = text[i] >= 32 && text[i] < 127 ? text[i] : '?';
+    u->busy[i] = 0;
+}
+
+void ok_ui_card(ok_ui *u, const char *title, const char *text, const uint16_t *px, int w, int h, int verified,
+                const char *foot)
+{
+    int y, i;
+    if (!text) {
+        u->card_ticks = 0;
+        u->card_live = 0;
+        return;
+    }
+    snprintf(u->card_title, sizeof u->card_title, "%s", title ? title : "");
+    for (i = 0; i < OK_UI_CARD_TEXT && text[i]; i++) u->card_text[i] = text[i] >= 32 && text[i] < 127 ? text[i] : '?';
+    u->card_text[i] = 0;
+    snprintf(u->card_foot, sizeof u->card_foot, "%s", foot ? foot : "");
+    u->card_w = u->card_h = 0;
+    if (px && w > 0 && h > 0) {
+        if (w > 128) w = 128;
+        if (h > 96) h = 96;
+        for (y = 0; y < h; y++) memcpy(u->card_px + y * w, px + y * w, (size_t)w * 2);
+        u->card_w = w;
+        u->card_h = h;
+    }
+    u->card_verified = verified;
+    u->card_ticks = 600;
+}
+
+void ok_ui_card_drawing(ok_ui *u, const char *title, const char *text, const uint8_t pixels[512], int verified,
+                        const char *foot)
+{
+    static uint16_t px[96 * 96];
+    int x, y;
+    if (!pixels) {
+        ok_ui_card(u, title, text, NULL, 0, 0, verified, foot);
+        return;
+    }
+    for (y = 0; y < 96; y++)
+        for (x = 0; x < 96; x++) px[y * 96 + x] = ok_drawing_get(pixels, (unsigned)(x * 2 / 3), (unsigned)(y * 2 / 3)) ? INK : PAPER;
+    ok_ui_card(u, title, text, px, 96, 96, verified, foot);
+}
+
 void ok_ui_listening(ok_ui *u, int state)
 {
     state = state < 0 || state > 2 ? 0 : state;
@@ -1106,6 +1229,7 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
     if (u->say_ticks && --u->say_ticks == 0) u->say = NULL;
     if (u->thought_ticks) u->thought_ticks--;
     if (u->dream_ticks) u->dream_ticks--;
+    if (u->card_ticks && !--u->card_ticks) u->card_live = 0;
     if (u->ask_ticks) u->ask_ticks--;
     if (u->happy_ticks) u->happy_ticks--;
     if (u->pressed_ticks) u->pressed_ticks--;
@@ -1165,6 +1289,11 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         if (held) return OK_UI_NOTHING;
         u->scene = u->scene == OK_UI_SPLASH ? OK_UI_FILM : OK_UI_HOME;
         u->intro_t = 0;
+        return OK_UI_CHANGED;
+    }
+    if (u->card_ticks && u->scene == OK_UI_HOME && !held) { /* a tap puts the card away (and ends a live look) */
+        u->card_ticks = 0;
+        u->card_live = 0;
         return OK_UI_CHANGED;
     }
     if (u->dream_ticks && u->scene == OK_UI_HOME && !held) { /* a tap puts the dream away */
@@ -1341,7 +1470,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         case B_DRAW: u->scene = OK_UI_SKETCH; u->eraser = 0; return OK_UI_CHANGED;
         case B_GALLERY: u->scene = OK_UI_GALLERY; return OK_UI_CHANGED;
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
-        case B_PHOTO: say(u, "Let me take a look!"); return OK_UI_PHOTO;
+        case B_PHOTO: return OK_UI_PHOTO; /* the platform shows what the camera and 0G are doing */
         case B_TALK: say(u, "I'm listening!"); return OK_UI_TALK;
         case B_GAMES: say(u, "Show me a drawing: I'll guess it!"); return OK_UI_GAMES;
         case B_MAIL: return OK_UI_MAIL;

@@ -472,9 +472,10 @@ static size_t base64(const uint8_t *in, size_t n, char *out)
 }
 
 static const char EYES[] =
-    "You are the eyes of Okupa, a small monkey living inside a Nintendo DSi, looking through its camera. In one "
-    "short sentence of plain English (at most 25 words), say what you see: people, faces and expressions, what "
-    "they hold or wear, the room, the light. No preamble.";
+    "You are the eyes of Okupa, a small monkey living inside a Nintendo DSi, looking through its camera. Name what "
+    "you really see in at most 15 words of plain English, concrete things first: the person (expression, what they "
+    "hold or wear) and the main objects around them. If the picture is too dark or blurry to tell, say so. No "
+    "preamble.";
 
 static const char GUESS[] =
     "You are playing Pictionary with a child on a Nintendo DSi. The picture is a quick black-on-white doodle drawn "

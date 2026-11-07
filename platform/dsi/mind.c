@@ -99,6 +99,8 @@ static char heard_text[OK_MIND_TEXT + 1], saw_text[OK_MIND_TEXT + 1];
 static const uint8_t *clip;
 static size_t clip_len;
 static uint32_t looked_at;
+TWL_BSS static uint16_t look_px[128 * 96]; /* the photo behind the last verified look */
+static volatile int live;                  /* the player keeps looking: no decisions meanwhile */
 TWL_BSS static uint8_t photo_twl[64 * 1024]; /* a camera PNG (37 KB) or a drawing */
 static uint8_t *photo;
 static size_t photo_cap;
@@ -259,6 +261,8 @@ void ok_dsi_mind_hear(const uint8_t *wav, size_t len)
 }
 
 void ok_dsi_mind_look(void) { queue(OK_DSI_LOOK); }
+void ok_dsi_mind_live(int on) { live = on; }
+void ok_dsi_mind_look_photo(uint16_t out[128 * 96]) { memcpy(out, look_px, sizeof look_px); }
 
 void ok_dsi_mind_letters(int allowed) { letters_ok = allowed; }
 
@@ -632,7 +636,7 @@ static int load_settings(uint8_t key[32])
     int have_signer = 0, ok;
     FILE *f;
     memset(&cfg, 0, sizeof cfg);
-    cfg.look_every = 120;
+    cfg.look_every = 0; /* the camera only when the player asks (look_every= in mind.txt to look now and then) */
     cfg.store_every = 10;
     snprintf(path, sizeof path, "%smind.txt", dir_path);
     if (!(f = fopen(path, "r"))) return 0;
@@ -1205,9 +1209,13 @@ static void look(request *q)
     if (!ok_dsi_eye_snap(photo, photo_cap, &n, why_cam)) {
         stopped("%s", why_cam);
         feed("%.38s", why_cam);
+        ok_facts_log(ok_dsi_uptime(), 'D', "%.38s", why_cam);
+        if (!strcmp(why_cam, "camera: init failed") || !strcmp(why_cam, "camera: DSi mode only"))
+            ok_facts_now.og_features &= ~4u; /* no camera here: the Photo button goes */
         if (q) finish(q, 0, why_cam);
         return;
     }
+    if (!q || !live) ok_dsi_eye_close(); /* the light stays on only while the player keeps looking */
     now_ms = (uint64_t)utc_now() * 1000u;
     draw(nonce, sizeof nonce);
     line(3, "Looking: %lu B photo to 0G", (unsigned long)n);
@@ -1226,7 +1234,10 @@ static void look(request *q)
         feed("saw: %.33s", t.saw);
         snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "saw: %.34s", t.saw);
         today_add("saw: %.75s", t.saw);
-        if (q) finish(q, 1, t.saw);
+        if (q) {
+            memcpy(look_px, ok_dsi_eye_thumb(), sizeof look_px);
+            finish(q, 1, t.saw);
+        }
     } else {
         call_failed(q, r);
     }
@@ -1614,6 +1625,7 @@ static int thinker(void *arg)
                 snprintf(ok_facts_now.og_error, sizeof ok_facts_now.og_error, "waiting for Wi-Fi");
             }
             hang_up();
+            if (isDSiMode()) ok_dsi_eye_close();
             wait_real(paused ? 500 : 1000, 0);
             continue;
         }
@@ -1624,6 +1636,11 @@ static int thinker(void *arg)
 
         /* The player first: what they said, a guess, a look, a comment. */
         serve_player();
+        if (live) { /* the player is watching what it sees: only looks, one after another */
+            wait_real(500, 1);
+            continue;
+        }
+        ok_dsi_eye_close();
         if (!player_waiting() && cfg.look_every > 0 && seen_idle < 60 && now_s() - looked_at > (uint32_t)cfg.look_every)
             look(NULL);
 

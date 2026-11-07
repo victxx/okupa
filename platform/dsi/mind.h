@@ -13,7 +13,7 @@
  *             (if DNS fails) and tz= (minutes the RTC is ahead of UTC)
  *             ear_host=, ear_provider=, ear_model=, ear_signer= (and ear_ip=)
  *             for speech to text; city= where the console is; look_every=
- *             seconds between looks through the camera (0: only with R)
+ *             seconds between looks through the camera (default 0: only when asked)
  *   mind.key  hex key that owns the 0G ledger paying the provider
  *   memory.txt  facts its mind chose to keep, one a line (it writes this)
  * Each episode is written to dir/episodes/ as a hash chain (chain.txt holds
@@ -44,8 +44,13 @@ int ok_dsi_mind_result(int kind, char *text, size_t cap, char why[48], uint32_t 
  * stay put while ok_dsi_mind_ear_busy(). */
 void ok_dsi_mind_hear(const uint8_t *wav, size_t len);
 int ok_dsi_mind_ear_busy(void);
-/* R or Photo: one photo from the camera to 0G's vision model. */
+/* R or Photo: one photo from the camera to 0G's vision model. live: the
+ * player is watching (the camera stays on between looks and the mind makes
+ * no decisions meanwhile); look_photo: the photo behind the last verified
+ * look, 128x96 DS colours. */
 void ok_dsi_mind_look(void);
+void ok_dsi_mind_live(int on);
+void ok_dsi_mind_look_photo(uint16_t out[128 * 96]);
 /* Pictionary: 0G's vision model guesses the 64x64 drawing. */
 void ok_dsi_mind_guess(const uint8_t pixels[512]);
 /* A drawing of the player's: 0G's vision model looks at it and the okupa
