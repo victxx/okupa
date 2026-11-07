@@ -72,6 +72,7 @@ No se ha enviado ninguna transacción a Ethereum. En 0G testnet, solo las cuatro
 | Arreglos de la revisión (c365ee7, 1954c04) | Etapas "Asking 0G" / "Checking signature" reales; sin decisión pagada tras cada petición; un sueño fallido ya no bloquea 5 min; respuestas tardías nunca se muestran con otro dibujo; la cámara no descarta fotogramas por un falso overrun; siestas que no despiertan a destiempo; hello y carta dicen "signed, waiting for a node" hasta verse en un bloque. Tests, sanitizers y ROM (R3D_GL=0) pasan; sin probar en la consola |
 | Mente más libre | Prompt con vida propia (se pregunta por la consola, 0G y los nodos, sin atribuirse poderes); sueños propios al dormir (cada 20 min) y ensoñaciones a solas (cada 45 min). 3 de 3 decisiones verificadas en mainnet desde el Mac (`run/host-mind-free-20261107/`) |
 | SD | `mind.txt` no tenía `ear_*` ni `dream_*` (por eso Talk y Dream no funcionaban): añadidos, copia previa en `run/sd-mindtxt-backup-20261107-0710/`. Whisper ("Hello Okupa, what are you dreaming about?") y z-image-turbo verificados con la misma clave desde el Mac (`run/host-ear-20261107/`, `run/host-dream-20261107/`). ROM bb0e49c8… copiada como `roms/nds/okupa.nds` |
+| Nodos de mainnet con hueco | Desde el Mac (mismo núcleo, sin transacciones): 80 por DNS + 103 por discv4 en 90 s; de 113 probados, 94 "too many peers" y 3 Reth 2.10 devuelven Status. Guardados en `sd:/okupa/peers-mainnet.txt`, que la DSi prueba primero para entregar su hello pendiente (nonce 0, firmado en la consola). `run/mainnet-peers-20261107/` |
 
 ## Siguiente
 
