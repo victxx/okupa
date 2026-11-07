@@ -358,21 +358,23 @@ const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about, int *
     return dream_px;
 }
 
-void ok_dsi_mind_guess(const uint8_t pixels[512])
+int ok_dsi_mind_guess(const uint8_t pixels[512])
 {
-    if (req[OK_DSI_GUESS].wanted || req[OK_DSI_GUESS].stage) return;
+    if (req[OK_DSI_GUESS].wanted || req[OK_DSI_GUESS].stage) return 0;
     memcpy(doodle, pixels, sizeof doodle);
-    queue(OK_DSI_GUESS);
+    return queue(OK_DSI_GUESS);
 }
 
 void ok_dsi_mind_dream_now(void) { queue(OK_DSI_DREAM); }
 
-void ok_dsi_mind_comment(const uint8_t pixels[512])
+int ok_dsi_mind_comment(const uint8_t pixels[512])
 {
-    if (req[OK_DSI_COMMENT].wanted || req[OK_DSI_COMMENT].stage) return;
+    if (req[OK_DSI_COMMENT].wanted || req[OK_DSI_COMMENT].stage) return 0;
     memcpy(gift, pixels, sizeof gift);
-    queue(OK_DSI_COMMENT);
+    return queue(OK_DSI_COMMENT);
 }
+
+const uint8_t *ok_dsi_mind_comment_pixels(void) { return gift; }
 
 int ok_dsi_mind_take(ok_mind *d)
 {
@@ -1252,7 +1254,8 @@ static void begin_serving(request *q)
 {
     serving = q;
     read_ms = 40000;
-    if (q) q->stage = OK_DSI_ASKING;
+    /* fetch() moves it on: the first round trip asks, the next checks. */
+    if (q && q->stage > OK_DSI_PREPARING) q->stage = OK_DSI_PREPARING;
 }
 
 static void end_serving(void)
@@ -1426,6 +1429,8 @@ static void picture(int kind)
  * calls): 0G's mind writes what it dreams of from its day, 0G's image model
  * draws it, both checked against their TEEs' signatures. */
 static uint32_t dreamt_at;
+static uint32_t dream_tried_at;  /* the last dream it began by itself */
+static uint32_t next_decide_at; /* the next decision of its own, after the rest */
 static int dreamt;
 
 static void dream_now(void)
@@ -1449,8 +1454,6 @@ static void dream_now(void)
         finish(q, 0, w);
         return;
     }
-    dreamt = 1;
-    dreamt_at = now_s();
     o = obs;
     if (!o.pet) {
         obs_pet = seen_pet;
@@ -1495,6 +1498,8 @@ static void dream_now(void)
         snprintf(dream_about, sizeof dream_about, "%s", about);
         keep_dream(dream_png, t.image_len, about);
         today_add("dreamt of %.70s", about);
+        dreamt = 1; /* the five minutes count from a dream made, not one tried */
+        dreamt_at = now_s();
         dream_new = 1;
         finish(q, 1, about);
     } else if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
@@ -1911,6 +1916,19 @@ static int thinker(void *arg)
         ok_dsi_eye_close();
         if (!player_waiting() && cfg.look_every > 0 && seen_idle < 60 && now_s() - looked_at > (uint32_t)cfg.look_every)
             look(NULL);
+        /* Dreams of its own: asleep, every 20 min; awake and alone for a
+         * while, a daydream every 45 min (verified like any other). */
+        if (cfg.have_dream && !player_waiting() && now_s() - dream_tried_at > 600 &&
+            ((seen_pet.asleep && (!dreamt || now_s() - dreamt_at > 1200)) ||
+             (!seen_pet.asleep && seen_idle > 300 && (!dreamt || now_s() - dreamt_at > 2700)))) {
+            dream_tried_at = now_s();
+            feed(seen_pet.asleep ? "asleep: a dream of its own" : "alone: a daydream");
+            if (queue(OK_DSI_DREAM)) serve_player();
+        }
+        if (!reply_due && now_s() < next_decide_at) { /* a request cut the rest short: not time to decide yet */
+            wait_real((next_decide_at - now_s()) * 1000u, 1);
+            continue;
+        }
 
         decide();
         serve_player();
@@ -1927,8 +1945,6 @@ static int thinker(void *arg)
             want_store = 0;
             flush_batch(key);
         }
-        if (reply_due || player_waiting()) continue; /* the player spoke or asked: answer now */
-
         /* Every 20 s while the player is around, every minute otherwise, 90 s
          * while it sleeps alone, so each thing it does has time to play out;
          * after failures it backs off up to a minute. Speaking, a photo or a
@@ -1937,7 +1953,10 @@ static int thinker(void *arg)
         if (seen_pet.asleep && seen_idle >= 60) rest = 90;
         if (fails) rest = fails >= 3 ? 60 : 10 << fails; /* each try costs a TLS handshake the game waits for */
         rest = rest * 1000 - (int)ms_last;
-        wait_real((uint32_t)(rest > 3000 ? rest : 3000), 1);
+        if (rest < 3000) rest = 3000;
+        next_decide_at = now_s() + (uint32_t)rest / 1000u;
+        if (reply_due || player_waiting()) continue; /* the player spoke or asked: answer now */
+        wait_real((uint32_t)rest, 1);
     }
     return 0;
 }

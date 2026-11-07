@@ -564,7 +564,7 @@ int main(void)
     int reply_wait = 0; /* 0G heard the player: the next decision is the answer */
     time_t reply_at = 0;
     int menu_talk = 0, menu_look = 0; /* the menu's Talk (1 start, 2 held, 3 let go), Photo */
-    int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0, game_auto = 0; /* Pictionary */
+    int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0, game_auto = 0, game_redo = 0; /* Pictionary */
     int game_guess_wanted = 0;         /* Guess! (or X) this frame */
     time_t game_since = 0;             /* when the guess went, or the question was asked */
     uint32_t doodle_sum = 0, doodle_guessed = 0, stroke_at = 0; /* Pictionary while drawing: what was last guessed */
@@ -730,6 +730,8 @@ int main(void)
         }
         if (now != last) {
             ok_pet_update(&pet, (int64_t)now);
+            ui.tx_waiting = ok_dsi_net_pending(NULL);
+            if (!pet.asleep) mind_nap_until = 0; /* woken: a later sleep is not that nap */
             if (mind_nap_until && now >= mind_nap_until) { /* the mind's short nap is over */
                 mind_nap_until = 0;
                 if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now);
@@ -894,19 +896,22 @@ int main(void)
                 } else {
                     game_asked = ask_locked = 0;
                     ok_ui_ask(&ui, NULL);
-                    if (!game_waiting) ok_dsi_mind_guess(page);
+                    /* An older guess still on its way is about older strokes:
+                     * it is dropped, and this drawing goes as soon as it lands. */
+                    game_redo = !ok_dsi_mind_guess(page);
                     game_waiting = 1;
-                    game_auto = 0; /* the answer, even one already on its way, is the real guess */
+                    game_auto = 0;
                     game_since = now;
                     doodle_guessed = sum;
                 }
             } else if (ui.scene == OK_UI_SKETCH && ui.pictionary && inked && !game_waiting && !game_asked && sum != doodle_guessed &&
                        !(keysHeld() & KEY_TOUCH) && (uint32_t)now_us() - stroke_at > 1500000u && now - game_since >= 8 &&
                        ok_dsi_mind_alive()) { /* the stylus rests: what does it look like so far? */
-                ok_dsi_mind_guess(page);
-                game_waiting = game_auto = 1;
-                game_since = now;
-                doodle_guessed = sum;
+                if (ok_dsi_mind_guess(page)) {
+                    game_waiting = game_auto = 1;
+                    game_since = now;
+                    doodle_guessed = sum;
+                }
             }
             if (game_waiting) {
                 int st = ok_dsi_mind_stage(OK_DSI_GUESS);
@@ -915,7 +920,7 @@ int main(void)
                                 : st == OK_DSI_CHECKING ? "Checking 0G's signature" : "Waiting for 0G");
                 ok_ui_listening(&ui, 2);
                 if (now - game_since > 60) {
-                    game_waiting = 0;
+                    game_waiting = game_redo = 0;
                     ok_ui_listening(&ui, 0);
                     ok_ui_busy(&ui, NULL);
                     ui.say = "0G took too long. Tap Guess! to try again.";
@@ -923,6 +928,12 @@ int main(void)
                 }
             }
             g = ok_dsi_mind_result(OK_DSI_GUESS, game_guess, sizeof game_guess, why, &ms);
+            if (g && (!game_waiting || game_redo)) { /* about a drawing nobody is waiting on now */
+                if (g > 0) ok_facts_log(ok_dsi_uptime(), 'G', "late guess dropped: %.24s", game_guess);
+                g = 0;
+                if (game_redo && ok_dsi_mind_guess(page)) game_redo = 0, game_since = now;
+                else if (game_redo) game_waiting = game_redo = 0;
+            }
             if (g) {
                 if (game_waiting) ok_ui_listening(&ui, 0);
                 ok_ui_busy(&ui, NULL);
@@ -981,10 +992,12 @@ int main(void)
                         ui.say = "Send it and it goes on the wall."; /* a hint, not 0G */
                         ui.say_ticks = 60 * 4;
                     }
-                } else {
-                    ok_dsi_mind_comment(comment_px);
+                } else if (ok_dsi_mind_comment(comment_px)) {
                     comment_waiting = 1;
                     comment_at = now;
+                } else if (comment_wanted == 2) {
+                    ui.say = "Still waiting on 0G about the last one.";
+                    ui.say_ticks = 60 * 4;
                 }
                 comment_wanted = 0;
             }
@@ -1003,6 +1016,10 @@ int main(void)
                 }
             }
             c = ok_dsi_mind_result(OK_DSI_COMMENT, text, sizeof text, why, &ms);
+            if (c && !comment_waiting) { /* it gave up waiting: the answer is only logged */
+                if (c > 0) ok_facts_log(ok_dsi_uptime(), 'G', "late comment dropped");
+                c = 0;
+            }
             if (c) {
                 if (comment_waiting && !game_waiting) {
                     ok_ui_listening(&ui, 0);
@@ -1012,11 +1029,11 @@ int main(void)
                 snprintf(foot, sizeof foot, "%lu.%lu s", (unsigned long)(ms / 1000), (unsigned long)(ms / 100 % 10));
             }
             if (c > 0) {
-                ok_ui_card_drawing(&ui, "Your drawing", text, comment_px, 1, foot);
+                ok_ui_card_drawing(&ui, "Your drawing", text, ok_dsi_mind_comment_pixels(), 1, foot);
                 if (!pet.asleep) ok_ui_direct(&ui, &pet, OK_MOVE_WAVE, OK_PLACE_ATTIC, OK_POSE_HAPPY, NULL);
             } else if (c < 0) {
                 snprintf(said, sizeof said, "0G could not look this time: %.47s", why);
-                ok_ui_card_drawing(&ui, "No answer", said, comment_px, 0, "nothing made up");
+                ok_ui_card_drawing(&ui, "No answer", said, ok_dsi_mind_comment_pixels(), 0, "nothing made up");
             }
             busy_comment = comment_waiting;
         }
@@ -1209,18 +1226,18 @@ int main(void)
                     }
                 }
                 st = ok_dsi_mind_stage(OK_DSI_DREAM);
-                if (dream_waiting && st && !busy_look && !game_waiting && !listening && !reply_wait && !ui.dream_ticks) {
+                if (dream_waiting && st && !busy_look && !game_waiting && !listening && !reply_wait) {
                     ok_ui_busy(&ui, st == OK_DSI_PREPARING ? "Dreaming (0G writes it)" : st == OK_DSI_ASKING ? "0G is drawing my dream"
                                                                                                  : "Checking 0G's signature");
                     ok_ui_listening(&ui, 2);
                 }
                 dr = ok_dsi_mind_result(OK_DSI_DREAM, NULL, 0, why, NULL);
-                if (dr || (dream_waiting && now - dream_at > 150)) {
+                if (dr || (dream_waiting && now - dream_at > 240)) {
                     if (dream_waiting && !busy_look && !game_waiting && !listening && !reply_wait) {
                         ok_ui_listening(&ui, 0);
                         ok_ui_busy(&ui, NULL);
                     }
-                    if (dr < 0) {
+                    if (dr < 0 && dream_waiting) { /* a dream of its own that failed is only in the log */
                         snprintf(said_dream, sizeof said_dream, "No dream this time: %.47s", why);
                         ui.say = said_dream;
                         ui.say_ticks = 60 * 6;
@@ -1235,7 +1252,7 @@ int main(void)
             if (ok_dsi_mind_take_letter(text)) {
                 letter_requested = 0;
                 if (send_letter(text, letter_day, today)) {
-                    ui.say = "I wrote you a letter, on Ethereum for good!";
+                    ui.say = "I wrote and signed you a letter! Now to find a node that takes it.";
                 } else {
                     ui.say = "I wrote you a letter... but could not post it.";
                 }
@@ -1318,7 +1335,12 @@ int main(void)
                         ok_dsi_net_commit_nonce(nonce);
                         ok_dsi_net_send(tx, len, hash);
                         ok_facts_log(ok_dsi_uptime(), 'E', "signed hello %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+                        ui.say = "Hello signed! Not on Ethereum yet: looking for a node.";
+                        ui.say_ticks = 60 * 5;
                     }
+                } else {
+                    ui.say = "Still on its way: I'll say when a block has it.";
+                    ui.say_ticks = 60 * 4;
                 }
             }
             if (r == OK_UI_SEND_DRAWING && storage) {
@@ -1330,7 +1352,7 @@ int main(void)
                     ui.say = "I need my key first: Dev > Wallet.";
                     ui.say_ticks = 300;
                 } else if (ok_dsi_net_pending(hash)) {
-                    ui.say = "One letter at a time: the last one is still on its way.";
+                    ui.say = "One at a time: my last one is still on its way.";
                     ui.say_ticks = 300;
                 } else if (ok_dsi_account_act(ok_dsi_net_chain_id(), ok_dsi_net_peek_nonce(), ui.drawing, tx, sizeof tx,
                                               &len, hash)) {

@@ -51,6 +51,7 @@ const uint8_t *ok_dsi_ear_stop(size_t *len, int *level)
 {
     uint32_t n;
     *level = -1;
+    *len = 0;
     if (!recording) return NULL;
     soundMicOff();
     recording = 0;
@@ -79,25 +80,27 @@ TWL_BSS static uint16_t thumb[128 * 96];
 static int selected;
 
 /* One frame: 1, or 0 if the NDMA never finished (within half a second of
- * real time, however slowly the game draws), -1 if the camera overran. The
- * camera's transfer bit is not reliably cleared by the hardware at the end
- * of a frame (libnds clears it itself before the next one), so only the
- * NDMA is waited on, then the transfer is stopped. */
+ * real time, however slowly the game draws). The camera's transfer bit is
+ * not reliably cleared by the hardware at the end of a frame (libnds clears
+ * it itself before the next one), so only the NDMA is waited on, then the
+ * transfer is stopped and its FIFO flushed. The error flag is not read: once
+ * the NDMA is done the frame is in memory, and a flag raised afterwards is
+ * the next frame pushing into a FIFO nobody empties at 8 fps. */
 static int grab(void)
 {
     uint32_t start;
-    int overrun;
     if (!cameraStartTransfer(frame, MCUREG_APT_SEQ_CMD_PREVIEW, CAMERA_NDMA)) return 0;
     start = cpuGetTiming();
     while (ndmaBusy(CAMERA_NDMA) && cpuGetTiming() - start < 500u * BUS_PER_MS) cothread_yield_irq(IRQ_VBLANK);
-    overrun = (REG_CAM_CNT & CAM_CNT_TRANSFER_ERROR) != 0;
     if (ndmaBusy(CAMERA_NDMA)) {
         REG_NDMA_CR(CAMERA_NDMA) &= ~NDMA_ENABLE; /* never finished: let the channel go */
         cameraStopTransfer();
+        REG_CAM_CNT |= CAM_CNT_TRANSFER_FLUSH;
         return 0;
     }
     cameraStopTransfer();
-    return overrun ? -1 : 1;
+    REG_CAM_CNT |= CAM_CNT_TRANSFER_FLUSH;
+    return 1;
 }
 
 void ok_dsi_eye_close(void)

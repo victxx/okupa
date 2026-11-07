@@ -57,11 +57,14 @@ void ok_dsi_mind_look_photo(uint16_t out[128 * 96]);
  * ETH", the block, under a hello's cost), -1 with why not, 0 nothing new. */
 void ok_dsi_mind_balance(const char *address0x);
 int ok_dsi_mind_take_balance(char eth[24], uint64_t *block, int *low, char why[48]);
-/* Pictionary: 0G's vision model guesses the 64x64 drawing. */
-void ok_dsi_mind_guess(const uint8_t pixels[512]);
+/* Pictionary: 0G's vision model guesses the 64x64 drawing. 0 when the last
+ * guess is still on its way (nothing new is sent). */
+int ok_dsi_mind_guess(const uint8_t pixels[512]);
 /* A drawing of the player's: 0G's vision model looks at it and the okupa
  * says one line about it (decoration only). */
-void ok_dsi_mind_comment(const uint8_t pixels[512]);
+int ok_dsi_mind_comment(const uint8_t pixels[512]);
+/* The drawing the last comment was asked about (what its card must show). */
+const uint8_t *ok_dsi_mind_comment_pixels(void);
 /* What it makes, dreams and writes, once each: an object out of boxes, its
  * own 64x64 drawing, last night's dream picture (DS colours) and a letter to
  * send on Ethereum. ok_dsi_mind_letters: whether it may write one now (the
