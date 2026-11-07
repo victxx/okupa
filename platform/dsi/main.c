@@ -249,6 +249,7 @@ static void machine_facts(int checks)
 /* Set while the player waits on a look, a guess or an answer: a decision
  * landing meanwhile must not clear that wait from the screen. */
 static int player_busy;
+static int ask_locked; /* a question of the game's own is on screen (Pictionary): the mind's waits */
 
 /* A verified decision of the okupa's mind becomes what the 3D okupa does:
  * its move, a mood while it is fresh and the line it says. The mind only
@@ -290,7 +291,7 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
     ok_ui_direct(u, p, move, where, poses[d->mood], said);
     if (!player_busy) ok_ui_listening(u, 0);
     if (d->thought[0]) ok_ui_thought(u, d->thought);
-    if (d->ask[0]) ok_ui_ask(u, d->ask);
+    if (d->ask[0] && !ask_locked) ok_ui_ask(u, d->ask);
     if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
 }
 
@@ -474,8 +475,13 @@ int main(void)
      * past it. */
     static ok_mind thought; /* the mind's latest decision */
     int listening = 0; /* a clip is with 0G */
-    int menu_talk = 0, menu_look = 0, menu_games = 0; /* the menu's Talk (1 start, 2 held, 3 let go), Photo, Games */
-    int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0; /* Pictionary */
+    int menu_talk = 0, menu_look = 0; /* the menu's Talk (1 start, 2 held, 3 let go), Photo */
+    int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0, game_auto = 0; /* Pictionary */
+    int game_guess_wanted = 0;         /* Guess! (or X) this frame */
+    time_t game_since = 0;             /* when the guess went, or the question was asked */
+    uint32_t doodle_sum = 0, doodle_guessed = 0, stroke_at = 0; /* Pictionary while drawing: what was last guessed */
+    int comment_wanted = 0;            /* a drawing for 0G to look at: 1 Done, 2 a gallery picture, 3 just sent */
+    static uint8_t comment_px[512];
     char game_guess[OK_MIND_TEXT + 1] = "";
     static uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
@@ -696,7 +702,7 @@ int main(void)
          * screens L and R turn pages instead.) */
         if (!tech_on && ((keysDown() & KEY_L) || menu_talk == 1) && !ok_dsi_mind_ear_busy()) {
             ok_dsi_ear_start();
-            ok_ui_ask(&ui, NULL); /* it is being answered */
+            if (!ask_locked) ok_ui_ask(&ui, NULL); /* it is being answered */
             ok_ui_listening(&ui, 1);
             if (menu_talk == 1) menu_talk = 2; /* held on the Talk button */
         } else if (menu_talk == 1) {
@@ -717,39 +723,87 @@ int main(void)
         }
         if (listening && !ok_dsi_mind_ear_busy() && !ok_dsi_ear_recording()) ok_ui_listening(&ui, 0);
         listening = ok_dsi_mind_ear_busy();
-        /* Pictionary against the okupa's mind: X and it guesses the drawing
-         * in the sketchbook (0G's vision model, checked here); A says it is
-         * right, B wrong. */
+        /* Pictionary against the okupa's mind: Games opens its page in the
+         * sketchbook; Guess! (or X) and 0G's vision model guesses it, checked
+         * here; A says it is right, B wrong. While the player draws, a pause
+         * of the stylus sends what is there for a quick "I think..." (no
+         * score). Each step is shown; a failure says why. */
         if (menu_talk == 3) menu_talk = 0;
-        if (!tech_on && ((keysDown() & KEY_X) || menu_games) && !game_waiting) {
-            int k;
-            for (k = 0; k < (int)sizeof ui.drawing && !ui.drawing[k]; k++) {}
-            if (k == (int)sizeof ui.drawing) {
-                ui.say = "Draw something first, then press X!";
-                ui.say_ticks = 60 * 3;
-            } else {
-                ok_dsi_mind_guess(ui.drawing);
-                game_waiting = 1;
-                ok_ui_listening(&ui, 2);
-            }
-        }
         {
-            static char failed_why[48], said[80];
-            int g = ok_dsi_mind_result(OK_DSI_GUESS, game_guess, sizeof game_guess, failed_why, NULL);
-            if (g) {
-                ok_ui_listening(&ui, 0);
-                game_waiting = 0;
+            static char said[96], q[64], why[48], foot[24];
+            const uint8_t *page = ui.pictionary ? ui.doodle : ui.drawing;
+            uint32_t sum = 1, ms;
+            int k, g, inked = 0;
+            for (k = 0; k < (int)sizeof ui.doodle; k++) {
+                sum = sum * 31 + page[k];
+                inked |= page[k];
             }
-            if (g > 0) {
-                static char q[64];
-                snprintf(q, sizeof q, "Is it a %.30s? A yes, B no", game_guess);
-                ok_ui_ask(&ui, q);
-                game_asked = 1;
-            } else if (g < 0) {
-                snprintf(said, sizeof said, "No guess from 0G: %.47s", failed_why);
+            if (sum != doodle_sum) doodle_sum = sum, stroke_at = (uint32_t)now_us();
+            if (!tech_on && (keysDown() & KEY_X) && (ui.scene == OK_UI_HOME || ui.scene == OK_UI_SKETCH)) game_guess_wanted = 1;
+            if (game_guess_wanted) {
+                game_guess_wanted = 0;
+                if (game_waiting && !game_auto) {
+                } else if (!inked) {
+                    ui.say = "Draw something first, then Guess!";
+                    ui.say_ticks = 60 * 3;
+                } else if (!ok_dsi_mind_alive()) {
+                    snprintf(said, sizeof said, "No guessing: %s.", ok_dsi_mind_why_not());
+                    ui.say = said;
+                    ui.say_ticks = 60 * 6;
+                } else {
+                    game_asked = ask_locked = 0;
+                    ok_ui_ask(&ui, NULL);
+                    if (!game_waiting) ok_dsi_mind_guess(page);
+                    game_waiting = 1;
+                    game_auto = 0; /* the answer, even one already on its way, is the real guess */
+                    game_since = now;
+                    doodle_guessed = sum;
+                }
+            } else if (ui.scene == OK_UI_SKETCH && ui.pictionary && inked && !game_waiting && !game_asked && sum != doodle_guessed &&
+                       !(keysHeld() & KEY_TOUCH) && (uint32_t)now_us() - stroke_at > 1500000u && now - game_since >= 8 &&
+                       ok_dsi_mind_alive()) { /* the stylus rests: what does it look like so far? */
+                ok_dsi_mind_guess(page);
+                game_waiting = game_auto = 1;
+                game_since = now;
+                doodle_guessed = sum;
+            }
+            if (game_waiting) {
+                int st = ok_dsi_mind_stage(OK_DSI_GUESS);
+                ok_ui_busy(&ui, st == OK_DSI_PREPARING ? "Looking at your drawing"
+                                : st == OK_DSI_ASKING  ? "Asking 0G"
+                                : st == OK_DSI_CHECKING ? "Checking 0G's signature" : "Waiting for 0G");
+                ok_ui_listening(&ui, 2);
+                if (now - game_since > 60) {
+                    game_waiting = 0;
+                    ok_ui_listening(&ui, 0);
+                    ok_ui_busy(&ui, NULL);
+                    ui.say = "0G took too long. Tap Guess! to try again.";
+                    ui.say_ticks = 60 * 6;
+                }
+            }
+            g = ok_dsi_mind_result(OK_DSI_GUESS, game_guess, sizeof game_guess, why, &ms);
+            if (g) {
+                if (game_waiting) ok_ui_listening(&ui, 0);
+                ok_ui_busy(&ui, NULL);
+                game_waiting = 0;
+                snprintf(foot, sizeof foot, "%lu.%lu s", (unsigned long)(ms / 1000), (unsigned long)(ms / 100 % 10));
+            }
+            if (g > 0 && game_auto) { /* a peek while drawing: no question, no score */
+                snprintf(said, sizeof said, "I think... %.30s? (0G, %s)", game_guess, foot);
+                ui.say = said;
+                ui.say_ticks = 60 * 5;
+            } else if (g > 0) {
+                snprintf(q, sizeof q, "Is it %s %.30s?", strchr("aeiou", game_guess[0]) ? "an" : "a", game_guess);
+                ok_ui_ask_hint(&ui, q, "A yes   B no");
+                game_asked = ask_locked = 1;
+                game_since = now;
+                ok_facts_log(ok_dsi_uptime(), 'G', "guess shown: %.30s (%s)", game_guess, foot);
+            } else if (g < 0 && !game_auto) {
+                snprintf(said, sizeof said, "No guess from 0G: %.47s", why);
                 ui.say = said;
                 ui.say_ticks = 60 * 6;
             }
+            if (game_asked && (now - game_since > 45 || !ui.ask_ticks)) game_asked = ask_locked = 0; /* unanswered: let it go */
         }
         if (!tech_on && game_asked && (keysDown() & (KEY_A | KEY_B))) {
             static char said[64], did[96];
@@ -765,9 +819,66 @@ int main(void)
             ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, did);
             ok_facts_log(ok_dsi_uptime(), 'G', "game: %s, Okupa %d - You %d", right ? "right" : "wrong", game_okupa,
                          game_you);
-            game_asked = 0;
+            game_asked = ask_locked = 0;
         }
-        menu_games = 0;
+        /* A drawing of the player's, for 0G to look at: closing the
+         * sketchbook with ink in it, or tapping a picture in the gallery. */
+        {
+            static int comment_waiting;
+            static time_t comment_at;
+            static char text[OK_MIND_TEXT + 1], why[48], foot[24], said[96];
+            uint32_t ms;
+            int c;
+            if (comment_wanted) {
+                if (comment_waiting) {
+                } else if (!ok_dsi_mind_alive()) {
+                    if (comment_wanted == 2) {
+                        snprintf(said, sizeof said, "I can't look: %s.", ok_dsi_mind_why_not());
+                        ui.say = said;
+                        ui.say_ticks = 60 * 5;
+                    } else if (comment_wanted == 1) {
+                        ui.say = "Send it and it goes on the wall."; /* a hint, not 0G */
+                        ui.say_ticks = 60 * 4;
+                    }
+                } else {
+                    ok_dsi_mind_comment(comment_px);
+                    comment_waiting = 1;
+                    comment_at = now;
+                }
+                comment_wanted = 0;
+            }
+            if (comment_waiting) {
+                int st = ok_dsi_mind_stage(OK_DSI_COMMENT);
+                if (!player_busy && !game_waiting) {
+                    ok_ui_busy(&ui, st == OK_DSI_ASKING ? "Showing it to 0G" : st == OK_DSI_CHECKING ? "Checking 0G's signature"
+                                                                                                 : "Looking at your drawing");
+                    ok_ui_listening(&ui, 2);
+                }
+                if (now - comment_at > 60) {
+                    comment_waiting = 0;
+                    ok_ui_listening(&ui, 0);
+                    ok_ui_busy(&ui, NULL);
+                    ok_ui_card_drawing(&ui, "Hmm...", "No answer from 0G this time.", comment_px, 0, "waited 60 s");
+                }
+            }
+            c = ok_dsi_mind_result(OK_DSI_COMMENT, text, sizeof text, why, &ms);
+            if (c) {
+                if (comment_waiting && !game_waiting) {
+                    ok_ui_listening(&ui, 0);
+                    ok_ui_busy(&ui, NULL);
+                }
+                comment_waiting = 0;
+                snprintf(foot, sizeof foot, "%lu.%lu s", (unsigned long)(ms / 1000), (unsigned long)(ms / 100 % 10));
+            }
+            if (c > 0) {
+                ok_ui_card_drawing(&ui, "Your drawing", text, comment_px, 1, foot);
+                if (!pet.asleep) ok_ui_direct(&ui, &pet, OK_MOVE_WAVE, OK_PLACE_ATTIC, OK_POSE_HAPPY, NULL);
+            } else if (c < 0) {
+                snprintf(said, sizeof said, "0G could not look this time: %.47s", why);
+                ok_ui_card_drawing(&ui, "No answer", said, comment_px, 0, "nothing made up");
+            }
+            player_busy |= comment_waiting;
+        }
         /* What the camera sees, in 0G's words: R or Photo starts a live look
          * (a new photo each time an answer lands, up to LOOK_ROUNDS); R,
          * Photo, B or a tap on the card stops it. Every step is shown as it
@@ -853,7 +964,7 @@ int main(void)
                 look_live = 0;
                 ok_dsi_mind_live(0);
             }
-            player_busy = look_waiting && !ui.card_ticks;
+            player_busy = (look_waiting && !ui.card_ticks) || game_waiting;
         }
         if (!tech_on && ui.scene == OK_UI_DEV && (keysDown() & KEY_Y)) {
             if (show_mind) ok_dsi_mind_toggle();
@@ -861,11 +972,6 @@ int main(void)
             show_net = 0;
         }
         if (ok_dsi_mind_take(&thought)) obey(&ui, &pet, &thought, (int64_t)now);
-        {
-            static char comment[OK_MIND_TEXT + 1];
-            if (ok_dsi_mind_result(OK_DSI_COMMENT, comment, sizeof comment, NULL, NULL) > 0) /* its verified reaction to the drawing */
-                ok_ui_direct(&ui, &pet, OK_MOVE_WAVE, OK_PLACE_ATTIC, OK_POSE_HAPPY, comment);
-        }
         /* What its mind made, drew, dreamed or wrote. */
         {
             static char said[80], letter_day[11];
@@ -1032,14 +1138,23 @@ int main(void)
                     ok_facts_log(ok_dsi_uptime(), 'E', "signed drawing %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
                     sent_waiting = 1;
                     ui.drawing_sent = 1;
-                    ok_dsi_mind_comment(ui.drawing); /* its mind on 0G looks at the drawing and says something */
+                    memcpy(comment_px, ui.drawing, sizeof comment_px); /* its mind on 0G looks at the drawing and says something */
+                    comment_wanted = 3;
                 }
             }
             if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
             /* The menu's mind buttons do what the keys do: Photo is R, Games
              * is X, Talk is L (held on the button), Mail shows the letters. */
             if (r == OK_UI_PHOTO) menu_look = 1;
-            if (r == OK_UI_GAMES) menu_games = 1;
+            if (r == OK_UI_GUESS) game_guess_wanted = 1;
+            if (r == OK_UI_DRAWING_DONE) {
+                memcpy(comment_px, ui.drawing, sizeof comment_px);
+                comment_wanted = 1;
+            }
+            if (r == OK_UI_GALLERY_LOOK && ui.gallery_pick >= 0 && ui.gallery_pick < ui.wall_count) {
+                memcpy(comment_px, ui.wall[ui.gallery_pick], sizeof comment_px);
+                comment_wanted = 2;
+            }
             if (r == OK_UI_TALK && !held) menu_talk = 1;
             if (r == OK_UI_MAIL && storage) show_mail(&ui, net_dir);
             if (r == OK_UI_MAIL && !storage) {

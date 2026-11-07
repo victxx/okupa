@@ -178,13 +178,15 @@ static int wrap(const char *s, char line[2][64])
     return line[1][0] ? 2 : 1;
 }
 
-static void bubble_as(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy, int kind, uint32_t ticks)
+static void bubble_as(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy, int kind, uint32_t ticks,
+                      const char *how)
 {
     char line[2][64];
     int lines = wrap(s, line), w, h, x, y, tx, k, hint = kind == ASK;
     uint16_t edge = kind == ASK ? RGB(26, 17, 3) : INK;
+    if (!how || !how[0]) how = "Hold L to answer";
     w = (width(line[0], 1) > width(line[1], 1) ? width(line[0], 1) : width(line[1], 1)) + 16;
-    if (hint && w < width("Hold L to answer", 1) + 16) w = width("Hold L to answer", 1) + 16;
+    if (hint && w < width(how, 1) + 16) w = width(how, 1) + 16;
     h = lines * 11 + 9 + hint * 10;
     if (hx < -50) hx = 128, hy = 110;
     x = hx - w / 2;
@@ -224,13 +226,13 @@ static void bubble_as(frame f, const uint8_t (*font)[8], const char *s, int hx, 
     }
     centred(f, font, x + w / 2, y + 6, line[0], INK, 1);
     if (lines == 2) centred(f, font, x + w / 2, y + 17, line[1], INK, 1);
-    if (hint) centred(f, font, x + w / 2, y + 6 + lines * 11, "Hold L to answer", MUTED, 1);
+    if (hint) centred(f, font, x + w / 2, y + 6 + lines * 11, how, MUTED, 1);
     (void)ticks;
 }
 
 static void bubble(frame f, const uint8_t (*font)[8], const char *s, int hx, int hy)
 {
-    bubble_as(f, font, s, hx, hy, SAY, 0);
+    bubble_as(f, font, s, hx, hy, SAY, 0, NULL);
 }
 
 /* While you answer: a round badge by its head with a microphone and rings
@@ -245,7 +247,7 @@ static void listening(frame f, const uint8_t (*font)[8], const ok_ui *u, int hx,
         size_t n = strlen(base);
         while (n && base[n - 1] == '.') n--; /* its own dots are replaced by the moving ones */
         snprintf(words, sizeof words, "%.*s%.*s", (int)n, base, (int)(u->ticks / 20 % 4), "...");
-        bubble_as(f, font, words, hx, hy, THINK, u->ticks);
+        bubble_as(f, font, words, hx, hy, THINK, u->ticks, NULL);
         return;
     }
     {
@@ -385,9 +387,9 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
     clock_pill(f, font, hour, minute);
     /* One bubble at a time: answering, a question, something just said, a thought, then its mood. */
     if (u->listening) listening(f, font, u, face.top_x, face.top_y);
-    else if (u->ask_ticks) bubble_as(f, font, u->ask, face.top_x, face.top_y, ASK, u->ticks);
+    else if (u->ask_ticks) bubble_as(f, font, u->ask, face.top_x, face.top_y, ASK, u->ticks, u->ask_hint);
     else if (u->say) bubble(f, font, line, face.top_x, face.top_y);
-    else if (u->thought_ticks) bubble_as(f, font, u->thought, face.top_x, face.top_y, THINK, u->ticks);
+    else if (u->thought_ticks) bubble_as(f, font, u->thought, face.top_x, face.top_y, THINK, u->ticks, NULL);
     else if (line && !(p->asleep && line == ok_pet_line(p, hour))) bubble(f, font, line, face.top_x, face.top_y);
     if (u->dream_ticks && u->dream_w > 0 && u->dream_h > 0) { /* last night's dream, in a cloud at the top left */
         int big = u->dream_w > u->dream_h ? u->dream_w : u->dream_h, w = u->dream_w * 72 / big, h = u->dream_h * 72 / big;
@@ -680,7 +682,7 @@ static void gallery(frame f, const uint8_t (*font)[8], const ok_ui *u)
         snprintf(line, sizeof line, "Newest: block #%llu, tx %02x%02x%02x%02x..", (unsigned long long)ok_facts_now.incl_block,
                  ok_facts_now.tx_hash[0], ok_facts_now.tx_hash[1], ok_facts_now.tx_hash[2], ok_facts_now.tx_hash[3]);
     else if (n)
-        snprintf(line, sizeof line, "Each one seen in a block");
+        snprintf(line, sizeof line, "Tap one: 0G looks at it");
     else
         snprintf(line, sizeof line, "Draw, send: it hangs here");
     text(f, font, 8, 172, line, RGB(24, 23, 21), 1);
@@ -734,15 +736,17 @@ static const char *tools[TOOLS] = {"Pen", "Eraser", "Clear", "Send", "Done"};
 
 static void sketch(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
+    const uint8_t *page = u->pictionary ? u->doodle : u->drawing;
     int x, y, i;
-    centred(f, font, 128, 12, "Sketchbook", PAPER, 2);
+    centred(f, font, 128, 12, u->pictionary ? "Pictionary: draw, I guess" : "Sketchbook", PAPER, 2);
     rect(f, CX - 2, CY - 2, 132, 132, INK);
     for (y = 0; y < 64; y++)
-        for (x = 0; x < 64; x++) rect(f, CX + 2 * x, CY + 2 * y, 2, 2, ok_drawing_get(u->drawing, x, y) ? INK : PAPER);
+        for (x = 0; x < 64; x++) rect(f, CX + 2 * x, CY + 2 * y, 2, 2, ok_drawing_get(page, x, y) ? INK : PAPER);
     for (i = 0; i < TOOLS; i++) {
         int on = (i == T_PEN && !u->eraser) || (i == T_ERASER && u->eraser);
-        frame_box(f, TX, TY(i), TW, TH, on ? RGB(29, 22, 6) : PAPER, INK);
-        centred(f, font, TX + TW / 2, TY(i) + 9, i == T_SEND && u->drawing_sent ? "On its way" : tools[i], INK, 1);
+        const char *label = i == T_SEND && u->pictionary ? "Guess!" : i == T_SEND && u->drawing_sent ? "On its way" : tools[i];
+        frame_box(f, TX, TY(i), TW, TH, on || (i == T_SEND && u->pictionary) ? RGB(29, 22, 6) : PAPER, INK);
+        centred(f, font, TX + TW / 2, TY(i) + 9, label, INK, 1);
     }
 }
 
@@ -915,7 +919,7 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         }
         if (u->scene == OK_UI_SKETCH) {
             if (draw) sketch(bottom, font, u);
-            line = "Draw me something for the house!";
+            if (!u->say) line = u->pictionary ? "Draw something, I'll guess it!" : "Draw me something for the house!";
         } else if (u->scene == OK_UI_DEV) {
             if (draw) dev(bottom, font, u);
         } else if (u->scene == OK_UI_WIFI) {
@@ -929,6 +933,7 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
             line = u->wallet_ready ? "My very own address!" : "Scribble! Wilder! More!";
         } else if (u->scene == OK_UI_GALLERY) {
             if (draw) gallery(bottom, font, u);
+            if (!u->say && u->wall_count) line = "Tap a picture: I'll tell you what I see.";
         } else if (u->scene == OK_UI_CLOSET) {
             if (draw) closet(bottom, font, u);
             if (!u->say) line = "How do I look?";
@@ -994,15 +999,18 @@ void ok_ui_thought(ok_ui *u, const char *text)
     u->thought_ticks = 360;
 }
 
-void ok_ui_ask(ok_ui *u, const char *question)
+void ok_ui_ask_hint(ok_ui *u, const char *question, const char *hint)
 {
     if (!question || !question[0]) {
         u->ask_ticks = 0;
         return;
     }
     copy_ascii(u->ask, question);
+    snprintf(u->ask_hint, sizeof u->ask_hint, "%s", hint ? hint : "");
     u->ask_ticks = 1800;
 }
+
+void ok_ui_ask(ok_ui *u, const char *question) { ok_ui_ask_hint(u, question, NULL); }
 
 void ok_ui_busy(ok_ui *u, const char *text)
 {
@@ -1260,7 +1268,8 @@ static void plot(ok_ui *u, int x, int y)
 {
     int i, j;
     for (j = 0; j < 2; j++)
-        for (i = 0; i < 2; i++) ok_drawing_set(u->drawing, (unsigned)(x + i), (unsigned)(y + j), !u->eraser);
+        for (i = 0; i < 2; i++)
+            ok_drawing_set(u->pictionary ? u->doodle : u->drawing, (unsigned)(x + i), (unsigned)(y + j), !u->eraser);
 }
 
 /* A stroke from the last point to this one, so fast strokes leave no gaps. */
@@ -1302,7 +1311,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (u->scene == OK_UI_SKETCH) {
         if (inside(x, y, CX, CY, 128, 128)) {
-            if (u->drawing_sent) return OK_UI_NOTHING; /* the signed pixels must stay as sent */
+            if (u->drawing_sent && !u->pictionary) return OK_UI_NOTHING; /* the signed pixels must stay as sent */
             if (!held) u->last_x = u->last_y = -1;
             stroke(u, (x - CX) / 2, (y - CY) / 2);
             return OK_UI_CHANGED;
@@ -1312,7 +1321,22 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             if (!inside(x, y, TX, TY(i), TW, TH)) continue;
             if (i == T_PEN) u->eraser = 0;
             if (i == T_ERASER) u->eraser = 1;
-            if (i == T_CLEAR && !u->drawing_sent) memset(u->drawing, 0, sizeof u->drawing);
+            if (i == T_CLEAR && u->pictionary) memset(u->doodle, 0, sizeof u->doodle);
+            else if (i == T_CLEAR && !u->drawing_sent) memset(u->drawing, 0, sizeof u->drawing);
+            if (i == T_SEND && u->pictionary) {
+                int k;
+                for (k = 0; k < (int)sizeof u->doodle && !u->doodle[k]; k++) {}
+                if (k == (int)sizeof u->doodle) {
+                    say(u, "Draw something first!");
+                    return OK_UI_CHANGED;
+                }
+                return OK_UI_GUESS;
+            }
+            if (i == T_DONE && u->pictionary) {
+                u->pictionary = 0;
+                u->scene = OK_UI_HOME;
+                return OK_UI_CHANGED;
+            }
             if (i == T_SEND) {
                 if (u->drawing_sent) return OK_UI_NOTHING;
                 say(u, "Off to Ethereum. It goes on the wall once a block has it.");
@@ -1324,9 +1348,9 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
                 u->scene = OK_UI_HOME;
                 for (k = 0; k < (int)sizeof u->drawing && !u->drawing[k]; k++) {}
                 if (u->drawing_sent) say(u, "It's on its way. Watch the wall!");
-                else if (k < (int)sizeof u->drawing) say(u, "I love it! Send it and it goes on the wall.");
-                else say(u, "Nothing yet? Maybe next time.");
+                else if (k == (int)sizeof u->drawing) say(u, "Nothing yet? Maybe next time.");
                 if (k < (int)sizeof u->drawing) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
+                if (k < (int)sizeof u->drawing && !u->drawing_sent) return OK_UI_DRAWING_DONE; /* 0G may look at it */
             }
             return OK_UI_CHANGED;
         }
@@ -1404,6 +1428,12 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             u->sound = 1 + OK_SFX_POP;
             return OK_UI_CHANGED;
         }
+        for (i = 0; !held && i < u->wall_count && i < OK_UI_WALL; i++)
+            if (inside(x, y, GX(i) - 2, GY(i) - 2, 68, 68)) {
+                u->gallery_pick = i;
+                u->sound = 1 + OK_SFX_TAP;
+                return OK_UI_GALLERY_LOOK;
+            }
         return OK_UI_NOTHING;
     }
     if (u->scene == OK_UI_CLOSET) {
@@ -1467,12 +1497,17 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         u->pressed_ticks = 8;
         u->sound = 1 + OK_SFX_TAP;
         switch (i) {
-        case B_DRAW: u->scene = OK_UI_SKETCH; u->eraser = 0; return OK_UI_CHANGED;
         case B_GALLERY: u->scene = OK_UI_GALLERY; return OK_UI_CHANGED;
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
         case B_PHOTO: return OK_UI_PHOTO; /* the platform shows what the camera and 0G are doing */
         case B_TALK: say(u, "I'm listening!"); return OK_UI_TALK;
-        case B_GAMES: say(u, "Show me a drawing: I'll guess it!"); return OK_UI_GAMES;
+        case B_GAMES: /* Pictionary: its own page in the sketchbook */
+            u->scene = OK_UI_SKETCH;
+            u->pictionary = 1;
+            u->eraser = 0;
+            say(u, "Draw something: I'll guess it!");
+            return OK_UI_GAMES;
+        case B_DRAW: u->scene = OK_UI_SKETCH; u->pictionary = 0; u->eraser = 0; return OK_UI_CHANGED;
         case B_MAIL: return OK_UI_MAIL;
         case B_FRIEND: return OK_UI_FRIEND;
         case B_DREAM: u->dream_ticks = 1200; return OK_UI_CHANGED;

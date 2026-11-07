@@ -17,7 +17,11 @@ enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_
        /* Buttons the platform may act on (the okupa has already said a hint):
         * look through the camera, listen through the microphone, a game
         * (it guesses the sketchbook's drawing), its letters, a friend. */
-       OK_UI_PHOTO, OK_UI_TALK, OK_UI_GAMES, OK_UI_MAIL, OK_UI_FRIEND };
+       OK_UI_PHOTO, OK_UI_TALK, OK_UI_GAMES, OK_UI_MAIL, OK_UI_FRIEND,
+       /* Pictionary's Guess! (the doodle is in ok_ui.doodle); the sketchbook
+        * closed with ink in it; a hung picture tapped in the gallery
+        * (ok_ui.gallery_pick): the platform may ask 0G about each. */
+       OK_UI_GUESS, OK_UI_DRAWING_DONE, OK_UI_GALLERY_LOOK };
 /* What the platform really handles (ok_ui.wired): a button for any other
  * of these is hidden, never shown dead. */
 #define OK_UI_HAS_PHOTO 1
@@ -81,13 +85,17 @@ typedef struct {
     uint8_t wall[OK_UI_WALL][64 * 64 / 8];
     int wall_count;
     int drawing_sent; /* the sketchbook's drawing is on its way: not editable until it lands */
+    /* Pictionary: the sketchbook draws on a page of its own (doodle), so the
+     * drawing to send is never touched; gallery_pick: the picture tapped. */
+    int pictionary, gallery_pick;
+    uint8_t doodle[64 * 64 / 8];
     /* A picture new on the wall is hung with a little show: wall_seen is
      * the wall as last shown, hang_t the ticks into hanging hang_slot. */
     uint32_t wall_seen;
     int wall_known, hang_t, hang_slot;
     /* The okupa's inner life, from its mind: a thought, a question for the
      * player, and whether it is listening to the answer. */
-    char thought[61], ask[61];
+    char thought[61], ask[61], ask_hint[24]; /* ask_hint: how to answer ("" = hold L) */
     int thought_ticks, ask_ticks, listening;
     /* What its mind makes: the name of the thing on the floor, a drawing of
      * its own (in a gilt frame), last night's dream (BGR555, up to 128x128). */
@@ -119,8 +127,10 @@ void ok_ui_direct(ok_ui *u, const ok_pet *p, int move, int where, int mood, cons
  * characters, copied (NULL or "" clears it). */
 void ok_ui_thought(ok_ui *u, const char *text);
 /* A question for the player, with a hint to hold L and answer; it stays
- * until ok_ui_ask(u, NULL) or 30 s. Up to 60 ASCII characters, copied. */
+ * until ok_ui_ask(u, NULL) or 30 s. Up to 60 ASCII characters, copied.
+ * ask_hint: the same with another way to answer ("A yes  B no"). */
 void ok_ui_ask(ok_ui *u, const char *question);
+void ok_ui_ask_hint(ok_ui *u, const char *question, const char *hint);
 /* 0 off, 1 listening (a microphone by its head while L is held; it looks
  * up), 2 thinking the answer over (a cloud of dots, with u->busy as its
  * words if set). Shown over any bubble. */

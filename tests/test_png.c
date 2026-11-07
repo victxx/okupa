@@ -62,6 +62,23 @@ int main(void)
         assert(ok_png_drawing(doodle, 2, pic, sizeof pic, &n) == OK_OK && n == ok_png_size(128, 128));
         assert(pic[48] == 0 && pic[49] == 255 && pic[52 + 3 * (16 * 2) + 1 + 3 * 128 * 0] == 255); /* white paper */
         assert(ok_png_drawing(doodle, 3, pic, sizeof pic, &n) == OK_ARGUMENT);
+        { /* the same drawing as 8-bit grey: a third of the bytes, the same picture read back */
+            static uint8_t grey[20000], scratch[40000];
+            static uint16_t back[128 * 128];
+            size_t g;
+            int w, h, k;
+            assert(ok_png_drawing_grey(doodle, 2, grey, sizeof grey, &g) == OK_OK && g == ok_png_grey_size(128, 128));
+            assert(g * 2 < n && grey[25] == 0); /* colour type 0: grey */
+            assert(ok_png_drawing_grey(doodle, 2, grey, g - 1, &g) == OK_RANGE);
+            assert(ok_png_drawing_grey(doodle, 2, grey, sizeof grey, &g) == OK_OK);
+            assert(ok_png_read_rgb15(grey, g, back, 128 * 128, &w, &h, scratch, sizeof scratch) == OK_OK && w == 128 && h == 128);
+            for (k = 0; k < 128 * 128; k++)
+                assert((back[k] & 0x7fff) == (ok_drawing_get(doodle, (unsigned)(k % 128 / 2), (unsigned)(k / 128 / 2)) ? 0 : 0x7fff));
+            if ((f = fopen("build/test-png-doodle-grey.png", "wb"))) { /* for okupa-mind guess= on the host */
+                fwrite(grey, 1, g, f);
+                fclose(f);
+            }
+        }
         if ((f = fopen("build/test-png-doodle.png", "wb"))) {
             fwrite(pic, 1, n, f);
             fclose(f);

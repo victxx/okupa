@@ -29,29 +29,32 @@ static void be32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)v;
 }
 
-/* Each scanline: a filter byte (0, none) and three bytes a pixel. */
-static size_t raw_size(int w, int h) { return (size_t)h * (1 + 3 * (size_t)w); }
+/* Each scanline: a filter byte (0, none) and channels bytes a pixel. */
+static size_t raw_bytes(int w, int h, int channels) { return (size_t)h * (1 + (size_t)channels * (size_t)w); }
 
-size_t ok_png_size(int w, int h)
+static size_t png_bytes(int w, int h, int channels)
 {
-    size_t raw = raw_size(w, h), blocks = (raw + 65534) / 65535;
+    size_t raw = raw_bytes(w, h, channels), blocks = (raw + 65534) / 65535;
     /* signature, IHDR, IDAT (zlib header, stored blocks, Adler-32), IEND */
     return 8 + 25 + 12 + 2 + blocks * 5 + raw + 4 + 12;
 }
 
-ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *out, size_t cap, size_t *len)
+size_t ok_png_size(int w, int h) { return png_bytes(w, h, 3); }
+size_t ok_png_grey_size(int w, int h) { return png_bytes(w, h, 1); }
+
+/* A w x h PNG of 8-bit grey (channels 1) or RGB (3), each pixel from px(). */
+typedef void (*pixel_fn)(const void *ctx, int x, int y, uint8_t out[3]);
+
+static ok_result write_png(int ow, int oh, int channels, pixel_fn px_of, const void *ctx, uint8_t *out, size_t cap,
+                           size_t *len)
 {
     static const uint8_t sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
     uint32_t a = 1, b = 0, c;
     size_t o = 0, raw, left, idat;
-    int ow, oh, x, y, dx, dy;
-    uint8_t *block = NULL;
+    int x, y;
     size_t in_block = 0;
-    if (!frame || !out || !len || w <= 0 || h <= 0 || scale < 1 || w % scale || h % scale) return OK_ARGUMENT;
-    ow = w / scale;
-    oh = h / scale;
-    if (ok_png_size(ow, oh) > cap) return OK_RANGE;
-    raw = raw_size(ow, oh);
+    if (png_bytes(ow, oh, channels) > cap) return OK_RANGE;
+    raw = raw_bytes(ow, oh, channels);
 
     memcpy(out, sig, 8);
     o = 8;
@@ -59,8 +62,8 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
     memcpy(out + o + 4, "IHDR", 4);
     be32(out + o + 8, (uint32_t)ow);
     be32(out + o + 12, (uint32_t)oh);
-    out[o + 16] = 8; /* bits per channel */
-    out[o + 17] = 2; /* truecolour */
+    out[o + 16] = 8;                       /* bits per channel */
+    out[o + 17] = channels == 1 ? 0 : 2;   /* grey or truecolour */
     out[o + 18] = out[o + 19] = out[o + 20] = 0;
     be32(out + o + 21, crc(0xffffffffu, out + o + 4, 17) ^ 0xffffffffu);
     o += 25;
@@ -75,27 +78,13 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
         if (ok_yield && (y & 7) == 7) ok_yield(); /* breathe on cooperative threads */
         for (x = -1; x < ow; x++) {
             uint8_t px[3];
-            int k, n = x < 0 ? 1 : 3;
-            if (x < 0) {
-                px[0] = 0; /* filter: none */
-            } else {
-                uint32_t r = 0, g = 0, bl = 0;
-                for (dy = 0; dy < scale; dy++)
-                    for (dx = 0; dx < scale; dx++) {
-                        uint16_t v = frame[(size_t)(y * scale + dy) * (size_t)w + (size_t)(x * scale + dx)];
-                        r += v & 31;
-                        g += v >> 5 & 31;
-                        bl += v >> 10 & 31;
-                    }
-                k = scale * scale;
-                px[0] = (uint8_t)(r * 255 / (31u * (uint32_t)k));
-                px[1] = (uint8_t)(g * 255 / (31u * (uint32_t)k));
-                px[2] = (uint8_t)(bl * 255 / (31u * (uint32_t)k));
-            }
+            int k, n = x < 0 ? 1 : channels;
+            if (x < 0) px[0] = 0; /* filter: none */
+            else px_of(ctx, x, y, px);
             for (k = 0; k < n; k++) {
                 if (!in_block) {
                     size_t size = left < 65535 ? left : 65535;
-                    block = out + o;
+                    uint8_t *block = out + o;
                     block[0] = left == size; /* the last block says so */
                     block[1] = (uint8_t)size;
                     block[2] = (uint8_t)(size >> 8);
@@ -112,7 +101,6 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
             }
         }
     }
-    (void)block;
     be32(out + o, b << 16 | a);
     o += 4;
     be32(out + idat, (uint32_t)(o - idat - 8));
@@ -127,6 +115,58 @@ ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *
     o += 12;
     *len = o;
     return OK_OK;
+}
+
+typedef struct {
+    const uint16_t *frame;
+    int w, scale;
+} rgb15_src;
+
+static void rgb15_pixel(const void *ctx, int x, int y, uint8_t px[3])
+{
+    const rgb15_src *s = (const rgb15_src *)ctx;
+    uint32_t r = 0, g = 0, bl = 0, k = (uint32_t)(s->scale * s->scale);
+    int dx, dy;
+    for (dy = 0; dy < s->scale; dy++)
+        for (dx = 0; dx < s->scale; dx++) {
+            uint16_t v = s->frame[(size_t)(y * s->scale + dy) * (size_t)s->w + (size_t)(x * s->scale + dx)];
+            r += v & 31;
+            g += v >> 5 & 31;
+            bl += v >> 10 & 31;
+        }
+    px[0] = (uint8_t)(r * 255 / (31u * k));
+    px[1] = (uint8_t)(g * 255 / (31u * k));
+    px[2] = (uint8_t)(bl * 255 / (31u * k));
+}
+
+ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *out, size_t cap, size_t *len)
+{
+    rgb15_src src;
+    if (!frame || !out || !len || w <= 0 || h <= 0 || scale < 1 || w % scale || h % scale) return OK_ARGUMENT;
+    src.frame = frame;
+    src.w = w;
+    src.scale = scale;
+    return write_png(w / scale, h / scale, 3, rgb15_pixel, &src, out, cap, len);
+}
+
+typedef struct {
+    const uint8_t *pixels;
+    int scale;
+} drawing_src;
+
+static void drawing_pixel(const void *ctx, int x, int y, uint8_t px[3])
+{
+    const drawing_src *s = (const drawing_src *)ctx;
+    px[0] = px[1] = px[2] = ok_drawing_get(s->pixels, (unsigned)(x / s->scale), (unsigned)(y / s->scale)) ? 0 : 255;
+}
+
+ok_result ok_png_drawing_grey(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len)
+{
+    drawing_src src;
+    if (!pixels || !out || !len || scale < 1 || scale > 2) return OK_ARGUMENT;
+    src.pixels = pixels;
+    src.scale = scale;
+    return write_png(64 * scale, 64 * scale, 1, drawing_pixel, &src, out, cap, len);
 }
 
 ok_result ok_png_drawing(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len)

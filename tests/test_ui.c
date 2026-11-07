@@ -41,6 +41,9 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_PHOTO);
     assert(ok_ui_touch(&u, &p, 161, 157, 0, t) == OK_UI_CHANGED && u.page == 1); /* More */
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_GAMES && p.need[OK_NEED_HUNGER] == 100);
+    assert(u.scene == OK_UI_SKETCH && u.pictionary); /* Pictionary: its own page in the sketchbook */
+    u.scene = OK_UI_HOME;
+    u.pictionary = 0;
     assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_MAIL);
     assert(ok_ui_touch(&u, &p, 159, 60, 0, t) == OK_UI_FRIEND);
     assert(ok_ui_touch(&u, &p, 95, 157, 0, t) == OK_UI_CHANGED && u.page == 0); /* Care */
@@ -48,6 +51,24 @@ int main(void)
     ok_facts_now.og_features = 1 | 2 | 8; /* the mind hears and plays, no camera */
     assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK);
     assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_GAMES);
+    /* Pictionary draws on its own page: the drawing to send is untouched; Guess! needs ink. */
+    assert(u.scene == OK_UI_SKETCH && u.pictionary);
+    assert(ok_ui_touch(&u, &p, 198, 140, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Draw something first!"));
+    assert(ok_ui_touch(&u, &p, 40, 60, 0, t) == OK_UI_CHANGED);
+    ok_ui_release(&u);
+    for (i = 0, inked = 0; i < (int)sizeof u.doodle; i++) inked += u.doodle[i] != 0;
+    assert(inked);
+    for (i = 0; i < (int)sizeof u.drawing; i++) assert(u.drawing[i] == 0);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 198, 140, 0, t) == OK_UI_GUESS);
+    u.drawing_sent = 1; /* even with a drawing on its way, the doodle can change */
+    assert(ok_ui_touch(&u, &p, 60, 60, 0, t) == OK_UI_CHANGED);
+    ok_ui_release(&u);
+    u.drawing_sent = 0;
+    assert(ok_ui_touch(&u, &p, 198, 120, 0, t) == OK_UI_CHANGED); /* Clear: the doodle only */
+    for (i = 0; i < (int)sizeof u.doodle; i++) assert(u.doodle[i] == 0);
+    assert(ok_ui_touch(&u, &p, 198, 165, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME && !u.pictionary);
+    inked = 0;
     ok_facts_now.og_features = 0;
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 
@@ -68,6 +89,19 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 198, 120, 0, t) == OK_UI_CHANGED);
     for (i = 0; i < (int)sizeof u.drawing; i++) assert(u.drawing[i] == 0);
     assert(ok_ui_touch(&u, &p, 198, 165, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
+    /* Done with ink in it: the platform may ask 0G to look at it. */
+    u.scene = OK_UI_SKETCH;
+    ok_drawing_set(u.drawing, 3, 3, 1);
+    assert(ok_ui_touch(&u, &p, 198, 165, 0, t) == OK_UI_DRAWING_DONE && u.scene == OK_UI_HOME);
+    ok_drawing_set(u.drawing, 3, 3, 0);
+    /* The gallery: a hung picture tapped is for 0G to look at. */
+    u.scene = OK_UI_GALLERY;
+    u.wall_count = 2;
+    assert(ok_ui_touch(&u, &p, 12 + 82 + 30, 30 + 30, 0, t) == OK_UI_GALLERY_LOOK && u.gallery_pick == 1);
+    assert(ok_ui_touch(&u, &p, 12 + 82 * 2 + 30, 30 + 30, 0, t) == OK_UI_NOTHING); /* an empty frame */
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    u.wall_count = 0;
+    u.scene = OK_UI_HOME;
     /* Send hands the drawing to the platform; once sent it cannot change. */
     u.scene = OK_UI_SKETCH;
     assert(ok_ui_touch(&u, &p, 198, 140, 0, t) == OK_UI_SEND_DRAWING && u.scene == OK_UI_HOME);
@@ -154,6 +188,12 @@ int main(void)
     assert(!u.thought_ticks && u.ask_ticks);
     ok_ui_ask(&u, NULL);
     assert(!u.ask_ticks);
+    ok_ui_ask_hint(&u, "Is it a cat?", "A yes  B no");
+    assert(u.ask_ticks && !strcmp(u.ask_hint, "A yes  B no"));
+    ok_ui_render(&u, &p, 10, 5, ok_font(), top, bottom);
+    ok_ui_ask(&u, "Lunch?");
+    assert(!u.ask_hint[0]);
+    ok_ui_ask(&u, NULL);
     ok_ui_ask(&u, "Still there?");
     for (i = 0; i < 1800; i++) ok_ui_tick(&u, &p);
     assert(!u.ask_ticks);

@@ -1257,7 +1257,7 @@ static void picture(int kind)
     ok_result r;
     q->wanted = 0;
     q->stage = OK_DSI_PREPARING;
-    if (ok_png_drawing(pixels, 2, photo, photo_cap, &n) != OK_OK) {
+    if (ok_png_drawing_grey(pixels, 2, photo, photo_cap, &n) != OK_OK) { /* 16.5 KB of grey, not 49 KB of RGB */
         finish(q, 0, "drawing: PNG did not fit");
         return;
     }

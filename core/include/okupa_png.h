@@ -12,8 +12,12 @@ size_t ok_png_size(int w, int h); /* bytes the PNG of a w x h picture takes */
 ok_result ok_png_rgb15(const uint16_t *frame, int w, int h, int scale, uint8_t *out, size_t cap, size_t *len);
 
 /* The 64x64 sketchbook (okupa_act.h pixels, 1 = ink) as a black-on-white
- * PNG, each pixel scale x scale (1 or 2). */
+ * PNG, each pixel scale x scale (1 or 2). _grey: the same picture as 8-bit
+ * grey, a third of the bytes (16.5 KB at scale 2 instead of 49 KB), for a
+ * vision model over a slow link; ok_png_grey_size gives its size. */
 ok_result ok_png_drawing(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len);
+ok_result ok_png_drawing_grey(const uint8_t pixels[512], int scale, uint8_t *out, size_t cap, size_t *len);
+size_t ok_png_grey_size(int w, int h);
 
 /* Reads a PNG back (8-bit grey, RGB or RGBA, not interlaced): any deflate
  * blocks, every scanline filter, CRCs and Adler-32 checked. Pixels become DS
