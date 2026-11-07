@@ -1,6 +1,9 @@
 CC ?= cc
-CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror
-SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
+# Screen text is clipped to its box on purpose: gcc's guesses about snprintf
+# truncation are not errors here (the flag only where the compiler knows it).
+NO_TRUNC := $(shell $(CC) -Werror -Wno-format-truncation -E -x c /dev/null >/dev/null 2>&1 && echo -Wno-format-truncation)
+CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror $(NO_TRUNC)
+SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror $(NO_TRUNC) -fsanitize=address,undefined -fno-omit-frame-pointer
 CPPFLAGS += -Icore/include -Igame/include -Ithird_party/tiny_sha3 -Ithird_party/secp256k1/include -Ithird_party/bearssl/inc -Ithird_party/font8x8 -Ithird_party/qrcodegen
 BUILD ?= build
 
