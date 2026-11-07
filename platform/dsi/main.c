@@ -249,7 +249,8 @@ static void machine_facts(int checks)
 /* Set while the player waits on a look, a guess or an answer: a decision
  * landing meanwhile must not clear that wait from the screen. */
 static int player_busy;
-static int busy_look, busy_comment; /* a look or a comment on its way (set by their parts of the loop) */
+static int busy_look, busy_comment, busy_dream; /* a look, a comment or a dream on its way (set by their parts of the loop) */
+static int dream_wanted; /* Dream tapped */
 static int ask_locked; /* a question of the game's own is on screen (Pictionary): the mind's waits */
 
 /* A nap the mind chose: short, and it wakes by itself (a voice or a tap on
@@ -1051,11 +1052,11 @@ int main(void)
             show_mind = 1;
             show_net = 0;
         }
-        player_busy = busy_look || busy_comment || game_waiting || listening || reply_wait;
+        player_busy = busy_look || busy_comment || busy_dream || game_waiting || listening || reply_wait;
         if (ok_dsi_mind_take(&thought)) {
             if (reply_wait) { /* its answer to what the player said */
                 reply_wait = 0;
-                player_busy = busy_look || busy_comment || game_waiting || listening;
+                player_busy = busy_look || busy_comment || busy_dream || game_waiting || listening;
                 if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now);
                 ok_ui_busy(&ui, NULL);
             }
@@ -1117,13 +1118,59 @@ int main(void)
                 ui.say_ticks = 60 * 5;
             }
             {
-                const uint16_t *dream = ok_dsi_mind_take_dream(&w, &h, &about);
-                if (dream) {
+                int quiet = 0;
+                const uint16_t *dream = ok_dsi_mind_take_dream(&w, &h, &about, &quiet);
+                if (dream && quiet) {
+                    ok_ui_dream_keep(&ui, dream, w, h); /* last time's: behind the Dream button */
+                } else if (dream) {
                     ok_ui_dream(&ui, dream, w, h); /* its cloud on the top screen */
                     snprintf(said, sizeof said, "I dreamt of %.50s", about);
                     ui.say = said;
                     ui.say_ticks = 60 * 8;
                 }
+            }
+            /* Dream: a new one asked of 0G (words, then the picture). */
+            {
+                static int dream_waiting;
+                static time_t dream_at;
+                static char why[48], said_dream[80];
+                int st, dr;
+                if (dream_wanted) {
+                    dream_wanted = 0;
+                    if (dream_waiting) {
+                    } else if (!ok_dsi_mind_alive()) {
+                        snprintf(said_dream, sizeof said_dream, "No dreaming: %s.", ok_dsi_mind_why_not());
+                        ui.say = said_dream;
+                        ui.say_ticks = 60 * 5;
+                    } else {
+                        ok_dsi_mind_dream_now();
+                        dream_waiting = 1;
+                        dream_at = now;
+                    }
+                }
+                st = ok_dsi_mind_stage(OK_DSI_DREAM);
+                if (dream_waiting && st && !busy_look && !game_waiting && !listening && !reply_wait && !ui.dream_ticks) {
+                    ok_ui_busy(&ui, st == OK_DSI_PREPARING ? "Dreaming (0G writes it)" : st == OK_DSI_ASKING ? "0G is drawing my dream"
+                                                                                                 : "Checking 0G's signature");
+                    ok_ui_listening(&ui, 2);
+                }
+                dr = ok_dsi_mind_result(OK_DSI_DREAM, NULL, 0, why, NULL);
+                if (dr || (dream_waiting && now - dream_at > 150)) {
+                    if (dream_waiting && !busy_look && !game_waiting && !listening && !reply_wait) {
+                        ok_ui_listening(&ui, 0);
+                        ok_ui_busy(&ui, NULL);
+                    }
+                    if (dr < 0) {
+                        snprintf(said_dream, sizeof said_dream, "No dream this time: %.47s", why);
+                        ui.say = said_dream;
+                        ui.say_ticks = 60 * 6;
+                    } else if (!dr) {
+                        ui.say = "No dream from 0G in time.";
+                        ui.say_ticks = 60 * 5;
+                    }
+                    dream_waiting = 0;
+                }
+                busy_dream = dream_waiting;
             }
             if (ok_dsi_mind_take_letter(text)) {
                 letter_requested = 0;
@@ -1244,6 +1291,7 @@ int main(void)
              * is X, Talk is L (held on the button), Mail shows the letters. */
             if (r == OK_UI_PHOTO) menu_look = 1;
             if (r == OK_UI_GUESS) game_guess_wanted = 1;
+            if (r == OK_UI_DREAM) dream_wanted = 1;
             if (r == OK_UI_DRAWING_DONE) {
                 memcpy(comment_px, ui.drawing, sizeof comment_px);
                 comment_wanted = 1;

@@ -63,7 +63,11 @@ void ok_dsi_mind_comment(const uint8_t pixels[512]);
 #include "okupa_make.h"
 int ok_dsi_mind_take_object(ok_object *o);
 int ok_dsi_mind_take_drawing(uint8_t pixels[512], char name[21]);
-const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about);
+const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about, int *quiet);
+/* Dream: a dream now (its words from 0G's mind, its picture from 0G's image
+ * model); one every five minutes, the result as OK_DSI_DREAM. take_dream's
+ * quiet: the last dream, read back at start (for the menu, not shown). */
+void ok_dsi_mind_dream_now(void);
 int ok_dsi_mind_take_letter(char text[141]);
 void ok_dsi_mind_letters(int allowed);
 /* 1 once per new verified decision (with its line, thought, question). */

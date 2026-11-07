@@ -21,7 +21,10 @@ enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_
        /* Pictionary's Guess! (the doodle is in ok_ui.doodle); the sketchbook
         * closed with ink in it; a hung picture tapped in the gallery
         * (ok_ui.gallery_pick): the platform may ask 0G about each. */
-       OK_UI_GUESS, OK_UI_DRAWING_DONE, OK_UI_GALLERY_LOOK };
+       OK_UI_GUESS, OK_UI_DRAWING_DONE, OK_UI_GALLERY_LOOK,
+       /* Dream, where the mind dreams (ok_facts og_features 16): a new dream
+        * asked of 0G (the last one is shown meanwhile, if there is one). */
+       OK_UI_DREAM };
 /* What the platform really handles (ok_ui.wired): a button for any other
  * of these is hidden, never shown dead. */
 #define OK_UI_HAS_PHOTO 1
@@ -170,6 +173,8 @@ void ok_ui_okupa_drawing(ok_ui *u, const uint8_t pixels[512]);
 /* Last night's dream: a picture of DS colours (w, h up to 128), shown on the
  * top screen in a dream cloud for about 20 s or until the player taps. */
 void ok_ui_dream(ok_ui *u, const uint16_t *rgb15, int w, int h);
+/* The same, kept for the Dream button without showing it now. */
+void ok_ui_dream_keep(ok_ui *u, const uint16_t *rgb15, int w, int h);
 /* One frame (1/60 s) passed; returns OK_UI_CHANGED when the screens need
  * redrawing (30 times a second: the okupa is always moving a little). */
 int ok_ui_tick(ok_ui *u, const ok_pet *p);

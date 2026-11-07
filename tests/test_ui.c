@@ -69,6 +69,20 @@ int main(void)
     for (i = 0; i < (int)sizeof u.doodle; i++) assert(u.doodle[i] == 0);
     assert(ok_ui_touch(&u, &p, 198, 165, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME && !u.pictionary);
     inked = 0;
+    /* Dreams configured: Dream is there with no dream yet, and asks for one; one kept is shown meanwhile. */
+    ok_facts_now.og_features = 16;
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && !u.dream_ticks);
+    {
+        static uint16_t sky[4] = {0x8000, 0x801f, 0x83e0, 0xfc00};
+        ok_ui_dream_keep(&u, sky, 2, 2);
+        assert(u.dream_w == 2 && !u.dream_ticks);
+        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && u.dream_ticks);
+        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && !u.dream_ticks); /* a tap puts it away */
+        ok_facts_now.og_features = 0;
+        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && u.dream_ticks); /* no mind: the kept one only */
+        u.dream_ticks = 0;
+        u.dream_w = u.dream_h = 0;
+    }
     ok_facts_now.og_features = 0;
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 

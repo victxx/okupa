@@ -471,12 +471,12 @@ static int shown(const ok_ui *u, int list[BUTTONS])
 {
     static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, OK_UI_HAS_GAMES,
                                             0, OK_UI_HAS_FRIEND, 0, 0};
-    /* What the mind says works here (ok_facts.og_features): 2 hearing, 4 the camera, 8 Pictionary. */
-    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 0, 0, 0};
+    /* What the mind says works here (ok_facts.og_features): 2 hearing, 4 the camera, 8 Pictionary, 16 dreams. */
+    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 0, 16, 0};
     int i, n = 0;
     for (i = 0; i < BUTTONS; i++) {
         if (needs_wire[i] && !(u->wired & needs_wire[i]) && !(ok_facts_now.og_features & needs_mind[i])) continue;
-        if (i == B_DREAM && !u->dream_w) continue;
+        if (i == B_DREAM && !u->dream_w && !(ok_facts_now.og_features & 16)) continue; /* a dream to show, or one to ask for */
         list[n++] = i;
     }
     return n;
@@ -1175,6 +1175,12 @@ void ok_ui_dream(ok_ui *u, const uint16_t *rgb15, int w, int h)
     u->dream_ticks = 1200;
 }
 
+void ok_ui_dream_keep(ok_ui *u, const uint16_t *rgb15, int w, int h)
+{
+    ok_ui_dream(u, rgb15, w, h);
+    u->dream_ticks = 0;
+}
+
 /* Out to the terrace or back in: the okupa is placed in the new spot. */
 static void go(ok_ui *u, const ok_pet *p, int where)
 {
@@ -1539,7 +1545,9 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         case B_DRAW: u->scene = OK_UI_SKETCH; u->pictionary = 0; u->eraser = 0; return OK_UI_CHANGED;
         case B_MAIL: return OK_UI_MAIL;
         case B_FRIEND: return OK_UI_FRIEND;
-        case B_DREAM: u->dream_ticks = 1200; return OK_UI_CHANGED;
+        case B_DREAM:
+            if (u->dream_w) u->dream_ticks = 1200; /* the last one meanwhile */
+            return ok_facts_now.og_features & 16 ? OK_UI_DREAM : OK_UI_CHANGED;
         }
         action = i == B_FEED ? OK_DO_FEED : i == B_PLAY ? OK_DO_PLAY : i == B_PET ? OK_DO_PET
                  : p->asleep ? OK_DO_WAKE : OK_DO_SLEEP;

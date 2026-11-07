@@ -312,9 +312,10 @@ int ok_dsi_mind_take_letter(char text[141])
     return 1;
 }
 
-const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about)
+const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about, int *quiet)
 {
     if (!dream_new) return NULL;
+    *quiet = dream_new == 2; /* last time's, read back from the SD card: in the menu, not on screen */
     dream_new = 0;
     *w = dream_w;
     *h = dream_h;
@@ -328,6 +329,8 @@ void ok_dsi_mind_guess(const uint8_t pixels[512])
     memcpy(doodle, pixels, sizeof doodle);
     queue(OK_DSI_GUESS);
 }
+
+void ok_dsi_mind_dream_now(void) { queue(OK_DSI_DREAM); }
 
 void ok_dsi_mind_comment(const uint8_t pixels[512])
 {
@@ -1156,6 +1159,47 @@ static void feed_verified(uint32_t ms)
     }
 }
 
+/* The newest dream, kept as dreams/last.png and last.txt (what it was of),
+ * so it is still there after a restart. */
+static void keep_dream(const uint8_t *png, size_t n, const char *about)
+{
+    char path[64];
+    FILE *f;
+    save_made("dreams", "dream", "png", png, n);
+    snprintf(path, sizeof path, "%sdreams/last.png", dir_path);
+    if ((f = fopen(path, "wb"))) {
+        write_slowly(f, png, n);
+        fclose(f);
+    }
+    snprintf(path, sizeof path, "%sdreams/last.txt", dir_path);
+    if ((f = fopen(path, "w"))) {
+        fprintf(f, "%s\n", about);
+        fclose(f);
+    }
+}
+
+static void load_dream(void)
+{
+    char path[64];
+    size_t n;
+    FILE *f;
+    if (!isDSiMode()) return;
+    snprintf(path, sizeof path, "%sdreams/last.png", dir_path);
+    if (!(f = fopen(path, "rb"))) return;
+    n = fread(dream_png, 1, sizeof dream_png, f);
+    fclose(f);
+    if (ok_png_read_rgb15(dream_png, n, dream_px, 128 * 128, &dream_w, &dream_h, dream_scratch, sizeof dream_scratch) != OK_OK)
+        return;
+    dream_about[0] = 0;
+    snprintf(path, sizeof path, "%sdreams/last.txt", dir_path);
+    if ((f = fopen(path, "r"))) {
+        if (fgets(dream_about, sizeof dream_about, f)) dream_about[strcspn(dream_about, "\r\n")] = 0;
+        fclose(f);
+    }
+    dream_new = 2;
+    feed("dream from last time: %dx%d", dream_w, dream_h);
+}
+
 /* ---- The thread's own state, shared by the steps below. */
 static uint8_t key[32];
 static ok_think_provider chat, ear, dreamer;
@@ -1342,6 +1386,89 @@ static void picture(int kind)
     save_episode(&chat, now_ms, count, 0);
 }
 
+/* A dream now, when the player asks (one every five minutes: two paid
+ * calls): 0G's mind writes what it dreams of from its day, 0G's image model
+ * draws it, both checked against their TEEs' signatures. */
+static uint32_t dreamt_at;
+static int dreamt;
+
+static void dream_now(void)
+{
+    request *q = &req[OK_DSI_DREAM];
+    char about[OK_MIND_DREAM + 1], w[48];
+    ok_mind_obs o;
+    uint8_t nonce[16];
+    uint64_t now_ms;
+    uint32_t t0;
+    ok_result r;
+    int j;
+    q->wanted = 0;
+    q->stage = OK_DSI_PREPARING;
+    if (!cfg.have_dream) {
+        finish(q, 0, isDSiMode() ? "no dreams: dream_* lines missing in mind.txt" : "no dreams in DS mode");
+        return;
+    }
+    if (dreamt && now_s() - dreamt_at < 300) {
+        snprintf(w, sizeof w, "one dream every 5 min: %lu s to go", (unsigned long)(300 - (now_s() - dreamt_at)));
+        finish(q, 0, w);
+        return;
+    }
+    dreamt = 1;
+    dreamt_at = now_s();
+    o = obs;
+    if (!o.pet) {
+        obs_pet = seen_pet;
+        o.pet = &obs_pet;
+    }
+    for (j = 0; j < today_count; j++) o.today[j] = today[j];
+    o.today_count = today_count;
+    o.date = today_date;
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    feed("dream: asking what it dreams of...");
+    ok_dsi_mind_where = "dream words (TLS)";
+    t0 = cpuGetTiming();
+    r = ok_think_diary(&t, &chat, key, now_ms, nonce, &o, fetch, NULL); /* its words for the dream (the entry is not kept) */
+    if (r != OK_OK || t.stage != OK_THINK_DECIDED) {
+        call_failed(q, r);
+        save_episode(&chat, now_ms, count, 1);
+        return;
+    }
+    feed_verified(elapsed_ms(t0));
+    save_episode(&chat, now_ms, count, 1);
+    if (!t.dream[0]) {
+        finish(q, 0, "0G wrote no dream this time");
+        return;
+    }
+    snprintf(about, sizeof about, "%s", t.dream);
+    feed("dreaming: %.28s", about);
+    now_ms = (uint64_t)utc_now() * 1000u;
+    draw(nonce, sizeof nonce);
+    ok_dsi_mind_where = "dream picture (TLS)";
+    begin_serving(q);
+    read_ms = 60000; /* a picture takes longer than words */
+    r = ok_think_dream(&t, &dreamer, key, now_ms, nonce, about, dream_png, sizeof dream_png, sense_buf, sense_cap, fetch,
+                       NULL);
+    end_serving();
+    q->ms = elapsed_ms(t0);
+    if (r == OK_OK && t.stage == OK_THINK_DECIDED &&
+        ok_png_read_rgb15(dream_png, t.image_len, dream_px, 128 * 128, &dream_w, &dream_h, dream_scratch,
+                          sizeof dream_scratch) == OK_OK) {
+        feed_verified(q->ms);
+        feed("dream: %dx%d picture, decoded here", dream_w, dream_h);
+        snprintf(dream_about, sizeof dream_about, "%s", about);
+        keep_dream(dream_png, t.image_len, about);
+        today_add("dreamt of %.70s", about);
+        dream_new = 1;
+        finish(q, 1, about);
+    } else if (r == OK_OK && t.stage == OK_THINK_DECIDED) {
+        finish(q, 0, "the dream picture would not decode");
+    } else {
+        call_failed(q, r);
+    }
+    if (r == OK_OK) save_episode(&dreamer, now_ms, count, 0);
+}
+
 /* Whatever the player is waiting for, first. */
 static void serve_player(void)
 {
@@ -1349,6 +1476,7 @@ static void serve_player(void)
     if (req[OK_DSI_GUESS].wanted) picture(OK_DSI_GUESS);
     if (req[OK_DSI_COMMENT].wanted) picture(OK_DSI_COMMENT);
     if (req[OK_DSI_LOOK].wanted) look(&req[OK_DSI_LOOK]);
+    if (req[OK_DSI_DREAM].wanted) dream_now();
 }
 
 /* 3. What it notices, copied from the game loop, and what it does. */
@@ -1608,7 +1736,7 @@ static void diary_it(void)
                 feed_verified(0);
                 feed("dream: %dx%d picture, decoded here", dream_w, dream_h);
                 snprintf(dream_about, sizeof dream_about, "%s", about);
-                save_made("dreams", "dream", "png", dream_png, t.image_len);
+                keep_dream(dream_png, t.image_len, about);
                 dream_new = 1;
             } else {
                 call_failed(NULL, r);
@@ -1649,6 +1777,7 @@ static int thinker(void *arg)
     load_chain();
     load_facts();
     load_said();
+    load_dream();
     ok_facts_now.og_features |= 1 | 8 | (cfg.have_ear ? 2 : 0) | (isDSiMode() && cfg.look_every >= 0 ? 4 : 0) |
                                (cfg.have_dream ? 16 : 0) | (cfg.store_on ? 32 : 0);
     {
