@@ -33,7 +33,9 @@ int main(void)
     ok_pet_update(&p, t + 12 * 3600);
     assert(p.asleep && ok_pet_mood(&p) == OK_MOOD_ASLEEP && !strcmp(ok_pet_line(&p, 15), "Zzz..."));
     assert(!ok_pet_do(&p, OK_DO_FEED, t + 12 * 3600)); /* asleep: no eating */
-    ok_pet_update(&p, t + 12 * 3600 + 100 * 300);      /* sleep restores energy, then it wakes */
+    ok_pet_update(&p, t + 12 * 3600 + 30 * 60);
+    assert(p.asleep && p.need[OK_NEED_ENERGY] == 30); /* a point a minute asleep */
+    ok_pet_update(&p, t + 12 * 3600 + 100 * 60);       /* sleep restores energy, then it wakes */
     assert(!p.asleep && p.need[OK_NEED_ENERGY] == 100);
 
     /* Actions and refusals. */
@@ -41,7 +43,7 @@ int main(void)
     ok_pet_init(&p, t);
     assert(ok_pet_do(&p, OK_DO_FEED, t) && p.need[OK_NEED_HUNGER] == 100);
     assert(!ok_pet_do(&p, OK_DO_FEED, t) && !strcmp(ok_pet_reply(OK_DO_FEED, 0), "I'm full, really."));
-    assert(ok_pet_do(&p, OK_DO_PLAY, t) && p.need[OK_NEED_FUN] == 95 && p.need[OK_NEED_ENERGY] == 60);
+    assert(ok_pet_do(&p, OK_DO_PLAY, t) && p.need[OK_NEED_FUN] == 95 && p.need[OK_NEED_ENERGY] == 66);
     assert(ok_pet_do(&p, OK_DO_PET, t) && p.need[OK_NEED_LOVE] == 90);
     p.need[OK_NEED_ENERGY] = 10;
     assert(!ok_pet_do(&p, OK_DO_PLAY, t) && ok_pet_mood(&p) == OK_MOOD_SLEEPY);
@@ -50,6 +52,13 @@ int main(void)
     assert(ok_pet_do(&p, OK_DO_WAKE, t) && !p.asleep && !ok_pet_do(&p, OK_DO_WAKE, t));
     p.need[OK_NEED_ENERGY] = 90;
     assert(!ok_pet_do(&p, OK_DO_SLEEP, t));
+    /* Woken with nothing left, it stays up: Wake gives it a little energy. */
+    p.need[OK_NEED_ENERGY] = 0;
+    ok_pet_update(&p, t + 1);
+    assert(p.asleep);
+    assert(ok_pet_do(&p, OK_DO_WAKE, t + 1) && !p.asleep && p.need[OK_NEED_ENERGY] == 25);
+    ok_pet_update(&p, t + 2);
+    assert(!p.asleep);
 
     /* A long absence is capped at a week, and needs never go below zero. */
     ok_pet_update(&p, t + 365LL * 86400);

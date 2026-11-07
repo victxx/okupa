@@ -2,9 +2,12 @@
 #include <string.h>
 
 /* Seconds per point, awake and asleep: a need empties in about a day if
- * ignored, so two or three short visits keep it happy. Negative = recovers. */
+ * ignored, so two or three short visits keep it happy. Negative = recovers:
+ * a minute of sleep a point of energy, so even an empty okupa is up again
+ * in under two hours, not a whole night. */
 static const int32_t awake_rate[OK_NEEDS] = {900, 600, 720, 1800};
-static const int32_t asleep_rate[OK_NEEDS] = {1800, -300, 0, 3600};
+static const int32_t asleep_rate[OK_NEEDS] = {1800, -60, 0, 3600};
+#define WAKE_ENERGY 25 /* woken up, it has at least this: it does not drop straight back to sleep */
 
 static void change(ok_pet *p, int need, int delta)
 {
@@ -50,7 +53,7 @@ int ok_pet_do(ok_pet *p, int action, int64_t now)
     case OK_DO_PLAY:
         if (p->need[OK_NEED_ENERGY] < 15) return 0;
         change(p, OK_NEED_FUN, 25);
-        change(p, OK_NEED_ENERGY, -10);
+        change(p, OK_NEED_ENERGY, -4);
         change(p, OK_NEED_LOVE, 5);
         return 1;
     case OK_DO_PET:
@@ -64,6 +67,7 @@ int ok_pet_do(ok_pet *p, int action, int64_t now)
     case OK_DO_WAKE:
         if (!p->asleep) return 0;
         p->asleep = 0;
+        if (p->need[OK_NEED_ENERGY] < WAKE_ENERGY) p->need[OK_NEED_ENERGY] = WAKE_ENERGY;
         memset(p->carry, 0, sizeof p->carry);
         return 1;
     }

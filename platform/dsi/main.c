@@ -252,10 +252,18 @@ static int player_busy;
 static int busy_look, busy_comment; /* a look or a comment on its way (set by their parts of the loop) */
 static int ask_locked; /* a question of the game's own is on screen (Pictionary): the mind's waits */
 
+/* A nap the mind chose: short, and it wakes by itself (a voice or a tap on
+ * Wake sooner). */
+static int64_t mind_nap_until, mind_nap_at;
+
 /* A verified decision of the okupa's mind becomes what the 3D okupa does:
  * its move, a mood while it is fresh and the line it says. The mind only
- * suggests going to bed; the pet decides whether it is tired enough. */
-static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
+ * suggests going to bed; the pet decides whether it is tired enough, and a
+ * nap is only taken when it makes sense: energy low, or night with nobody
+ * there; never right after the player did something, never twice within
+ * ten minutes, and for three minutes at most. idle: seconds since the
+ * player last touched or pressed anything. */
+static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now, uint32_t idle)
 {
     static const int moves[OK_ACTIVITIES] = {OK_MOVE_LOOK,   OK_MOVE_SCRATCH, OK_MOVE_STRETCH, OK_MOVE_HOP,
                                              OK_MOVE_PEEK,   OK_MOVE_WANDER,  OK_MOVE_SIGH,    OK_MOVE_WAVE,
@@ -271,7 +279,12 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
                                                      "*munches*",      "*plays*",     "*yawns*",     "*heads out*",
                                                      "*heads in*"};
     static int last_activity = -1;
-    int move = moves[d->activity], where = OK_PLACE_ATTIC, here = ok_house_where();
+    int move, where = OK_PLACE_ATTIC, here = ok_house_where();
+    if (d->activity < 0 || d->activity >= OK_ACTIVITIES || d->mood < 0 || d->mood >= OK_FEELINGS) return;
+    move = moves[d->activity];
+    /* Something to say to a player who is there: it wakes up to say it
+     * (a line said while asleep would be lost). */
+    if (p->asleep && d->line[0] && idle < 60) ok_pet_do(p, OK_DO_WAKE, now);
     /* Its line (or what it does, if it says nothing); its thought in a
      * cloud; its question waits in its own bubble for the player to answer
      * by holding L. All three come from the verified decision. */
@@ -293,7 +306,19 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now)
     if (!player_busy) ok_ui_listening(u, 0);
     if (d->thought[0]) ok_ui_thought(u, d->thought);
     if (d->ask[0] && !ask_locked) ok_ui_ask(u, d->ask);
-    if (d->activity == OK_MIND_SLEEP && !p->asleep) ok_pet_do(p, OK_DO_SLEEP, now);
+    if (d->activity == OK_MIND_SLEEP && !p->asleep) {
+        time_t t = (time_t)now;
+        struct tm *tm = localtime(&t);
+        int night = tm && (tm->tm_hour >= 22 || tm->tm_hour < 7);
+        int tired = p->need[OK_NEED_ENERGY] < 30, alone = idle > 120;
+        if ((tired || (night && alone)) && idle >= 60 && now - mind_nap_at >= 600 && ok_pet_do(p, OK_DO_SLEEP, now)) {
+            mind_nap_at = now;
+            mind_nap_until = tired ? 0 : now + 180; /* really tired: it sleeps until rested */
+            ok_facts_log(ok_dsi_uptime(), 'G', "nap: %s", tired ? "tired" : "night, nobody here");
+        } else {
+            ok_facts_log(ok_dsi_uptime(), 'G', "nap refused: energy %u, idle %lus", p->need[OK_NEED_ENERGY], (unsigned long)idle);
+        }
+    }
 }
 
 /* ---- Watchdog: if the game loop stops for 2 s, the vertical blank
@@ -644,6 +669,10 @@ int main(void)
         }
         if (now != last) {
             ok_pet_update(&pet, (int64_t)now);
+            if (mind_nap_until && now >= mind_nap_until) { /* the mind's short nap is over */
+                mind_nap_until = 0;
+                if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now);
+            }
             last = now;
             tm = localtime(&now);
             ok_dsi_audio_tune(ui.scene == OK_UI_SPLASH || ui.scene == OK_UI_FILM ? OK_TUNE_INTRO
@@ -1030,7 +1059,7 @@ int main(void)
                 if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now);
                 ok_ui_busy(&ui, NULL);
             }
-            obey(&ui, &pet, &thought, (int64_t)now);
+            obey(&ui, &pet, &thought, (int64_t)now, (uint32_t)(now - last_input));
         }
         /* What its mind made, drew, dreamed or wrote. */
         {
