@@ -47,6 +47,22 @@ Qué está hecho y con qué evidencia. Los registros completos quedan en `run/` 
 | Dibujo → pared (8898e12) | Send en el cuaderno firma el dibujo 64×64 en la DSi (gas 60000, máx. 2 gwei); se cuelga solo cuando la DSi lo ve en un bloque con la raíz recalculada. Pared y dibujo en camino en la SD. Sin probar en la consola |
 | Primera mezcla completa (2026-11-06) | `main` = visual (mono 3D, ático, pared de 6 cuadros con animación) + mind (0G decide los movimientos) + plan de entrega + web (Swarm/Arkiv). Tests, sanitizers y ROM pasan |
 
+## 2026-11-07: informe desde la DSi (ROM software 3D, ~8 fps) y arreglos
+
+Informe del usuario: Photo y Games no muestran nada, repite frases, ignora el micrófono, se duerme a cada rato y Dream desapareció. Diagnóstico en el código: la foto verificada nunca llegaba a la pantalla; cada toque (botones incluidos) iba a la mente como "touched the screen"; las esperas contaban fotogramas (a 8 fps, 60 s eran ~7 min); el hilo de la mente salía para siempre con un error de montaje; las peticiones del jugador esperaban detrás del ciclo entero; los fallos se veían como "zzz"; la energía tardaba 8 h en volver; Dream solo aparecía tras un sueño en la misma sesión.
+
+| Pieza | Evidencia |
+|---|---|
+| Hilo de la mente | Esperas en tiempo real (temporizador de bus); peticiones del jugador (oír, mirar, adivinar, comentar, soñar) con etapas y siempre terminadas con respuesta verificada o motivo; no muere por un error de montaje. Tests de host + ROM compilada (R3D_GL=0); sin probar en la consola |
+| Photo / R | Cámara: espera solo al NDMA con plazo real, 5 fotogramas de calentamiento, la luz encendida mientras se mira. Tarjeta arriba con la foto enviada, las palabras de 0G y el sello TEE; en vivo hasta 8 rondas. Sin probar en la consola: la prueba es una foto de la tarjeta y en el feed G "looking: N KB" + "TEE sig ok" + "saw: ...", o el motivo ("camera: no frame / init failed") |
+| Pictionary y comentarios | Página propia en el cuaderno con Guess!, pista "A yes B no", adivinanza rápida al parar el lápiz; Done, la galería y el envío piden a 0G que mire el dibujo. PNG gris 128×128 (16,5 KB en vez de 49 KB), leído de vuelta en tests. No reverificado en 0G con PNG gris |
+| Hablar | "You said" con la transcripción verificada; la siguiente decisión responde primero; clips casi mudos no se envían (nivel en el log); últimas 12 frases en `recent.txt` y una frase repetida no se muestra; acentos convertidos (que, Victor) |
+| Dormir | Energía +1/min dormido, Wake deja 25, Play −4; el "sleep" de 0G solo con energía < 30 o de noche sin jugador, siestas de 3 min; un fallo de 0G dice "No answer from 0G: motivo" |
+| Dream | Botón visible si hay `dream_*` en mind.txt; sueño a demanda (palabras + imagen, ambas TEE, uno cada 5 min); `dreams/last.png` se recupera al arrancar |
+| Wallet | Saldo por JSON-RPC público (publicnode por defecto, `balance_host=` / `=off`), solo para mostrar, nunca en el envío; QR solo con Show QR y codificado una vez |
+
+Pendiente en la consola: todo lo anterior. Si Dream o Talk no aparecen, comprobar que `sd:/okupa/mind.txt` tiene las líneas `dream_*` y `ear_*`.
+
 No se ha enviado ninguna transacción a Ethereum. En 0G testnet, solo las cuatro de preparación del ledger con la cuenta de laboratorio.
 
 ## Siguiente
