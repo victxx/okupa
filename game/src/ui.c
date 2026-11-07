@@ -790,6 +790,7 @@ static void dev(frame f, const uint8_t (*font)[8], const ok_ui *u)
 #define SCRIBBLE_Y 30
 #define SCRIBBLE_W 240
 #define SCRIBBLE_H 100
+#define WALLET_BAL_Y 42
 static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
     char head[33];
@@ -802,29 +803,53 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         frame_box(f, 8, 138, 240, 12, RGB(24, 23, 21), INK);
         rect(f, 10, 140, 236 * (u->wallet_progress > 100 ? 100 : u->wallet_progress) / 100, 8, RGB(9, 22, 10));
         centred(f, font, 128, 154, "Your strokes are its randomness", PAPER, 1);
-    } else {
-        /* An EIP-681 link as a QR code, so a phone wallet can just scan it. */
-        static uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(6)], tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
-        char a[23], b[21], link[64];
-        int size, x, y, scale, left, topq;
+    } else if (!u->wallet_qr) { /* the address and what it holds, as a public node reports it */
+        char a[23], b[21];
         snprintf(a, sizeof a, "%.22s", u->wallet_address);
         snprintf(b, sizeof b, "%.20s", u->wallet_address + 22);
         centred(f, font, 128, 18, a, PAPER, 1);
         centred(f, font, 128, 28, b, PAPER, 1);
+        round_box(f, 8, WALLET_BAL_Y, 240, 66, 8, RGB(13, 12, 12));
+        text(f, font, 18, WALLET_BAL_Y + 6, "Balance", RGB(24, 23, 21), 1);
+        centred(f, font, 128, WALLET_BAL_Y + 22, u->wallet_balance[0] ? u->wallet_balance : "?", PAPER, 2);
+        centred(f, font, 128, WALLET_BAL_Y + 38, u->wallet_balance_note[0] ? u->wallet_balance_note : "tap to ask", RGB(24, 23, 21), 1);
+        centred(f, font, 128, WALLET_BAL_Y + 51, "public RPC, display only (tap: refresh)", MUTED, 1);
+        if (u->wallet_low && u->wallet_balance[0])
+            centred(f, font, 128, 118, "Low: a hello can cost up to 0.00006 ETH", RGB(31, 20, 12), 1);
+        centred(f, font, 128, 130, "Sending never uses the RPC: P2P only", MUTED, 1);
+        centred(f, font, 128, 152, u->wallet_status[0] ? u->wallet_status : "Show QR to receive ETH", PAPER, 1);
+        frame_box(f, 4, 166, 120, 22, PAPER, INK);
+        centred(f, font, 64, 173, "Send hello", INK, 1);
+        frame_box(f, 126, 166, 62, 22, PAPER, INK);
+        centred(f, font, 157, 173, "Show QR", INK, 1);
+    } else {
+        /* An EIP-681 link as a QR code, so a phone wallet can just scan it;
+         * encoded once per address, not every frame. */
+        static uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(6)], tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
+        static char encoded[64];
+        static int have;
+        char link[64];
+        int size, x, y, scale, left, topq;
         snprintf(link, sizeof link, "ethereum:%.42s", u->wallet_address);
-        if (qrcodegen_encodeText(link, tmp, qr, qrcodegen_Ecc_MEDIUM, 1, 6, qrcodegen_Mask_AUTO, true)) {
+        if (strcmp(link, encoded)) {
+            have = qrcodegen_encodeText(link, tmp, qr, qrcodegen_Ecc_MEDIUM, 1, 6, qrcodegen_Mask_AUTO, true);
+            snprintf(encoded, sizeof encoded, "%s", link);
+        }
+        if (have) {
             size = qrcodegen_getSize(qr);
-            scale = 112 / (size + 4);
+            scale = 136 / (size + 4);
             left = 128 - (size + 4) * scale / 2;
-            topq = 38;
+            topq = 18;
             rect(f, left, topq, (size + 4) * scale, (size + 4) * scale, RGB(31, 31, 31));
             for (y = 0; y < size; y++)
                 for (x = 0; x < size; x++)
                     if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
         }
-        centred(f, font, 128, 152, u->wallet_status[0] ? u->wallet_status : "Scan to send ETH", PAPER, 1);
+        centred(f, font, 128, 156, u->wallet_balance[0] ? u->wallet_balance : "Scan to send ETH", PAPER, 1);
         frame_box(f, 4, 166, 120, 22, PAPER, INK);
         centred(f, font, 64, 173, "Send hello", INK, 1);
+        frame_box(f, 126, 166, 62, 22, PAPER, INK);
+        centred(f, font, 157, 173, "Hide QR", INK, 1);
     }
     frame_box(f, 190, 166, 62, 22, PAPER, INK);
     centred(f, font, 221, 173, "Back", INK, 1);
@@ -926,7 +951,8 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         static uint32_t last_tick;
         int draw = bottom != last_buf || u->scene != last_scene || u->pressed != last_pressed || u->page != last_page ||
                    u->pressed_ticks ||
-                   u->scene == OK_UI_SKETCH || u->scene == OK_UI_WALLET || u->ticks - last_tick >= 6 || u->ticks < last_tick;
+                   u->scene == OK_UI_SKETCH || (u->scene == OK_UI_WALLET && !u->wallet_ready) || u->ticks - last_tick >= 6 ||
+                   u->ticks < last_tick;
         if (draw) {
             last_buf = bottom;
             last_scene = u->scene;
@@ -1394,6 +1420,11 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     if (u->scene == OK_UI_WALLET) {
         if (!u->wallet_ready && inside(x, y, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H)) return OK_UI_WALLET_SCRIBBLE;
         if (u->wallet_ready && !held && inside(x, y, 4, 166, 120, 22)) return OK_UI_WALLET_HELLO;
+        if (u->wallet_ready && !held && inside(x, y, 126, 166, 62, 22)) {
+            u->wallet_qr = !u->wallet_qr;
+            return OK_UI_CHANGED;
+        }
+        if (u->wallet_ready && !u->wallet_qr && !held && inside(x, y, 8, WALLET_BAL_Y, 240, 66)) return OK_UI_WALLET_BALANCE;
         if (held || !inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;
         u->scene = OK_UI_DEV;
         return OK_UI_CHANGED;
@@ -1407,6 +1438,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         }
         if (inside(x, y, 126, 166, 62, 22)) {
             u->scene = OK_UI_WALLET;
+            u->wallet_qr = 0; /* the address and balance first; the QR when asked */
             return OK_UI_WALLET_OPEN;
         }
         if (!inside(x, y, 190, 166, 62, 22)) return OK_UI_NOTHING;

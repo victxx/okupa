@@ -12,12 +12,16 @@ hangs them on its wall, remembers them and sometimes gives you something back.
 - **Just the console and a Wi-Fi.** No server of ours anywhere: the DSi finds
   Ethereum nodes, sends, checks its own inclusion and thinks with 0G by itself.
 - **No server in the way.** The DSi signs each picture itself and gossips it to
-  Ethereum peers over devp2p. No RPC provider, no relay, nobody to ask permission.
+  Ethereum peers over devp2p. No RPC provider in the sending path, no relay,
+  nobody to ask permission. (The wallet screen shows the balance as a public
+  JSON-RPC node reports it, publicnode by default, `balance_host=` or `=off` in
+  mind.txt: display only, that node's word, and it learns this IP owns the
+  address. Sending never looks at it.)
 - **A companion with a body.** The DSi is its body: the camera is its eyes, the
   clock tells it how long you were away, the touch screen is how you reach it.
   Its mind runs on 0G: each decision is verifiable, logged with a request id, and
-  its diary lives on 0G Storage. When 0G is unreachable it simply goes to sleep;
-  it never pretends to have decided.
+  its diary lives on 0G Storage. When 0G is unreachable it says so (no answer,
+  and why); it never pretends to have decided.
 - **Gifts between companions.** Pictures and tiny 3D objects (an apple, a plushie,
   at most 200 triangles in four tones) travel from one companion's account to
   another's. The chain itself records who gave what, and when.

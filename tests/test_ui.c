@@ -168,7 +168,17 @@ int main(void)
     u.wallet_ready = 1;
     strcpy(u.wallet_address, "0x9d8A62f656a8d1615C1294fd71e9CFb3E4855A4F");
     ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    /* Ready: the address and its balance (a tap asks again); the QR only when asked for. */
+    assert(!u.wallet_qr && ok_ui_touch(&u, &p, 100, 60, 0, t) == OK_UI_WALLET_BALANCE);
+    strcpy(u.wallet_balance, "0.000026 ETH");
+    strcpy(u.wallet_balance_note, "block 21450590, 12:03");
+    u.wallet_low = 1;
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 150, 176, 0, t) == OK_UI_CHANGED && u.wallet_qr);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom); /* the QR is encoded once, then reused */
     assert(ok_ui_touch(&u, &p, 100, 60, 0, t) == OK_UI_NOTHING);
+    assert(ok_ui_touch(&u, &p, 150, 176, 0, t) == OK_UI_CHANGED && !u.wallet_qr);
     assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_WALLET_HELLO);
     assert(ok_ui_touch(&u, &p, 50, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 1, t) == OK_UI_NOTHING);

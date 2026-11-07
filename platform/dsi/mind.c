@@ -13,6 +13,7 @@
 #include "okupa_sntp.h"
 #include "bearssl_hash.h"
 #include "okupa_think.h"
+#include "okupa_balance.h"
 #include <arpa/inet.h>
 #include <dswifi9.h>
 #include <errno.h>
@@ -66,7 +67,7 @@ static ok_think *tp;
 /* One TLS state per provider host, so each keeps its session for the next
  * connection: a resumed handshake skips the certificate chain and the key
  * exchange, the part that would hold the ARM9 for hundreds of ms. */
-#define TLS_HOSTS 4 /* chat, ears, dreams, the 0G chain */
+#define TLS_HOSTS 5 /* chat, ears, dreams, the 0G chain, the balance */
 TWL_BSS static ok_tls tls_twl[TLS_HOSTS];
 static ok_tls *tls_by_host = tls_twl, *tlsp = tls_twl;
 static int tls_hosts = TLS_HOSTS;
@@ -134,6 +135,12 @@ static volatile int alive;
 static const char *not_alive = "my 0G mind is off (no mind.txt / mind.key)";
 static int read_ms = 60000; /* how long a reply may take; shorter while the player waits */
 static int reply_due;       /* the player just spoke: answer it before anything else */
+/* The wallet's balance, read from a public JSON-RPC node for the screen:
+ * not 0G, not part of sending; served even while the mind is paused. */
+static volatile int balance_wanted, balance_result;
+static char balance_addr[43], balance_eth[24], balance_why[48];
+static uint64_t balance_block;
+static int balance_low;
 TWL_BSS static char sense_twl[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
 static char *sense_buf;
 static size_t sense_cap;
@@ -165,6 +172,8 @@ static struct {
      * is there (0 = only when asked with R). */
     long look_every;
     char city[41];
+    /* The wallet's balance: a public JSON-RPC node (display only); "off" none. */
+    char balance_host[64];
     /* 0G Storage: store=mainnet turns it on; store_every= minutes between
      * batches (10); store_node= "ip:port:shard" lines override the nodes. */
     int store_on;
@@ -250,6 +259,7 @@ static void drop_requests(const char *why_not)
 static int player_waiting(void)
 {
     int k;
+    if (balance_wanted) return 1;
     for (k = 0; k < OK_DSI_ASKS; k++)
         if (req[k].wanted) return 1;
     return 0;
@@ -282,6 +292,31 @@ void ok_dsi_mind_hear(const uint8_t *wav, size_t len)
 }
 
 void ok_dsi_mind_look(void) { queue(OK_DSI_LOOK); }
+
+void ok_dsi_mind_balance(const char *address0x)
+{
+    if (balance_wanted || !address0x) return;
+    snprintf(balance_addr, sizeof balance_addr, "%.42s", address0x);
+    balance_result = 0;
+    if (!started || !dir_path[0]) {
+        snprintf(balance_why, sizeof balance_why, "needs Wi-Fi and mind.txt");
+        balance_result = -1;
+        return;
+    }
+    balance_wanted = 1;
+}
+
+int ok_dsi_mind_take_balance(char eth[24], uint64_t *block, int *low, char why[48])
+{
+    int s = balance_result;
+    if (!s) return 0;
+    balance_result = 0;
+    snprintf(eth, 24, "%s", s > 0 ? balance_eth : "");
+    snprintf(why, 48, "%s", s < 0 ? balance_why : "");
+    *block = balance_block;
+    *low = balance_low;
+    return s;
+}
 void ok_dsi_mind_live(int on) { live = on; }
 void ok_dsi_mind_look_photo(uint16_t out[128 * 96]) { memcpy(out, look_px, sizeof look_px); }
 
@@ -686,6 +721,7 @@ static int load_settings(uint8_t key[32])
         else if (!strcmp(text, "dream_ip")) snprintf(cfg.dream_ip, sizeof cfg.dream_ip, "%.19s", v);
         else if (!strcmp(text, "dream_signer")) cfg.have_dream = unhex(v, cfg.dream_signer, 20);
         else if (!strcmp(text, "city")) snprintf(cfg.city, sizeof cfg.city, "%.40s", v);
+        else if (!strcmp(text, "balance_host")) snprintf(cfg.balance_host, sizeof cfg.balance_host, "%.63s", v);
         else if (!strcmp(text, "store")) cfg.store_on = !strcmp(v, "mainnet");
         else if (!strcmp(text, "store_every")) cfg.store_every = strtol(v, NULL, 10);
         else if (!strcmp(text, "store_node") && cfg.store_nodes < 8)
@@ -1469,6 +1505,45 @@ static void dream_now(void)
     if (r == OK_OK) save_episode(&dreamer, now_ms, count, 0);
 }
 
+/* The balance for the wallet screen: eth_blockNumber then eth_getBalance at
+ * that block, from a public node (its word, not a proof). */
+static void balance_step(void)
+{
+    static ok_balance b;
+    const char *host = cfg.balance_host[0] ? cfg.balance_host
+                       : !strcmp(ok_dsi_net_name(), "sepolia") ? "ethereum-sepolia-rpc.publicnode.com"
+                       : !strcmp(ok_dsi_net_name(), "mainnet") ? "ethereum-rpc.publicnode.com" : "";
+    balance_wanted = 0;
+    if (!host[0] || !strcmp(host, "off")) {
+        snprintf(balance_why, sizeof balance_why, host[0] ? "balance_host=off in mind.txt" : "no public node for this network");
+        balance_result = -1;
+        return;
+    }
+    if (!wifi_ready()) {
+        snprintf(balance_why, sizeof balance_why, "no Wi-Fi");
+        balance_result = -1;
+        return;
+    }
+    if (!clock_synced) clock_sync();
+    ok_dsi_mind_where = "balance (TLS)";
+    feed("balance: asking %.24s", host);
+    read_ms = 20000;
+    ok_balance_ask(host, balance_addr, fetch, NULL, episode, episode_cap, &b);
+    read_ms = 60000;
+    if (b.eth[0]) {
+        snprintf(balance_eth, sizeof balance_eth, "%s", b.eth);
+        balance_block = b.block;
+        balance_low = b.low;
+        feed("balance: %.16s at block %llu", b.eth, (unsigned long long)b.block);
+        balance_result = 1;
+    } else {
+        snprintf(balance_why, sizeof balance_why, "%.47s", b.error[0] ? b.error : "no answer");
+        feed("balance: %.28s", balance_why);
+        hang_up();
+        balance_result = -1;
+    }
+}
+
 /* Whatever the player is waiting for, first. */
 static void serve_player(void)
 {
@@ -1772,6 +1847,7 @@ static int thinker(void *arg)
         stopped("no mind.txt / mind.key");
         not_alive = "my 0G mind is off (mind.txt / mind.key)";
         drop_requests(not_alive);
+        started = 0; /* nothing serves requests: they fail at once */
         return 0;
     }
     load_chain();
@@ -1804,6 +1880,7 @@ static int thinker(void *arg)
     dreamer.generation = 0;
 
     for (;;) {
+        if (balance_wanted) balance_step(); /* not 0G: served even while the mind is paused */
         if (paused || !wifi_ready() || !have_pet) {
             alive = 0;
             not_alive = paused ? "my 0G mind is paused (Dev > Y)" : "my 0G mind is waiting for Wi-Fi";
@@ -1916,7 +1993,6 @@ static int has_settings(void)
 void ok_dsi_mind_start(const char *dir)
 {
     if (started) return;
-    started = 1;
     snprintf(dir_path, sizeof dir_path, "%s", dir ? dir : "");
     if (!has_settings()) {
         line(0, "0G mind: off");
@@ -1936,4 +2012,5 @@ void ok_dsi_mind_start(const char *dir)
         return;
     }
     not_alive = "my 0G mind is starting";
+    started = 1;
 }

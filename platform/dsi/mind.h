@@ -51,6 +51,12 @@ int ok_dsi_mind_ear_busy(void);
 void ok_dsi_mind_look(void);
 void ok_dsi_mind_live(int on);
 void ok_dsi_mind_look_photo(uint16_t out[128 * 96]);
+/* The wallet's balance for the screen, from a public JSON-RPC node (mind.txt
+ * balance_host=, or =off; by default publicnode for mainnet or Sepolia):
+ * display only, never part of sending. take_balance: 1 with it ("0.0042
+ * ETH", the block, under a hello's cost), -1 with why not, 0 nothing new. */
+void ok_dsi_mind_balance(const char *address0x);
+int ok_dsi_mind_take_balance(char eth[24], uint64_t *block, int *low, char why[48]);
 /* Pictionary: 0G's vision model guesses the 64x64 drawing. */
 void ok_dsi_mind_guess(const uint8_t pixels[512]);
 /* A drawing of the player's: 0G's vision model looks at it and the okupa

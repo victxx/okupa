@@ -360,6 +360,65 @@ static void watchdog(void)
     }
 }
 
+/* The wallet's balance, as a public JSON-RPC node last reported it, kept in
+ * balance-<network>.txt ("0.0042 ETH block unix-time") so the screen has
+ * something (marked as old) before the next answer. Display only. */
+static void balance_file(char *path, size_t cap)
+{
+    snprintf(path, cap, "%.30sbalance-%.10s.txt", net_dir, ok_dsi_net_name());
+}
+
+static void balance_ask(ok_ui *u)
+{
+    char path[64], eth[24];
+    unsigned long long block;
+    long long at;
+    FILE *f;
+    if (!u->wallet_ready) return;
+    balance_file(path, sizeof path);
+    if (!u->wallet_balance[0] && net_dir[0] && (f = fopen(path, "r"))) {
+        if (fscanf(f, "%23s ETH %llu %lld", eth, &block, &at) == 3) {
+            time_t t = (time_t)at;
+            struct tm *tm = localtime(&t);
+            snprintf(u->wallet_balance, sizeof u->wallet_balance, "%.18s ETH", eth);
+            snprintf(u->wallet_balance_note, sizeof u->wallet_balance_note, "old: block %llu, %02d/%02d %02d:%02d", block,
+                     tm ? tm->tm_mday : 0, tm ? tm->tm_mon + 1 : 0, tm ? tm->tm_hour : 0, tm ? tm->tm_min : 0);
+        }
+        fclose(f);
+    }
+    ok_dsi_mind_balance(u->wallet_address);
+    if (!u->wallet_balance[0]) snprintf(u->wallet_balance_note, sizeof u->wallet_balance_note, "asking a public node...");
+}
+
+static void balance_take(ok_ui *u)
+{
+    char eth[24], why[48], path[64], tmp[72];
+    uint64_t block;
+    int low, r = ok_dsi_mind_take_balance(eth, &block, &low, why);
+    FILE *f;
+    if (r > 0) {
+        time_t now = time(NULL);
+        struct tm *tm = localtime(&now);
+        snprintf(u->wallet_balance, sizeof u->wallet_balance, "%s", eth);
+        snprintf(u->wallet_balance_note, sizeof u->wallet_balance_note, "block %llu, %02d:%02d", (unsigned long long)block,
+                 tm ? tm->tm_hour : 0, tm ? tm->tm_min : 0);
+        u->wallet_low = low;
+        if (net_dir[0]) { /* a new file, then swapped in */
+            balance_file(path, sizeof path);
+            snprintf(tmp, sizeof tmp, "%.63s.tmp", path);
+            if ((f = fopen(tmp, "w"))) {
+                int ok = fprintf(f, "%s %llu %lld\n", eth, (unsigned long long)block, (long long)now) > 0;
+                if (fclose(f) == 0 && ok) {
+                    remove(path);
+                    rename(tmp, path);
+                }
+            }
+        }
+    } else if (r < 0) {
+        snprintf(u->wallet_balance_note, sizeof u->wallet_balance_note, "%s%.32s", u->wallet_balance[0] ? "old; " : "", why);
+    }
+}
+
 /* The day of the last letter the okupa sent, from letters.txt. */
 static void last_letter_day(char out[11])
 {
@@ -664,6 +723,7 @@ int main(void)
                 redraw = 1;
             }
         }
+        balance_take(&ui);
         if (hang_waiting) { /* at once: a power cut before it hangs must not lose it */
             hang(&ui);
             hang_waiting = 0;
@@ -1238,8 +1298,14 @@ int main(void)
             if (r == OK_UI_WALLET_OPEN) {
                 snprintf(ui.wallet_network, sizeof ui.wallet_network, "%s", ok_dsi_net_name());
                 ok_dsi_account_open(storage ? key_path : NULL, &ui);
+                balance_ask(&ui); /* display only: sending never looks at it */
             }
-            if (r == OK_UI_WALLET_SCRIBBLE) ok_dsi_account_scribble(touch.px, touch.py, &ui);
+            if (r == OK_UI_WALLET_BALANCE) balance_ask(&ui);
+            if (r == OK_UI_WALLET_SCRIBBLE) {
+                int was = ui.wallet_ready;
+                ok_dsi_account_scribble(touch.px, touch.py, &ui);
+                if (!was && ui.wallet_ready) balance_ask(&ui);
+            }
             if (r == OK_UI_WALLET_HELLO && storage) {
                 /* One hello at a time: while one is waiting, pressing again
                  * just keeps handing out the same bytes. */

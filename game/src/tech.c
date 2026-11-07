@@ -169,8 +169,8 @@ static const char *const step_text[OK_TECH_STEPS] = {
     "the transactions trie. Our hash inside = it is in.",
     "The okupa's next move comes from a model on 0G Compute, over TLS 1.2 from the DSi. The reply is "
     "signed in a TEE; the DSi recovers the signer before acting.",
-    "No sync, no EVM, no state: no balances, no consensus. A block is checked by hashing, not "
-    "finalised. Everything else here runs on this DSi, in C."};
+    "No sync, no EVM, no state on the console, no consensus. A block is checked by hashing, not "
+    "finalised. The wallet's balance is a public RPC's word, for display; sending never uses it."};
 
 static void step_diagram(frame f, const uint8_t (*font)[8], const ok_tech *t, const ok_facts *fa)
 {

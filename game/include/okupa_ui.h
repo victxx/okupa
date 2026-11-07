@@ -13,7 +13,7 @@
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM,
        OK_UI_GALLERY };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
-       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING,
+       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING, OK_UI_WALLET_BALANCE,
        /* Buttons the platform may act on (the okupa has already said a hint):
         * look through the camera, listen through the microphone, a game
         * (it guesses the sketchbook's drawing), its letters, a friend. */
@@ -84,6 +84,11 @@ typedef struct {
     int wallet_ready, wallet_progress;
     char wallet_address[43], wallet_network[12];
     char wallet_status[33]; /* e.g. the hello on its way */
+    /* Its balance, as a public JSON-RPC node reports it (display only; the
+     * platform fills it): "0.004200 ETH" or "", and where it came from or
+     * why there is none. wallet_qr: the QR code instead (Show QR). */
+    char wallet_balance[24], wallet_balance_note[40];
+    int wallet_low, wallet_qr;
     /* The wall: drawings the console saw included, oldest first. */
     uint8_t wall[OK_UI_WALL][64 * 64 / 8];
     int wall_count;
