@@ -45,7 +45,7 @@ static const profile *net = &mainnet;
 #define LINES 14
 
 static char lines[LINES][33], summary[33] = "Network: starting";
-static char log_path[48], peers_path[48], wifi_path[48], pending_path[48], nonce_path[48], from_path[48],
+static char log_path[48], peers_path[48], wifi_path[48],
     included_path[48];
 static uint8_t pending[1200], pending_hash[32];
 static size_t pending_len;
@@ -147,41 +147,12 @@ void ok_dsi_net_files(const char *dir)
     snprintf(log_path, sizeof log_path, "%snet-log.txt", dir);
     snprintf(peers_path, sizeof peers_path, "%speers-%s.txt", dir, net->name);
     snprintf(wifi_path, sizeof wifi_path, "%swifi.txt", dir);
-    snprintf(pending_path, sizeof pending_path, "%spending-%s.hex", dir, net->name);
-    snprintf(nonce_path, sizeof nonce_path, "%snonce-%s.txt", dir, net->name);
-    snprintf(from_path, sizeof from_path, "%swatch-%s.txt", dir, net->name);
     snprintf(included_path, sizeof included_path, "%sincluded-%s.txt", dir, net->name);
     snprintf(ok_facts_now.network, sizeof ok_facts_now.network, "%s", net->name);
     ok_facts_now.chain_id = net->net->network_id;
     memcpy(ok_facts_now.genesis, net->net->genesis, 32);
     snprintf(ok_facts_now.dns_tree, sizeof ok_facts_now.dns_tree, "%s", strchr(net->tree, '@') + 1);
     load_known_networks();
-    /* A transaction still waiting from last time: same bytes, same hash. */
-    if ((f = fopen(pending_path, "r"))) {
-        char hex[2 * sizeof pending + 4];
-        size_t n = 0;
-        unsigned v;
-        if (fgets(hex, sizeof hex, f))
-            while (n < sizeof pending && sscanf(hex + 2 * n, "%2x", &v) == 1) pending[n++] = (uint8_t)v;
-        fclose(f);
-        if (n > 1) {
-            pending_len = n;
-            ok_keccak256(pending, n, pending_hash);
-        }
-    }
-    if (pending_len && (f = fopen(from_path, "r"))) {
-        unsigned long long v;
-        if (fscanf(f, "%llu", &v) == 1) watch_from = v;
-        fclose(f);
-    }
-}
-
-static void save_watch_from(void)
-{
-    FILE *f = fopen(from_path, "w");
-    if (!f) return;
-    fprintf(f, "%llu\n", (unsigned long long)watch_from);
-    fclose(f);
 }
 
 int ok_dsi_net_take_included(uint8_t hash[32], uint64_t *block)
@@ -202,41 +173,6 @@ int ok_dsi_net_pending(uint8_t hash[32])
     return pending_len != 0;
 }
 
-/* The next nonce, read only: it is used up (ok_dsi_net_commit_nonce) only
- * once a transaction with it was really signed, so a failed signature never
- * leaves a gap that would block every later transaction. */
-uint64_t ok_dsi_net_peek_nonce(void)
-{
-    unsigned long long nonce = 0;
-    FILE *f = fopen(nonce_path, "r");
-    if (f) {
-        if (fscanf(f, "%llu", &nonce) != 1) nonce = 0;
-        fclose(f);
-    }
-    return nonce;
-}
-
-/* Written to a new file, then swapped in: a power cut never leaves it empty. */
-void ok_dsi_net_commit_nonce(uint64_t used)
-{
-    char tmp[56];
-    FILE *f;
-    snprintf(tmp, sizeof tmp, "%.50s.tmp", nonce_path);
-    if (!(f = fopen(tmp, "w"))) return;
-    fprintf(f, "%llu\n", (unsigned long long)used + 1);
-    if (fclose(f) == 0) {
-        remove(nonce_path);
-        rename(tmp, nonce_path);
-    }
-}
-
-uint64_t ok_dsi_net_take_nonce(void)
-{
-    uint64_t n = ok_dsi_net_peek_nonce();
-    ok_dsi_net_commit_nonce(n);
-    return n;
-}
-
 /* 1 if this transaction hash is in included-<network>.txt (seen in a block). */
 int ok_dsi_net_was_included(const uint8_t hash[32])
 {
@@ -254,25 +190,19 @@ int ok_dsi_net_was_included(const uint8_t hash[32])
     return 0;
 }
 
-void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32])
+void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32], uint64_t from)
 {
-    FILE *f;
-    size_t i;
     if (n > sizeof pending) return;
     memcpy(pending, tx, n);
     memcpy(pending_hash, hash, 32);
     pending_len = n;
     handed = 0;
-    watch_from = 0;
-    remove(from_path);
+    watch_from = from;
     ok_facts_now.incl_state = 0;
     ok_facts_now.blocks_checked = 0;
-    if ((f = fopen(pending_path, "w"))) {
-        for (i = 0; i < n; i++) fprintf(f, "%02x", pending[i]);
-        fprintf(f, "\n");
-        fclose(f);
-    }
 }
+
+uint64_t ok_dsi_net_watch_from(void) { return pending_len ? watch_from : 0; }
 
 /* A public node says the account has used this nonce: the pending one got
  * into a block the console never watched. It stops being handed out (and
@@ -283,8 +213,6 @@ void ok_dsi_net_forget(void)
     pending_len = 0;
     handed = 0;
     watch_from = 0;
-    remove(pending_path);
-    remove(from_path);
     ok_facts_now.incl_state = 0;
     ok_facts_log(ok_dsi_uptime(), 'E', "pending let go: a public node says its nonce is used");
 }
@@ -910,7 +838,6 @@ static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
     }
     if (c->root_ok) { /* a body that does not match its header gets asked for again */
         watch_from = h->number + 1;
-        save_watch_from();
     }
     line(LINES - 2, "Block %llu: %u txs, root %s", (unsigned long long)h->number, (unsigned)c->count,
          c->root_ok ? "ok" : "BAD");
@@ -940,8 +867,6 @@ static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
     included_block = h->number;
     included_event = 1;
     pending_len = 0;
-    remove(pending_path);
-    remove(from_path);
     {
         char text[48];
         snprintf(text, sizeof text, "In block %llu!", (unsigned long long)h->number);
@@ -1055,7 +980,6 @@ static int dial(int i, int row)
     /* Where to start looking: the head when it was first handed over. */
     if (pending_len && rep.tx_written && !watch_from && rep.remote.latest) {
         watch_from = rep.remote.latest;
-        save_watch_from();
     }
     /* A node that hangs up "too many peers" right after Status drops what
      * it was given: written to the socket is not taken. Only a session that

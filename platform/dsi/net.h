@@ -25,9 +25,13 @@ const char (*ok_dsi_net_lines(void))[33];
 void ok_dsi_net_files(const char *dir);
 const char *ok_dsi_net_name(void);
 
-/* A signed transaction to deliver: kept on the SD card and handed to every
- * node that reaches Status (even a full one), until replaced. */
-void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32]);
+/* A signed transaction to deliver, handed to every node that keeps us until
+ * a block holds it. The caller has already saved it (okupa_state.h): the
+ * postman keeps it in memory only. from: the block to start looking from
+ * (0: the head of the first node that takes it). */
+void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32], uint64_t from);
+/* Where the postman is looking for it now, to save with it (0: none). */
+uint64_t ok_dsi_net_watch_from(void);
 int ok_dsi_net_pending(uint8_t hash[32]); /* 1 if one is waiting */
 int ok_dsi_net_handed(void);               /* nodes it was handed to */
 /* Let the pending one go (a public node says its nonce was used). */
@@ -36,11 +40,6 @@ uint64_t ok_dsi_net_chain_id(void);
 /* One-shot: the pending transaction was seen in a block (header hash and
  * transactions root recomputed on the console). Clears the pending one. */
 int ok_dsi_net_take_included(uint8_t hash[32], uint64_t *block);
-/* The account's next nonce, counted on the console (nonce-<network>.txt). */
-uint64_t ok_dsi_net_take_nonce(void);
-/* Read the next nonce; use it up only after a successful signature. */
-uint64_t ok_dsi_net_peek_nonce(void);
-void ok_dsi_net_commit_nonce(uint64_t used);
 /* 1 if this hash was seen in a block (included-<network>.txt). */
 int ok_dsi_net_was_included(const uint8_t hash[32]);
 

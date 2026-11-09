@@ -9,7 +9,7 @@ BUILD_ID ?= unknown
 
 SECP := third_party/secp256k1
 BEAR := third_party/bearssl
-CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/mind.c game/src/instinct.c game/src/think.c game/src/memory.c game/src/make.c game/src/jsonrpc.c game/src/balance.c game/src/facts.c game/src/tech.c third_party/qrcodegen/qrcodegen.c game/src/plant_art.c game/src/sky_art.c \
+CORE := $(wildcard core/src/*.c) game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/state.c game/src/mind.c game/src/instinct.c game/src/think.c game/src/memory.c game/src/make.c game/src/jsonrpc.c game/src/balance.c game/src/facts.c game/src/tech.c third_party/qrcodegen/qrcodegen.c game/src/plant_art.c game/src/sky_art.c \
         third_party/tiny_sha3/sha3.c platform/dsi/main.c platform/dsi/net.c platform/dsi/account.c platform/dsi/audio.c platform/dsi/mind.c platform/dsi/senses.c game/src/music.c
 SECP_SRC := $(SECP)/src/secp256k1.c $(SECP)/src/precomputed_ecmult.c $(SECP)/src/precomputed_ecmult_gen.c
 BEAR_SRC := $(shell find $(BEAR)/src -name '*.c')

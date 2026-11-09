@@ -11,7 +11,7 @@
 #include "okupa_font.h"
 #include "okupa_house.h"
 #include "okupa_monkey.h"
-#include "okupa_save.h"
+#include "okupa_state.h"
 #include "okupa_facts.h"
 #include "okupa_keys.h"
 #include "okupa_tech.h"
@@ -32,7 +32,7 @@ static uint16_t back[2][OK_UI_W * OK_UI_H];
 static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
-static char save_path[40], temp_path[40], net_dir[40], key_path[40], look_path[40], wall_path[40], sent_path[40];
+static char net_dir[40], key_path[40], look_path[40];
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -119,29 +119,14 @@ static int open_storage(void)
     if (!fatInitDefault()) return 0;
     for (i = 0; i < sizeof roots / sizeof roots[0]; i++) {
         if (stat(roots[i], &st) || !S_ISDIR(st.st_mode)) continue;
-        snprintf(save_path, sizeof save_path, "%sokupa", roots[i]);
-        mkdir(save_path, 0700);
-        snprintf(save_path, sizeof save_path, "%sokupa/save.bin", roots[i]);
-        snprintf(temp_path, sizeof temp_path, "%sokupa/save.tmp", roots[i]);
+        snprintf(net_dir, sizeof net_dir, "%sokupa", roots[i]);
+        mkdir(net_dir, 0700);
         snprintf(net_dir, sizeof net_dir, "%sokupa/", roots[i]);
         snprintf(key_path, sizeof key_path, "%sokupa/account.key", roots[i]);
         snprintf(look_path, sizeof look_path, "%sokupa/look.txt", roots[i]);
-        snprintf(wall_path, sizeof wall_path, "%sokupa/wall.bin", roots[i]);
-        snprintf(sent_path, sizeof sent_path, "%sokupa/drawing-sent.bin", roots[i]);
         return 1;
     }
     return 0;
-}
-
-static int load_file(const char *path, ok_pet *p, uint8_t drawing[512])
-{
-    uint8_t buf[OK_SAVE_SIZE + 1];
-    size_t n;
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    n = fread(buf, 1, sizeof buf, f);
-    fclose(f);
-    return ok_save_read(buf, n, p, drawing) == OK_OK;
 }
 
 /* What the okupa wears: three small numbers in a text file of its own. */
@@ -167,67 +152,64 @@ static int save_look(const ok_look *look)
     return fclose(f) == 0 && ok;
 }
 
-/* Write a new file, then swap it in. If the power goes in between, the
- * temporary copy is complete and loading falls back to it. */
-static int save(const ok_pet *p, const uint8_t drawing[512])
-{
-    uint8_t buf[OK_SAVE_SIZE];
-    FILE *f;
-    int ok;
-    ok_save_write(p, drawing, buf);
-    if (!(f = fopen(temp_path, "wb"))) return 0;
-    ok = fwrite(buf, 1, sizeof buf, f) == sizeof buf;
-    ok = fclose(f) == 0 && ok;
-    if (!ok) return 0;
-    remove(save_path);
-    return rename(temp_path, save_path) == 0;
-}
-
 /* ---- The wall: drawings hung once the console saw them in a block ------------- */
 
-/* The drawing on its way: its pixels and its transaction hash, kept on the SD
- * card so it still gets hung after a restart. */
-static uint8_t sent_pixels[512], sent_hash[32];
-static int sent_waiting, hang_waiting;
 
-static void load_wall(ok_ui *u)
+/* Everything that must survive a power cut, in one snapshot that two files
+ * take turns holding (okupa_state.h). A transaction is saved there, with the
+ * nonce moved on, before the postman sees it; a retry, even after a restart,
+ * sends exactly the same bytes. */
+static ok_state state;
+static ok_state_store store;
+static int state_ready; /* saving works */
+static int send_ok;     /* and sending too: the snapshot is for this network */
+static int hang_waiting;
+
+static int drawing_waiting(void) { return state.tx_kind == OK_TX_PICTURE && state.tx_len; }
+
+/* The wall as the screen shows it: the drawings, 1 bit a pixel. */
+static void wall_to_ui(ok_ui *u)
 {
-    FILE *f;
-    if ((f = fopen(wall_path, "rb"))) {
-        uint8_t n = 0;
-        if (fread(&n, 1, 1, f) == 1 && n <= OK_UI_WALL && fread(u->wall, 512, n, f) == n) u->wall_count = n;
-        fclose(f);
-    }
-    if ((f = fopen(sent_path, "rb"))) {
-        sent_waiting = fread(sent_hash, 1, 32, f) == 32 && fread(sent_pixels, 1, 512, f) == 512;
-        fclose(f);
-        u->drawing_sent = sent_waiting;
-        if (sent_waiting) memcpy(u->drawing, sent_pixels, 512);
-    }
+    int i;
+    u->wall_count = 0;
+    for (i = 0; i < state.wall_count && u->wall_count < OK_UI_WALL; i++)
+        if (state.wall_kind[i] == OK_PIC_DRAWING) memcpy(u->wall[u->wall_count++], state.wall[i], 512);
 }
 
-static void save_wall(const ok_ui *u)
+/* The live game into the snapshot, saved and read back. 1 if it is on the SD. */
+static int keep(const ok_ui *u, const ok_pet *p)
 {
-    FILE *f = fopen(wall_path, "wb");
-    uint8_t n = (uint8_t)u->wall_count;
-    if (!f) return;
-    fwrite(&n, 1, 1, f);
-    fwrite(u->wall, 512, n, f);
-    fclose(f);
+    if (!state_ready) return 0;
+    state.pet = *p;
+    if (!u->drawing_sent) memcpy(state.page, u->drawing, 512);
+    if (state.tx_len && ok_dsi_net_watch_from()) state.watch_from = ok_dsi_net_watch_from();
+    return ok_state_save(&store, &state);
 }
 
-static void hang(ok_ui *u)
+static void forget_tx(void)
 {
-    if (u->wall_count == OK_UI_WALL) { /* full: the oldest comes down */
-        memmove(u->wall[0], u->wall[1], 512 * (OK_UI_WALL - 1));
-        u->wall_count--;
+    state.tx_kind = OK_TX_NONE;
+    state.tx_len = 0;
+    state.tx_pic_kind = OK_PIC_NONE;
+    state.watch_from = 0;
+}
+
+/* The drawing on its way was seen in a block: up on the wall (the oldest
+ * comes down when it is full), and a fresh page. */
+static void hang(ok_ui *u, const ok_pet *p)
+{
+    if (state.wall_count == OK_STATE_WALL) {
+        memmove(state.wall[0], state.wall[1], sizeof state.wall[0] * (OK_STATE_WALL - 1));
+        memmove(state.wall_kind, state.wall_kind + 1, OK_STATE_WALL - 1);
+        state.wall_count--;
     }
-    memcpy(u->wall[u->wall_count++], sent_pixels, 512);
-    save_wall(u);
-    sent_waiting = 0;
-    remove(sent_path);
+    state.wall_kind[state.wall_count] = state.tx_pic_kind ? state.tx_pic_kind : OK_PIC_DRAWING;
+    memcpy(state.wall[state.wall_count++], state.tx_pic, OK_STATE_PICTURE);
+    forget_tx();
+    wall_to_ui(u);
     u->drawing_sent = 0;
-    memset(u->drawing, 0, sizeof u->drawing); /* a fresh page */
+    memset(u->drawing, 0, sizeof u->drawing);
+    keep(u, p);
 }
 
 /* The machine's own facts, and the core's timed checks for the DSi page. */
@@ -409,9 +391,11 @@ static void balance_take(ok_ui *u)
         /* A transaction still "on its way" whose nonce the node says is used
          * got into a block the console never saw: let it go, so the next one
          * can be sent. A drawing waits for the console's own proof. */
-        if (ok_dsi_mind_balance_nonce(&used) && ok_dsi_net_pending(h) && !sent_waiting &&
-            used >= ok_dsi_net_peek_nonce()) {
+        if (ok_dsi_mind_balance_nonce(&used) && ok_dsi_net_pending(h) && !drawing_waiting() &&
+            used >= state.next_nonce) {
             ok_dsi_net_forget();
+            forget_tx();
+            keep(u, shown_pet);
             snprintf(balance_said, sizeof balance_said, "My last one got in! A public node says so.");
             u->say = balance_said;
             u->say_ticks = 60 * 6;
@@ -459,7 +443,6 @@ int main(void)
     int comment_wanted = 0;            /* a drawing for 0G to look at: 1 Done, 2 a gallery picture, 3 just sent */
     static uint8_t comment_px[512];
     char game_guess[OK_MIND_TEXT + 1] = "";
-    static uint8_t saved[OK_SAVE_SIZE], current[OK_SAVE_SIZE];
     struct tm *tm;
     touchPosition touch;
     static ok_pet pet;
@@ -510,27 +493,45 @@ int main(void)
     boot_step = "SD card";
     storage = open_storage();
     if (storage) {
-        if (load_file(save_path, &pet, ui.drawing) || load_file(temp_path, &pet, ui.drawing)) {
-            save_status = "Save: loaded from SD";
-            ok_pet_update(&pet, (int64_t)now); /* live the time it was off */
-        } else {
-            save_status = "Save: new okupa on SD";
-        }
+        int opened;
         boot_step = "SD files";
         load_look(&ui.look);
         ok_dsi_net_files(net_dir);
-        load_wall(&ui);
+        opened = ok_state_open(&store, net_dir, &state);
+        if (opened == 1) {
+            state_ready = 1;
+            save_status = store.fell_back ? "Save: last save was cut, older kept" : "Save: loaded from SD";
+        } else if (opened == 0) { /* none yet: this okupa, and the files of older versions if any */
+            int found;
+            memset(&state, 0, sizeof state);
+            state.pet = pet;
+            found = ok_state_import(net_dir, ok_dsi_net_name(), &state);
+            state.chain_id = ok_dsi_net_chain_id();
+            state_ready = ok_state_save(&store, &state);
+            save_status = !state_ready ? "Save: FAILED to write SD" : found ? "Save: old files moved in" : "Save: new okupa on SD";
+        } else {
+            save_status = "Save: files damaged, not touched";
+        }
+        if (state_ready) {
+            pet = state.pet;
+            ok_pet_update(&pet, (int64_t)now); /* live the time it was off */
+            memcpy(ui.drawing, state.page, 512);
+            wall_to_ui(&ui);
+            send_ok = state.chain_id == ok_dsi_net_chain_id();
+            if (!send_ok) save_status = "Save: from another network";
+        }
         ok_dsi_account_open(key_path, &ui); /* the key is there from the start, not only after Dev > Wallet */
-        /* A drawing waiting from last time with nothing pending any more: it
-         * was seen in a block (hang it now) or it never got posted (free the page). */
-        {
-            uint8_t h[32];
-            if (sent_waiting && !ok_dsi_net_pending(h)) {
-                if (ok_dsi_net_was_included(sent_hash)) hang(&ui);
-                else {
-                    sent_waiting = 0;
-                    ui.drawing_sent = 0;
-                    remove(sent_path);
+        /* The transaction on its way: seen in a block meanwhile (hang it now),
+         * or handed out again, the very same bytes. */
+        if (send_ok && state.tx_len) {
+            if (ok_dsi_net_was_included(state.tx_hash)) {
+                if (drawing_waiting()) hang(&ui, &pet);
+                else forget_tx(), keep(&ui, &pet);
+            } else {
+                ok_dsi_net_send(state.tx, state.tx_len, state.tx_hash, state.watch_from);
+                if (drawing_waiting()) {
+                    ui.drawing_sent = 1;
+                    memcpy(ui.drawing, state.tx_pic, 512);
                 }
             }
         }
@@ -553,7 +554,6 @@ int main(void)
     local_did = "turned the console on";
     /* The network and the mind start once the intro is over: their crypto
      * shares this one CPU and the film needs all of it. */
-    ok_save_write(&pet, ui.drawing, saved);
     worn = ui.look;
     frame_at = cpuGetTiming();
     boot_step = "running";
@@ -599,11 +599,13 @@ int main(void)
             uint64_t inc_block;
             if (ok_dsi_net_take_included(inc_hash, &inc_block)) {
                 static char said[48];
-                if (sent_waiting && !memcmp(inc_hash, sent_hash, 32)) {
+                if (drawing_waiting() && !memcmp(inc_hash, state.tx_hash, 32)) {
                     hang_waiting = 1; /* hung below, in front of the player (not behind SELECT) */
                     snprintf(said, sizeof said, "Block %lu has my drawing. On the wall!", (unsigned long)inc_block);
                 } else {
                     snprintf(said, sizeof said, "My last one is in block %lu!", (unsigned long)inc_block);
+                    forget_tx();
+                    keep(&ui, &pet);
                 }
                 ui.say = said;
                 ui.say_ticks = 600;
@@ -613,7 +615,7 @@ int main(void)
         }
         balance_take(&ui);
         if (hang_waiting) { /* at once: a power cut before it hangs must not lose it */
-            hang(&ui);
+            hang(&ui, &pet);
             hang_waiting = 0;
         }
         if (now != last) {
@@ -671,7 +673,7 @@ int main(void)
                 uint8_t hash[32];
                 if (ok_dsi_net_pending(hash))
                     snprintf(ui.wallet_status, sizeof ui.wallet_status, "%s %02x%02x%02x%02x: %d nodes",
-                             sent_waiting ? "Drawing" : "Hello", hash[0], hash[1], hash[2], hash[3], ok_dsi_net_handed());
+                             drawing_waiting() ? "Drawing" : "Tx", hash[0], hash[1], hash[2], hash[3], ok_dsi_net_handed());
             }
         }
         /* The okupa's mind on 0G lives in its own thread: tell it what the
@@ -1297,33 +1299,44 @@ int main(void)
             }
             if (r == OK_UI_SEND_DRAWING && storage) {
                 static uint8_t tx[700];
+                static ok_state before;
                 uint8_t hash[32];
                 size_t len;
-                FILE *f;
                 if (!ui.wallet_ready) {
                     ui.say = "I need my key first: Dev > Wallet.";
                     ui.say_ticks = 300;
-                } else if (ok_dsi_net_pending(hash)) {
+                } else if (!send_ok) {
+                    ui.say = "My save files need a look first: nothing sent.";
+                    ui.say_ticks = 300;
+                } else if (state.tx_len) {
                     ui.say = "One at a time: my last one is still on its way.";
                     ui.say_ticks = 300;
-                } else if (ok_dsi_account_act(ok_dsi_net_chain_id(), ok_dsi_net_peek_nonce(), ui.drawing, tx, sizeof tx,
-                                              &len, hash)) {
-                    ok_dsi_net_commit_nonce(ok_dsi_net_peek_nonce()); /* used up only once really signed */
-                    /* What the drawing is waiting for goes on the SD first, so a
-                     * power cut never leaves a pending drawing nobody hangs. */
-                    memcpy(sent_pixels, ui.drawing, 512);
-                    memcpy(sent_hash, hash, 32);
-                    if ((f = fopen(sent_path, "wb"))) {
-                        fwrite(sent_hash, 1, 32, f);
-                        fwrite(sent_pixels, 1, 512, f);
-                        fclose(f);
-                    }
-                    ok_dsi_net_send(tx, len, hash);
-                    ok_facts_log(ok_dsi_uptime(), 'E', "signed drawing %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
-                    sent_waiting = 1;
+                } else if (ok_dsi_account_act(state.chain_id, state.next_nonce, ui.drawing, tx, sizeof tx, &len, hash)) {
+                    /* Saved first, the nonce moved on; only then the postman
+                     * sees it. A save that fails means it was never sent. */
+                    before = state;
+                    state.tx_kind = OK_TX_PICTURE;
+                    state.tx_len = (uint16_t)len;
+                    memcpy(state.tx, tx, len);
+                    memcpy(state.tx_hash, hash, 32);
+                    state.tx_pic_kind = OK_PIC_DRAWING;
+                    memset(state.tx_pic, 0, sizeof state.tx_pic);
+                    memcpy(state.tx_pic, ui.drawing, 512);
+                    state.next_nonce++;
+                    state.watch_from = 0;
                     ui.drawing_sent = 1;
-                    memcpy(comment_px, ui.drawing, sizeof comment_px); /* its mind on 0G looks at the drawing and says something */
-                    comment_wanted = 3;
+                    if (keep(&ui, &pet)) {
+                        ok_dsi_net_send(state.tx, state.tx_len, state.tx_hash, 0);
+                        ok_facts_log(ok_dsi_uptime(), 'E', "signed drawing %02x%02x%02x%02x", hash[0], hash[1], hash[2],
+                                     hash[3]);
+                        memcpy(comment_px, ui.drawing, sizeof comment_px); /* its mind on 0G looks at it and says something */
+                        comment_wanted = 3;
+                    } else {
+                        state = before;
+                        ui.drawing_sent = 0;
+                        ui.say = "I couldn't save it, so I didn't send it.";
+                        ui.say_ticks = 300;
+                    }
                 }
             }
             if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
@@ -1349,16 +1362,11 @@ int main(void)
         }
         /* Save what the player changed once the stylus is up, and the passing
          * time every five minutes; never more than once every two seconds. */
-        if (storage && !held && now - saved_at >= 2) {
-            ok_save_write(&pet, ui.drawing, current);
-            if (memcmp(current, saved, 5 + OK_NEEDS + 1) || memcmp(current + OK_SAVE_SIZE - 516, saved + OK_SAVE_SIZE - 516, 512) ||
-                now - saved_at >= 300) {
-                if (save(&pet, ui.drawing)) {
-                    memcpy(saved, current, sizeof saved);
-                    save_status = "Save: saved to SD";
-                } else {
-                    save_status = "Save: FAILED to write SD";
-                }
+        if (storage && state_ready && !held && now - saved_at >= 2) {
+            /* The needs, sleep or the page changed (or five minutes went by): saved. */
+            if (memcmp(state.pet.need, pet.need, OK_NEEDS) || state.pet.asleep != pet.asleep ||
+                (!ui.drawing_sent && memcmp(state.page, ui.drawing, 512)) || now - saved_at >= 300) {
+                save_status = keep(&ui, &pet) ? "Save: saved to SD" : "Save: FAILED to write SD";
                 saved_at = now;
             }
             if (memcmp(&worn, &ui.look, sizeof worn) && save_look(&ui.look)) worn = ui.look;
