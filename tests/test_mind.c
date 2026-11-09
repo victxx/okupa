@@ -112,18 +112,10 @@ int main(void)
     assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
                  "\\\"x\\\":-1,\\\"gaze\\\":\\\"moon\\\"}", &d) == OK_OK);
     assert(d.x == -1 && d.gaze == -1 && !strcmp(ok_mind_gaze_name(d.gaze), "-"));
-    assert(!d.make[0] && !d.draw[0] && !d.letter[0]);
+    assert(!d.make[0] && !d.draw[0]);
     assert(parse("{\\\"activity\\\":\\\"play\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
-                 "\\\"make\\\":\\\"a paper boat\\\",\\\"draw\\\":\\\"the moon\\\","
-                 "\\\"letter\\\":\\\"Dear Victor, thank you.\\\"}", &d) == OK_OK);
-    assert(!strcmp(d.make, "a paper boat") && !strcmp(d.draw, "the moon") && !strcmp(d.letter, "Dear Victor, thank you."));
-    /* The mainnet answer of 2026-11-07, too long: it ends on its last whole sentence. */
-    assert(parse("{\\\"activity\\\":\\\"eat\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
-                 "\\\"letter\\\":\\\"My dear Player, I am Okupa! I saw your request. It is night in Mumbai. I am "
-                 "eating a berry and thinking of you. Your DS is my warm home. Thank you for letting me stay. Come back "
-                 "soon!\\\"}", &d) == OK_OK);
-    assert(!strcmp(d.letter, "My dear Player, I am Okupa! I saw your request. It is night in Mumbai. I am eating a "
-                             "berry and thinking of you. Your DS is my warm home."));
+                 "\\\"make\\\":\\\"a paper boat\\\",\\\"draw\\\":\\\"the moon\\\"}", &d) == OK_OK);
+    assert(!strcmp(d.make, "a paper boat") && !strcmp(d.draw, "the moon"));
     assert(parse("{\\\"activity\\\":\\\"go_outside\\\",\\\"mood\\\":\\\"bored\\\",\\\"line\\\":\\\"\\\"}", &d) == OK_OK);
     assert(d.activity == OK_MIND_GO_OUTSIDE && !d.line[0]); /* quiet is allowed */
     ok_mind_memory(&d, memory);

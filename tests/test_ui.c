@@ -30,13 +30,13 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && p.asleep);
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Zzz... (it's sleeping)"));
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && !p.asleep);
-    /* No mind: one menu (Feed..Sleep, Draw, Gallery, Mail, Dev), no tabs, no dead buttons. */
+    /* No mind: one menu (Feed..Sleep, Draw, Gallery, Dev), no tabs, no dead buttons. */
     assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_NOTHING);
-    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_MAIL);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 97, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GALLERY);
     assert(ok_ui_touch(&u, &p, 210, 175, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME); /* Back */
-    /* Everything wired: Talk, Photo on the first menu; Games, Mail, Friend, Dev on More. */
-    u.wired = OK_UI_HAS_PHOTO | OK_UI_HAS_TALK | OK_UI_HAS_GAMES | OK_UI_HAS_MAIL | OK_UI_HAS_FRIEND;
+    /* Everything wired: Talk, Photo on the first menu; Games, Friend, Dev on More. */
+    u.wired = OK_UI_HAS_PHOTO | OK_UI_HAS_TALK | OK_UI_HAS_GAMES | OK_UI_HAS_FRIEND;
     assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK && u.scene == OK_UI_HOME);
     assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_PHOTO);
     assert(ok_ui_touch(&u, &p, 161, 157, 0, t) == OK_UI_CHANGED && u.page == 1); /* More */
@@ -44,8 +44,7 @@ int main(void)
     assert(u.scene == OK_UI_SKETCH && u.pictionary); /* Pictionary: its own page in the sketchbook */
     u.scene = OK_UI_HOME;
     u.pictionary = 0;
-    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_MAIL);
-    assert(ok_ui_touch(&u, &p, 159, 60, 0, t) == OK_UI_FRIEND);
+    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_FRIEND);
     assert(ok_ui_touch(&u, &p, 95, 157, 0, t) == OK_UI_CHANGED && u.page == 0); /* Care */
     u.wired = 0;
     ok_facts_now.og_features = 1 | 2 | 8; /* the mind hears and plays, no camera */
@@ -71,15 +70,15 @@ int main(void)
     inked = 0;
     /* Dreams configured: Dream is there with no dream yet, and asks for one; one kept is shown meanwhile. */
     ok_facts_now.og_features = 16;
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && !u.dream_ticks);
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_DREAM && !u.dream_ticks);
     {
         static uint16_t sky[4] = {0x8000, 0x801f, 0x83e0, 0xfc00};
         ok_ui_dream_keep(&u, sky, 2, 2);
         assert(u.dream_w == 2 && !u.dream_ticks);
-        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && u.dream_ticks);
-        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && !u.dream_ticks); /* a tap puts it away */
+        assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_DREAM && u.dream_ticks);
+        assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_CHANGED && !u.dream_ticks); /* a tap puts it away */
         ok_facts_now.og_features = 0;
-        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && u.dream_ticks); /* no mind: the kept one only */
+        assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_CHANGED && u.dream_ticks); /* no mind: the kept one only */
         u.dream_ticks = 0;
         u.dream_w = u.dream_h = 0;
     }
@@ -127,12 +126,12 @@ int main(void)
     u.scene = OK_UI_HOME;
 
     /* Dev (on the second menu) asks the platform to run the checks; Back returns. */
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Wi-Fi from Dev: search, pick a secured network, type its password. */
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS);
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_RUN_CHECKS);
     assert(ok_ui_touch(&u, &p, 90, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
     u.ap_count = 2;
     strcpy(u.aps[0].ssid, "iPhone de Okupa");
@@ -179,7 +178,6 @@ int main(void)
     ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom); /* the QR is encoded once, then reused */
     assert(ok_ui_touch(&u, &p, 100, 60, 0, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 150, 176, 0, t) == OK_UI_CHANGED && !u.wallet_qr);
-    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_WALLET_HELLO);
     assert(ok_ui_touch(&u, &p, 50, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DEV);

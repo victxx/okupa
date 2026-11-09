@@ -5,9 +5,10 @@
 A small monkey moved into a 2009 Nintendo DSi without asking. It lives in the
 attic, has needs, sleeps, dreams and talks to you. Its mind runs on 0G Compute,
 and the console checks each answer's TEE signature before it believes it. The
-console is also a small Ethereum peer of its own: it signs your drawings and its
-letters and hands them to mainnet nodes over devp2p. There is no RPC on the
-sending path.
+console is also a small Ethereum peer of its own: it signs your drawings and
+hands them to mainnet nodes over devp2p. There is no RPC on the sending path.
+
+The state of the ETHGlobal Mumbai entry is kept on the `mumbai26` branch.
 
 Everything is C99 on a 133 MHz ARM9 with 16 MB of RAM and a weak Wi-Fi chip.
 Press **SELECT** on the console to see the real data behind every step:

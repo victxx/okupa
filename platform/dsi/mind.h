@@ -16,9 +16,8 @@
  *             seconds between looks through the camera (default 0: only when asked)
  *   mind.key  hex key that owns the 0G ledger paying the provider
  *   memory.txt  facts its mind chose to keep, one a line (it writes this)
- * Each episode is written to dir/episodes/ as a hash chain (chain.txt holds
- * the last link) for the host to put on 0G Storage. Without settings, Wi-Fi
- * or a verified answer the okupa decides nothing new: nothing is made up. */
+ * Without settings, Wi-Fi or a verified answer the okupa decides nothing
+ * new through 0G: nothing is made up. */
 void ok_dsi_mind_start(const char *dir);
 /* What the okupa notices, from the game loop (cheap: call every frame).
  * did: something the player just did, or NULL; it is told to the mind once. */
@@ -70,10 +69,8 @@ int ok_dsi_mind_guess(const uint8_t pixels[512]);
 int ok_dsi_mind_comment(const uint8_t pixels[512]);
 /* The drawing the last comment was asked about (what its card must show). */
 const uint8_t *ok_dsi_mind_comment_pixels(void);
-/* What it makes, dreams and writes, once each: an object out of boxes, its
- * own 64x64 drawing, last night's dream picture (DS colours) and a letter to
- * send on Ethereum. ok_dsi_mind_letters: whether it may write one now (the
- * game loop keeps the cap: one a day, none while another is pending). */
+/* What it makes and dreams, once each: an object out of boxes, its own
+ * 64x64 drawing and last night's dream picture (DS colours). */
 #include "okupa_make.h"
 int ok_dsi_mind_take_object(ok_object *o);
 int ok_dsi_mind_take_drawing(uint8_t pixels[512], char name[21]);
@@ -82,8 +79,6 @@ const uint16_t *ok_dsi_mind_take_dream(int *w, int *h, const char **about, int *
  * model); one every five minutes, the result as OK_DSI_DREAM. take_dream's
  * quiet: the last dream, read back at start (for the menu, not shown). */
 void ok_dsi_mind_dream_now(void);
-int ok_dsi_mind_take_letter(char text[141]);
-void ok_dsi_mind_letters(int allowed);
 /* 1 once per new verified decision (with its line, thought, question). */
 int ok_dsi_mind_take(ok_mind *d); /* 2: it answers what the player said, 1 any other */
 /* Lines for the Dev screen. */

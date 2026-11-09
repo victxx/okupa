@@ -143,7 +143,7 @@ static void note_tx(const ok_tx *tx, const uint8_t *raw, size_t len, const uint8
  * unit of gas (today's base fee is far below), on a gas limit just above what
  * the act needs, so the most it can ever cost is gas_limit x 2 gwei. */
 static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_t act_len, uint64_t gas_limit,
-                    const uint8_t *to, const char *kind, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])
+                    const char *kind, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])
 {
     char text[80] = {0};
     uint8_t priv[32], pub[64];
@@ -162,8 +162,7 @@ static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_
             tx.max_priority_fee = 100000000ull; /* 0.1 gwei */
             tx.max_fee = 2000000000ull;         /* 2 gwei */
             tx.gas_limit = gas_limit;
-            if (to) memcpy(tx.to, to, 20); /* a letter to a friend's address */
-            else ok_keys_address(pub, tx.to); /* to itself */
+            ok_keys_address(pub, tx.to); /* to itself */
             tx.data = act;
             tx.data_len = act_len;
             t0 = cpuGetTiming();
@@ -177,32 +176,13 @@ static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_
     return ok;
 }
 
-/* A hello, or a drawing when pixels is given. A hello uses 21 210 gas; a
- * drawing about 21 000 + 16 x 518, or the calldata floor (with room for a
- * higher one). */
+/* A drawing: about 21 000 + 16 x 518 gas, or the calldata floor (with room
+ * for a higher one). */
 int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
                        uint8_t hash[32])
 {
     uint8_t act[OK_ACT_MAX];
     size_t act_len;
-    if ((pixels ? ok_act_drawing(pixels, act, sizeof act, &act_len) : ok_act_hello(act, sizeof act, &act_len)) != OK_OK)
-        return 0;
-    return sign_act(chain_id, nonce, act, act_len, pixels ? 60000 : 30000, NULL, pixels ? "drawing" : "hello", out, cap, len,
-                    hash);
-}
-
-/* A letter the okupa's mind wrote: up to 140 bytes need at most 21 000 +
- * 40 x 146 = 26 840 gas (the calldata floor); 40 000 leaves room. */
-int ok_dsi_account_letter(uint64_t chain_id, uint64_t nonce, const char *text, const uint8_t *to, uint8_t *out,
-                          size_t cap, size_t *len, uint8_t hash[32])
-{
-    uint8_t act[OK_ACT_HEADER + OK_LETTER_MAX];
-    size_t act_len;
-    if (ok_act_letter(text, act, sizeof act, &act_len) != OK_OK) return 0;
-    return sign_act(chain_id, nonce, act, act_len, 40000, to, "letter", out, cap, len, hash);
-}
-
-int ok_dsi_account_hello(uint64_t chain_id, uint64_t nonce, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])
-{
-    return ok_dsi_account_act(chain_id, nonce, NULL, out, cap, len, hash);
+    if (!pixels || ok_act_drawing(pixels, act, sizeof act, &act_len) != OK_OK) return 0;
+    return sign_act(chain_id, nonce, act, act_len, 60000, "drawing", out, cap, len, hash);
 }

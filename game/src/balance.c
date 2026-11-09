@@ -1,5 +1,5 @@
 #include "okupa_balance.h"
-#include "okupa_store.h"
+#include "okupa_jsonrpc.h"
 #include <stdio.h>
 #include <string.h>
 

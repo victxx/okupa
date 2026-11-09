@@ -4,7 +4,6 @@
 #include "okupa_memory.h"
 #include "okupa_png.h"
 #include "senses.h"
-#include "okupa_store.h"
 #include "okupa_facts.h"
 #include "okupa_ui.h"
 #include "okupa_keccak.h"
@@ -68,14 +67,14 @@ static ok_think *tp;
 /* One TLS state per provider host, so each keeps its session for the next
  * connection: a resumed handshake skips the certificate chain and the key
  * exchange, the part that would hold the ARM9 for hundreds of ms. */
-#define TLS_HOSTS 5 /* chat, ears, dreams, the 0G chain, the balance */
+#define TLS_HOSTS 4 /* chat, ears, dreams, the balance */
 TWL_BSS static ok_tls tls_twl[TLS_HOSTS];
 static ok_tls *tls_by_host = tls_twl, *tlsp = tls_twl;
 static int tls_hosts = TLS_HOSTS;
 #define tls (*tlsp)
-TWL_BSS static char episode_twl[224 * 1024]; /* a hearing keeps its audio in base64 (~110 KB); a batch's upload body */
-static char *episode;
-static size_t episode_cap;
+TWL_BSS static char scratch_twl[16 * 1024]; /* JSON-RPC answers for the wallet's balance */
+static char *scratch;
+static size_t scratch_cap;
 static char recent[OK_MIND_RECENT][OK_MIND_MEMORY];
 static int recent_count;
 
@@ -97,8 +96,7 @@ static char want_make[41], want_draw[41];
 static ok_object made;
 static uint8_t drew[512];
 static char drew_name[21];
-static char letter[141];
-static volatile int made_new, drew_new, letter_new, dream_new, letters_ok;
+static volatile int made_new, drew_new, dream_new;
 TWL_BSS static uint16_t dream_px[128 * 128];
 static int dream_w, dream_h;
 static char dream_about[OK_MIND_DREAM + 1];
@@ -149,17 +147,6 @@ static int balance_have_nonce;
 TWL_BSS static char sense_twl[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
 static char *sense_buf;
 static size_t sense_cap;
-static char chain[65]; /* sha256 of the last episode written */
-
-/* Episodes waiting to go to 0G Storage together, one JSON object a line: one
- * submission for many keeps the gas down. */
-#define BATCH_MAX (160 * 1024) /* its upload body, 4/3 of it, fits in episode[] */
-TWL_BSS static char batch[BATCH_MAX]; /* DSi mode only: 0G Storage is off in DS mode */
-static size_t batch_len;
-static int batch_count;
-static uint32_t stored_at;
-static int want_store;
-static ok_store store; /* its request bodies go in episode[], free while a batch is stored */
 
 static struct {
     char host[96], provider[48], model[64], ip[20];
@@ -179,12 +166,6 @@ static struct {
     char city[41];
     /* The wallet's balance: a public JSON-RPC node (display only); "off" none. */
     char balance_host[64];
-    /* 0G Storage: store=mainnet turns it on; store_every= minutes between
-     * batches (10); store_node= "ip:port:shard" lines override the nodes. */
-    int store_on;
-    long store_every;
-    char store_node[8][32];
-    int store_nodes;
 } cfg;
 
 static void line(int i, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -332,8 +313,6 @@ void ok_dsi_mind_live(int on) { live = on; }
 void ok_dsi_mind_look_photo(uint16_t out[128 * 96]) { memcpy(out, look_px, sizeof look_px); }
 void ok_dsi_mind_look_quip(char out[49]) { memcpy(out, look_quip, sizeof look_quip); }
 
-void ok_dsi_mind_letters(int allowed) { letters_ok = allowed; }
-
 int ok_dsi_mind_take_object(ok_object *o)
 {
     if (!made_new) return 0;
@@ -348,14 +327,6 @@ int ok_dsi_mind_take_drawing(uint8_t pixels[512], char name[21])
     memcpy(pixels, drew, 512);
     memcpy(name, drew_name, 21);
     drew_new = 0;
-    return 1;
-}
-
-int ok_dsi_mind_take_letter(char text[141])
-{
-    if (!letter_new) return 0;
-    memcpy(text, letter, 141);
-    letter_new = 0;
     return 1;
 }
 
@@ -712,7 +683,6 @@ static int load_settings(uint8_t key[32])
     FILE *f;
     memset(&cfg, 0, sizeof cfg);
     cfg.look_every = 0; /* the camera only when the player asks (look_every= in mind.txt to look now and then) */
-    cfg.store_every = 10;
     snprintf(path, sizeof path, "%smind.txt", dir_path);
     if (!(f = fopen(path, "r"))) return 0;
     while (fgets(text, sizeof text, f)) {
@@ -738,10 +708,6 @@ static int load_settings(uint8_t key[32])
         else if (!strcmp(text, "dream_signer")) cfg.have_dream = unhex(v, cfg.dream_signer, 20);
         else if (!strcmp(text, "city")) snprintf(cfg.city, sizeof cfg.city, "%.40s", v);
         else if (!strcmp(text, "balance_host")) snprintf(cfg.balance_host, sizeof cfg.balance_host, "%.63s", v);
-        else if (!strcmp(text, "store")) cfg.store_on = !strcmp(v, "mainnet");
-        else if (!strcmp(text, "store_every")) cfg.store_every = strtol(v, NULL, 10);
-        else if (!strcmp(text, "store_node") && cfg.store_nodes < 8)
-            snprintf(cfg.store_node[cfg.store_nodes++], sizeof cfg.store_node[0], "%.31s", v);
     }
     fclose(f);
     if (!cfg.host[0] || !cfg.provider[0] || !cfg.model[0] || !have_signer) return 0;
@@ -749,7 +715,6 @@ static int load_settings(uint8_t key[32])
     cfg.have_dream = cfg.have_dream && cfg.dream_host[0] && cfg.dream_provider[0] && cfg.dream_model[0];
     if (!isDSiMode()) { /* DS mode: smaller buffers, no camera */
         cfg.have_dream = 0;
-        cfg.store_on = 0;
         cfg.look_every = 0;
     }
     snprintf(path, sizeof path, "%smind.key", dir_path);
@@ -760,12 +725,6 @@ static int load_settings(uint8_t key[32])
     ok = ok && unhex(text, key, 32);
     ok_wipe(text, sizeof text);
     return ok;
-}
-
-static void hex32(const uint8_t h[32], char out[65])
-{
-    int i;
-    for (i = 0; i < 32; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
 }
 
 /* A file written in 4 KB pieces, letting the game draw between them (the SD
@@ -781,78 +740,6 @@ static int write_slowly(FILE *f, const void *data, size_t n)
         cothread_yield();
     }
     return 1;
-}
-
-/* The episode goes to the SD card as the next link of the chain, and (batch
- * set) into the next 0G Storage batch. Photos and drawings stay on the SD
- * card only: a few of them would fill a batch and send it on its way. */
-static void save_episode(const ok_think_provider *p, uint64_t now_ms, unsigned count, int to_batch)
-{
-    char path[160];
-    uint8_t hash[32];
-    size_t n;
-    FILE *f;
-    int ok;
-    if (ok_think_episode(&t, p, now_ms, chain, episode, episode_cap, &n) != OK_OK) {
-        line(13, "Episode: too big, not saved");
-        return;
-    }
-    if (t.chat_id[0])
-        snprintf(path, sizeof path, "%sepisodes/%.80s.json", dir_path, t.chat_id);
-    else
-        snprintf(path, sizeof path, "%sepisodes/stop-%llu.json", dir_path, (unsigned long long)now_ms);
-    ok = (f = fopen(path, "wb")) != NULL;
-    if (ok) {
-        ok = write_slowly(f, episode, n);
-        ok = fclose(f) == 0 && ok;
-    }
-    if (!ok) {
-        line(13, "Episode: SD write FAILED");
-        return;
-    }
-    {
-        br_sha256_context c; /* in pieces, breathing between them */
-        size_t i;
-        br_sha256_init(&c);
-        for (i = 0; i < n; i += 8192) {
-            br_sha256_update(&c, episode + i, n - i < 8192 ? n - i : 8192);
-            cothread_yield();
-        }
-        br_sha256_out(&c, hash);
-    }
-    /* And into the batch for 0G Storage (one that would not fit waits for
-     * the next batch; one bigger than a batch stays on the SD card only). */
-    if (cfg.store_on && to_batch && n + 1 < BATCH_MAX / 2) {
-        if (batch_len + n + 1 > BATCH_MAX - 256) want_store = 1;
-        else {
-            memcpy(batch + batch_len, episode, n);
-            batch_len += n;
-            batch[batch_len++] = '\n';
-            batch_count++;
-        }
-    }
-    hex32(hash, chain);
-    snprintf(path, sizeof path, "%sepisodes/chain.txt", dir_path);
-    if ((f = fopen(path, "w"))) {
-        fprintf(f, "%s\n", chain);
-        fclose(f);
-    }
-    line(13, "Episode %u on SD, chained", count);
-    feed("episode %u on SD, chained %.8s", count, chain);
-}
-
-static void load_chain(void)
-{
-    char path[64];
-    FILE *f;
-    snprintf(path, sizeof path, "%sepisodes", dir_path);
-    mkdir(path, 0700);
-    snprintf(path, sizeof path, "%sepisodes/chain.txt", dir_path);
-    chain[0] = 0;
-    if ((f = fopen(path, "r"))) {
-        if (!fgets(chain, sizeof chain, f) || strlen(chain) != 64) chain[0] = 0;
-        fclose(f);
-    }
 }
 
 /* The TLS version and suite this connection agreed, short enough for the
@@ -1074,118 +961,6 @@ static void failed(void)
     if (t.net_error == BR_ERR_X509_EXPIRED || t.net_error == BR_ERR_X509_TIME_UNKNOWN) clock_synced = 0, clock_tried_at = 0;
 }
 
-/* Plain HTTP to a storage node, host "ip:port". */
-static int http_fetch(void *ctx, const char *host, const char *head, size_t n, const char *body, size_t len, char *resp,
-                      size_t cap, size_t *got)
-{
-    struct sockaddr_in addr;
-    char name[32], *colon;
-    int nfd, error = 0, k;
-    socklen_t elen = sizeof error;
-    size_t sent;
-    (void)ctx;
-    snprintf(name, sizeof name, "%s", host);
-    if (!(colon = strchr(name, ':'))) return -2;
-    *colon = 0;
-    memset(&addr, 0, sizeof addr);
-    addr.sin_len = sizeof addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)atoi(colon + 1));
-    if (!inet_aton(name, &addr.sin_addr)) return -2;
-    if ((nfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -3;
-    fcntl(nfd, F_SETFL, fcntl(nfd, F_GETFL, 0) | O_NONBLOCK);
-    if ((connect(nfd, (struct sockaddr *)&addr, sizeof addr) && errno != EINPROGRESS) || !wait_for(nfd, POLLOUT, 8000) ||
-        getsockopt(nfd, SOL_SOCKET, SO_ERROR, &error, &elen) || error) {
-        close(nfd);
-        return -3;
-    }
-    for (k = 0; k < 2; k++) {
-        const char *p = k ? body : head;
-        size_t total = k ? len : n;
-        for (sent = 0; sent < total;) {
-            int w;
-            if (!wait_for(nfd, POLLOUT, 10000)) {
-                close(nfd);
-                return -1;
-            }
-            w = send(nfd, p + sent, total - sent > 4096 ? 4096 : total - sent, 0);
-            if (w <= 0) {
-                close(nfd);
-                return -1;
-            }
-            sent += (size_t)w;
-        }
-    }
-    *got = 0;
-    while (*got < cap && wait_for(nfd, POLLIN, 20000)) {
-        int r = recv(nfd, resp + *got, cap - *got, 0);
-        if (r <= 0) break;
-        *got += (size_t)r;
-        if (ok_think_complete(resp, *got)) break;
-    }
-    close(nfd);
-    resp[*got < cap ? *got : cap - 1] = 0;
-    return *got ? 0 : -1;
-}
-
-static void wait_ms(int ms) { wait_real((uint32_t)(ms < 0 ? 0 : ms), 0); }
-static void store_step(const char *step) { feed("storage: %.29s", step); }
-
-/* The batch so far goes to 0G Storage: a first line says what it is, then
- * one episode a line. */
-static void flush_batch(const uint8_t key[32])
-{
-    static const char *mainnet[4] = {"34.71.110.60:5678:0", "34.66.131.173:5678:0", "34.169.236.186:5678:1",
-                                     "34.60.163.4:5678:1"};
-    static char node_host[8][24];
-    ok_store_net net;
-    char head[160], path[64];
-    size_t hl;
-    FILE *f;
-    int i, shards = 0;
-    if (!batch_len) return;
-    memset(&net, 0, sizeof net);
-    net.rpc_host = "evmrpc.0g.ai";
-    net.chain_id = 16661;
-    unhex("62d4144db0f0a6fbbaeb6296c785c71b3d57c526", net.flow, 20);
-    unhex("f574ff1fd8602f0131baab74f9f7cf24993321de", net.market, 20);
-    for (i = 0; i < (cfg.store_nodes ? cfg.store_nodes : 4) && i < 8; i++) {
-        const char *spec = cfg.store_nodes ? cfg.store_node[i] : mainnet[i];
-        const char *last = strrchr(spec, ':');
-        if (!last) continue;
-        snprintf(node_host[net.node_count], sizeof node_host[0], "%.*s", (int)(last - spec), spec);
-        net.node[net.node_count] = node_host[net.node_count];
-        net.node_shard[net.node_count] = atoi(last + 1);
-        if (net.node_shard[net.node_count] + 1 > shards) shards = net.node_shard[net.node_count] + 1;
-        net.node_count++;
-    }
-    net.shards = shards;
-    hl = (size_t)snprintf(head, sizeof head, "{\"okupa_batch\":1,\"episodes\":%d,\"last_sha256\":\"%s\"}\n", batch_count, chain);
-    if (hl + batch_len > sizeof batch) return;
-    memmove(batch + hl, batch, batch_len);
-    memcpy(batch, head, hl);
-    feed("storage: %d episodes, %lu KB", batch_count, (unsigned long)((hl + batch_len) / 1024));
-    if (ok_store_put(&store, &net, key, (const uint8_t *)batch, hl + batch_len, episode, episode_cap, fetch,
-                     http_fetch, NULL, wait_ms, store_step) == OK_OK &&
-        store.stage == OK_STORE_DONE) {
-        feed("stored on 0G: %.26s", store.root);
-        if (store.tx[0]) feed("tx %.35s", store.tx);
-        snprintf(ok_facts_now.og_storage_root, sizeof ok_facts_now.og_storage_root, "%s", store.root);
-        snprintf(path, sizeof path, "%sepisodes/stored.txt", dir_path);
-        if ((f = fopen(path, "a"))) {
-            fprintf(f, "%s %s %llu %d %s\n", store.root, store.tx[0] ? store.tx : "-", (unsigned long long)store.seq,
-                    batch_count, chain);
-            fclose(f);
-        }
-        batch_len = 0;
-        batch_count = 0;
-    } else {
-        feed("storage failed: %.24s", store.error[0] ? store.error : "?");
-        /* the batch stays (without its first line) for the next try */
-        memmove(batch, batch + hl, batch_len);
-    }
-}
-
 /* A number member of an object, or -1. */
 static long number(const ok_json *obj, const char *key)
 {
@@ -1336,7 +1111,6 @@ static void hear(void)
     } else {
         call_failed(q, r);
     }
-    save_episode(&ear, now_ms, count, 1);
 }
 
 /* 2. Eyes: through the camera when the player asks (q), or now and then
@@ -1392,7 +1166,6 @@ static void look(request *q)
     } else {
         call_failed(q, r);
     }
-    save_episode(&chat, now_ms, count, 0); /* a photo: on the SD card, not in the 0G Storage batch */
 }
 
 /* A drawing for the vision model: Pictionary (guess) or its reaction to a
@@ -1440,7 +1213,6 @@ static void picture(int kind)
     } else {
         call_failed(q, r);
     }
-    save_episode(&chat, now_ms, count, 0);
 }
 
 /* A dream now, when the player asks (one every five minutes: two paid
@@ -1488,11 +1260,9 @@ static void dream_now(void)
     r = ok_think_diary(&t, &chat, key, now_ms, nonce, &o, fetch, NULL); /* its words for the dream (the entry is not kept) */
     if (r != OK_OK || t.stage != OK_THINK_DECIDED) {
         call_failed(q, r);
-        save_episode(&chat, now_ms, count, 1);
         return;
     }
     feed_verified(elapsed_ms(t0));
-    save_episode(&chat, now_ms, count, 1);
     if (!t.dream[0]) {
         finish(q, 0, "0G wrote no dream this time");
         return;
@@ -1525,7 +1295,6 @@ static void dream_now(void)
     } else {
         call_failed(q, r);
     }
-    if (r == OK_OK) save_episode(&dreamer, now_ms, count, 0);
 }
 
 /* The balance for the wallet screen: eth_blockNumber then eth_getBalance at
@@ -1551,7 +1320,7 @@ static void balance_step(void)
     ok_dsi_mind_where = "balance (TLS)";
     feed("balance: asking %.24s", host);
     read_ms = 20000;
-    ok_balance_ask(host, balance_addr, fetch, NULL, episode, episode_cap, &b);
+    ok_balance_ask(host, balance_addr, fetch, NULL, scratch, scratch_cap, &b);
     read_ms = 60000;
     if (b.eth[0]) {
         snprintf(balance_eth, sizeof balance_eth, "%s", b.eth);
@@ -1616,7 +1385,6 @@ static void decide(void)
     if (asked[0] && now_s() - asked_at > 90) asked[0] = 0; /* nobody answered in 90 s: it may ask something else */
     if (asked[0]) obs.asked = asked;
     if (cfg.city[0]) obs.city = cfg.city;
-    obs.can_write_letter = letters_ok;
     ok_memory_tell(&facts, &obs);
     for (j = 0; j < recent_count; j++) obs.recent[j] = recent[j];
     obs.recent_count = recent_count;
@@ -1680,13 +1448,6 @@ static void decide(void)
         }
         if (t.decision.make[0] && !want_make[0]) snprintf(want_make, sizeof want_make, "%s", t.decision.make);
         if (t.decision.draw[0] && !want_draw[0]) snprintf(want_draw, sizeof want_draw, "%s", t.decision.draw);
-        if (t.decision.letter[0] && letters_ok && !letter_new) {
-            snprintf(letter, sizeof letter, "%s", t.decision.letter);
-            letter_new = 1;
-            letters_ok = 0; /* the game loop says again when another is allowed */
-            feed("letter: %.31s", letter);
-            today_add("wrote the player a letter: %.52s", letter);
-        }
         mailbox = t.decision; /* the episode keeps what 0G said; the screen never says a line twice */
         {
             const char *lines[OK_MIND_LINES];
@@ -1710,7 +1471,6 @@ static void decide(void)
     }
     line(3, "#%u: HTTP %d in %lu ms, %d known", count, t.http_status, (unsigned long)ms_last, facts.count);
     line(0, "0G mind: alive, %u/%u verified", verified, count);
-    save_episode(&chat, now_ms, count, 1);
 }
 
 /* What it decided to make: an object, or a drawing of its own. */
@@ -1736,7 +1496,6 @@ static void make_it(void)
     } else {
         call_failed(NULL, r);
     }
-    save_episode(&chat, now_ms, count, 1);
     want_make[0] = 0;
 }
 
@@ -1763,7 +1522,6 @@ static void draw_it(void)
     } else {
         call_failed(NULL, r);
     }
-    save_episode(&chat, now_ms, count, 1);
     want_draw[0] = 0;
 }
 
@@ -1793,7 +1551,6 @@ static void plan_it(void)
     } else {
         call_failed(NULL, r);
     }
-    save_episode(&chat, now_ms, count, 1);
 }
 
 /* The diary: once the day is over (a new date) or after 23:00, and the
@@ -1831,7 +1588,6 @@ static void diary_it(void)
         if (t.dream[0] && cfg.have_dream) { /* and tonight's dream, drawn by the image model */
             char about[OK_MIND_DREAM + 1];
             snprintf(about, sizeof about, "%s", t.dream);
-            save_episode(&chat, now_ms, count, 1);
             now_ms = (uint64_t)utc_now() * 1000u;
             draw(nonce, sizeof nonce);
             feed("dreaming: %.28s", about);
@@ -1848,12 +1604,10 @@ static void diary_it(void)
             } else {
                 call_failed(NULL, r);
             }
-            if (r == OK_OK) save_episode(&dreamer, now_ms, count, 0);
         }
     } else {
         call_failed(NULL, r);
     }
-    save_episode(&chat, now_ms, count, 1);
     if (diary_written == -1 || strcmp(date, today_date)) { /* written or not, the new day starts */
         snprintf(today_date, sizeof today_date, "%s", date);
         today_count = 0;
@@ -1882,12 +1636,11 @@ static int thinker(void *arg)
         started = 0; /* nothing serves requests: they fail at once */
         return 0;
     }
-    load_chain();
     load_facts();
     load_said();
     load_dream();
     ok_facts_now.og_features |= 1 | 8 | (cfg.have_ear ? 2 : 0) | (isDSiMode() && cfg.look_every >= 0 ? 4 : 0) |
-                               (cfg.have_dream ? 16 : 0) | (cfg.store_on ? 32 : 0);
+                               (cfg.have_dream ? 16 : 0);
     {
         time_t now = time(NULL);
         strftime(today_date, sizeof today_date, "%Y-%m-%d", localtime(&now));
@@ -1965,15 +1718,9 @@ static int thinker(void *arg)
         serve_player();
         if (!reply_due && want_draw[0]) draw_it();
         serve_player();
-        /* The slow mind, the diary and the storage batch only when nobody waits. */
+        /* The slow mind and the diary only when nobody waits. */
         if (!reply_due && !player_waiting()) plan_it();
         if (!reply_due && !player_waiting()) diary_it();
-        if (!reply_due && !player_waiting() && cfg.store_on && batch_len &&
-            (want_store || now_s() - stored_at > (uint32_t)cfg.store_every * 60u)) {
-            stored_at = now_s();
-            want_store = 0;
-            flush_batch(key);
-        }
         /* Every 20 s while the player is around, every minute otherwise, 90 s
          * while it sleeps alone, so each thing it does has time to play out;
          * after failures it backs off up to a minute. Speaking, a photo or a
@@ -2002,7 +1749,7 @@ static int buffers(void)
     void *room;
     if (isDSiMode()) {
         tp = &t_twl;
-        episode = episode_twl, episode_cap = sizeof episode_twl;
+        scratch = scratch_twl, scratch_cap = sizeof scratch_twl;
         photo = photo_twl, photo_cap = sizeof photo_twl;
         sense_buf = sense_twl, sense_cap = sizeof sense_twl;
         return 1;
@@ -2010,14 +1757,14 @@ static int buffers(void)
     tp = malloc(sizeof *tp);
     tls_by_host = tlsp = calloc(2, sizeof *tls_by_host);
     tls_hosts = 2;
-    episode_cap = 96 * 1024, episode = malloc(episode_cap);
+    scratch_cap = 16 * 1024, scratch = malloc(scratch_cap);
     photo_cap = 52 * 1024, photo = malloc(photo_cap);
     sense_cap = 72 * 1024, sense_buf = malloc(sense_cap);
     room = malloc(MIND_STACK + HEADROOM); /* the thread's stack and what the rest needs, still free after */
     free(room);
-    if (tp && tls_by_host && episode && photo && sense_buf && room) return 1;
-    free(tp), free(tls_by_host), free(episode), free(photo), free(sense_buf);
-    tp = NULL, tls_by_host = tlsp = NULL, episode = NULL, photo = NULL, sense_buf = NULL;
+    if (tp && tls_by_host && scratch && photo && sense_buf && room) return 1;
+    free(tp), free(tls_by_host), free(scratch), free(photo), free(sense_buf);
+    tp = NULL, tls_by_host = tlsp = NULL, scratch = NULL, photo = NULL, sense_buf = NULL;
     return 0;
 }
 

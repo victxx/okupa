@@ -153,14 +153,6 @@ ok_result ok_think_guess(ok_think *t, const ok_think_provider *p, const uint8_t 
 
 const char *ok_think_stage_name(ok_think_stage s);
 
-/* The episode of one call as JSON (for 0G Storage): kind, stage, decision or
- * transcript or sight, chat id, signer, signed text and signature, and the
- * exact request (a JSON string, or base64 for audio) and response, so anyone
- * can rebuild and re-check the hashes. prev: sha256 hex of the episode before
- * it ("" for the first), so the okupa's life is a chain anyone can walk. */
-ok_result ok_think_episode(const ok_think *t, const ok_think_provider *p, uint64_t now_ms, const char *prev,
-                           char *out, size_t cap, size_t *len);
-
 /* An HTTPS round trip over the core's TLS for platforms that only have a
  * connected socket: rd/wr move raw bytes on it. ok_think_https opens the TLS
  * session first; ok_think_exchange reuses one already open (keep-alive). */

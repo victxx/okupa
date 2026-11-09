@@ -24,12 +24,8 @@ static const char SYSTEM[] =
     "the floor, or -1 to stay, \"z\": 0 to 100, back to front, or -1, \"gaze\": one of [\"player\",\"window\","
     "\"door\",\"frames\",\"floor\",\"sky\"], what it looks at, \"energy\": 0 to 100, how lively it moves "
     "(tired and sad low, excited high), \"make\": a small object Okupa builds now out of boxes, a few words, or "
-    "\"\", \"draw\": something Okupa draws now on its own sketchbook, a few words, or \"\", \"letter\": a short "
-    "letter to the player, at most 140 characters, sent for ever on Ethereum, or \"\"}. Make and draw rarely, "
-    "when inspired or when the player asks. can_write_letter is true only when the player has asked Okupa for "
-    "a letter: then write it in this very answer, two or three short sentences under 140 characters, warm in Okupa's own voice, about something real from "
-    "its day (what it did, what the player did or said, its plan) or from known, never an event that did not "
-    "happen, and say in line that it wrote it; when it is false, letter is always \"\". You move its whole body: choose where it goes, where it looks and how it "
+    "\"\", \"draw\": something Okupa draws now on its own sketchbook, a few words, or \"\"}. Make and draw "
+    "rarely, when inspired or when the player asks. You move its whole body: choose where it goes, where it looks and how it "
     "moves so each decision plays out like a little scene. player_said, when present, is what the player just said "
     "out loud to Okupa (speech to text, accents dropped; they may speak Spanish or English): then line MUST answer it "
     "directly and specifically in English, so they can tell Okupa understood (refer to what they said), and the "
@@ -53,8 +49,8 @@ static const char SYSTEM[] =
  * characters; ok_mind_request joins the two. */
 static const char FREE[] =
     " Okupa has a life of its own that does not revolve around the player. It knows it lives inside an old "
-    "console, that its thoughts are computed far away on 0G and come back signed, and that its letters and the "
-    "player's drawings travel on Ethereum through strangers' nodes. It wonders about this out loud and in "
+    "console, that its thoughts are computed far away on 0G and come back signed, and that the player's "
+    "drawings travel on Ethereum through strangers' nodes. It wonders about this out loud and in "
     "thought: what the Wi-Fi tastes like, who runs the nodes, what lies past the edge of the screen, whether it "
     "is real, what it would do if it got out. It daydreams, invents small projects and private jokes, follows "
     "its own goal and sometimes finishes what it was doing before answering. thought is usually a daydream or an "
@@ -236,8 +232,6 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
                 return OK_RANGE;
         if (!raw(user, sizeof user, &u, "]")) return OK_RANGE;
     }
-    if (!diary && !raw(user, sizeof user, &u, obs->can_write_letter ? ",\"can_write_letter\":true" : ",\"can_write_letter\":false"))
-        return OK_RANGE;
     if (obs->goal && (!raw(user, sizeof user, &u, ",\"goal\":") || !text(user, sizeof user, &u, obs->goal, OK_MIND_NOTE)))
         return OK_RANGE;
     if (obs->plan && (!raw(user, sizeof user, &u, ",\"plan\":") || !text(user, sizeof user, &u, obs->plan, OK_MIND_NOTE)))
@@ -397,26 +391,18 @@ ok_result ok_mind_parse(const char *body, size_t n, ok_mind *d)
         char s[256];
         ok_json v;
         size_t n, i, o;
-        static const char *keys[3] = {"make", "draw", "letter"};
-        char *outs[3];
-        size_t caps[3];
+        static const char *keys[2] = {"make", "draw"};
+        char *outs[2];
+        size_t caps[2];
         int k;
         outs[0] = d->make, caps[0] = sizeof d->make;
         outs[1] = d->draw, caps[1] = sizeof d->draw;
-        outs[2] = d->letter, caps[2] = sizeof d->letter;
-        for (k = 0; k < 3; k++) {
+        for (k = 0; k < 2; k++) {
             outs[k][0] = 0;
             if (ok_json_member(&obj, keys[k], &v) != OK_OK || ok_json_string(&v, s, sizeof s, &n) != OK_OK) continue;
             for (i = 0, o = 0; i < n && o + 1 < caps[k]; i++)
                 if ((unsigned char)s[i] >= 0x20 && (unsigned char)s[i] < 0x7f) outs[k][o++] = s[i];
             outs[k][o] = 0;
-            if (k == 2 && i < n) { /* a letter too long: end it on its last whole sentence, or word */
-                while (o > 40 && !strchr(".!?", outs[k][o - 1])) o--;
-                if (o <= 40)
-                    for (o = strlen(outs[k]); o > 0 && outs[k][o - 1] != ' ';) o--;
-                while (o > 0 && outs[k][o - 1] == ' ') o--;
-                outs[k][o] = 0;
-            }
         }
     }
     note(&obj, "ask", d->ask);

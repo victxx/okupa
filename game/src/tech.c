@@ -149,7 +149,7 @@ static void packet(frame f, const uint8_t (*font)[8], int x0, int y0, int x1, in
 /* ---- The walk-through --------------------------------------------------------- */
 
 static const char *const step_title[OK_TECH_STEPS] = {
-    "A key from you", "Find the nodes", "Shake hands", "Say who we are", "Sign a letter",
+    "A key from you", "Find the nodes", "Shake hands", "Say who we are", "Sign a drawing",
     "Hand it over", "In a block?", "Ask 0G's mind", "What it skips"};
 
 static const char *const step_text[OK_TECH_STEPS] = {
@@ -161,8 +161,8 @@ static const char *const step_text[OK_TECH_STEPS] = {
     "with a keccak MAC. Plain TCP from the DSi's Wi-Fi.",
     "Hello (devp2p 5, snappy), then eth/69 Status: chain id, genesis and the fork id, a CRC32 of every "
     "fork (EIP-2124). We keep no blocks and say so.",
-    "An EIP-1559 transaction to itself, zero value, with an OKPA act in its data (a hello or a 64x64 "
-    "drawing). Signed on the ARM9 with libsecp256k1.",
+    "An EIP-1559 transaction to itself, zero value, with an OKPA act in its data (a 64x64 drawing). "
+    "Signed on the ARM9 with libsecp256k1.",
     "Public nodes are full: most say \"too many peers\" a moment after Status. The DSi hands the "
     "transaction over in that moment. The node gossips it on.",
     "While a node keeps us, the DSi asks for new headers and bodies, re-hashes each header and rebuilds "
@@ -295,8 +295,7 @@ static void step_data(frame f, const uint8_t (*font)[8], const ok_tech *t, const
     case 4:
         if (!fa->tx_len) {
             text(f, font, 4, y, "Nothing signed yet:", DIM, 1);
-            text(f, font, 4, y + 12, "Dev > Wallet > Send hello", DIM, 1);
-            text(f, font, 4, y + 24, "or Draw > Send", DIM, 1);
+            text(f, font, 4, y + 12, "Draw > Send", DIM, 1);
             break;
         }
         snprintf(v, sizeof v, "%s, nonce %lu", fa->tx_kind, (unsigned long)fa->tx_nonce);

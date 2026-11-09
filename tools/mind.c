@@ -6,8 +6,9 @@
  *   build/okupa-mind <host> <provider> <model> <signer> <key file> <out dir> hear=<16-bit mono wav>
  *   build/okupa-mind <host> <provider> <model> <signer> <key file> <out dir> see=<png>
  * With several decisions it lives for a while: each one remembers the last
- * few, one TLS connection is kept open between them, and the episodes are
- * chained by hash (episode-N.json). The key must own the 0G ledger that pays
+ * few, one TLS connection is kept open between them, and each call's exact
+ * request, response and TEE signature are saved in the out dir (N-*.json,
+ * so anyone can re-check them). The key must own the 0G ledger that pays
  * the provider. Exit 0 only if every decision was verified; anything else is
  * a safe stop (the okupa sleeps). */
 #define _POSIX_C_SOURCE 200809L /* getaddrinfo with -std=c99 */
@@ -136,6 +137,21 @@ static void save(const char *dir, const char *name, const char *data, size_t n)
     }
 }
 
+/* The exact bytes of one call, for anyone re-checking the TEE signature. */
+static void save_call(const char *dir, const char *prefix, const ok_think *t)
+{
+    char name[64];
+    if (!dir) return;
+    snprintf(name, sizeof name, "%srequest.json", prefix);
+    save(dir, name, t->request, t->request_len);
+    snprintf(name, sizeof name, "%sresponse.json", prefix);
+    if (t->response) save(dir, name, t->response, t->response_len);
+    snprintf(name, sizeof name, "%ssignature.hex", prefix);
+    if (t->signature[0]) save(dir, name, t->signature, strlen(t->signature));
+    snprintf(name, sizeof name, "%ssigned_text.txt", prefix);
+    if (t->text[0]) save(dir, name, t->text, strlen(t->text));
+}
+
 static double seconds(void)
 {
     struct timeval now;
@@ -146,15 +162,14 @@ static double seconds(void)
 int main(int argc, char **argv)
 {
     static ok_think t;
-    static char episode[1200000], memory[OK_MIND_RECENT][OK_MIND_MEMORY];
-    char keyhex[80], prev[65] = "", name[48];
-    uint8_t key[32], nonce[16], hash[32];
+    static char memory[OK_MIND_RECENT][OK_MIND_MEMORY];
+    char keyhex[80], name[48];
+    uint8_t key[32], nonce[16];
     ok_think_provider p;
     ok_mind_obs obs;
     ok_pet pet;
     struct tm local;
     time_t sec;
-    size_t n;
     FILE *f;
     ok_result r;
     int count = argc > 7 ? atoi(argv[7]) : 1, i, j, verified = 0;
@@ -214,8 +229,7 @@ int main(int argc, char **argv)
         if (t.stage == OK_THINK_DECIDED)
             printf("VERIFIED %s: \"%s\"\n", hear ? "heard" : guess ? "guessed" : comment ? "says" : "saw", hear ? t.heard : t.saw);
         else if (t.response_len) printf("    %.*s\n", (int)(t.response_len > 300 ? 300 : t.response_len), t.response);
-        if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
-            save(argv[6], "episode.json", episode, n);
+        save_call(argv[6], "", &t);
         return t.stage == OK_THINK_DECIDED ? 0 : 1;
     }
 
@@ -241,8 +255,7 @@ int main(int argc, char **argv)
                 putchar('\n');
             }
         }
-        if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
-            save(argv[6], "episode.json", episode, n);
+        save_call(argv[6], "", &t);
         return t.stage == OK_THINK_DECIDED ? 0 : 1;
     }
     if (argc > 7 && !strncmp(argv[7], "dream=", 6)) { /* a dream: a picture from the image model */
@@ -299,8 +312,7 @@ int main(int argc, char **argv)
             printf("VERIFIED goal: %s | plan: %s | feeling: %s\n", t.plan.goal, t.plan.plan, t.plan.feeling);
         else if (t.stage == OK_THINK_DECIDED)
             printf("VERIFIED diary: %s\n         dream: %s\n", t.diary, t.dream);
-        if (ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) == OK_OK)
-            save(argv[6], "episode.json", episode, n);
+        save_call(argv[6], "", &t);
         return t.stage == OK_THINK_DECIDED ? 0 : 1;
     }
 
@@ -318,12 +330,6 @@ int main(int argc, char **argv)
         obs.minute = local.tm_min;
         obs.seconds_since_player = (uint32_t)(i * 5);
         if (i) obs.player_did = NULL;
-        /* OKUPA_LETTER=1: on the second decision the player asks for a
-         * letter, as the Mail button does; it may write one until it has. */
-        if (i == 1 && getenv("OKUPA_LETTER")) {
-            obs.player_did = "asked you to write them a letter";
-            obs.can_write_letter = 1;
-        }
         if (!entropy(nonce, sizeof nonce)) return 2;
         t0 = seconds();
         r = ok_think_run(&t, &p, key, (uint64_t)(seconds() * 1000.0), nonce, &obs, fetch, NULL);
@@ -341,10 +347,6 @@ int main(int argc, char **argv)
                    t.decision.energy, t.decision.line, t.decision.thought[0] ? " thinks: " : "",
                    t.decision.thought, t.decision.ask[0] ? " asks: " : "", t.decision.ask,
                    t.decision.remember[0] ? " keeps: " : "", t.decision.remember);
-            if (t.decision.letter[0]) {
-                printf("         letter%s: %s\n", obs.can_write_letter ? "" : " (not asked for, dropped)", t.decision.letter);
-                obs.can_write_letter = 0;
-            }
             /* It remembers what it just did, newest first. */
             for (j = OK_MIND_RECENT - 1; j > 0; j--) memcpy(memory[j], memory[j - 1], sizeof memory[0]);
             ok_mind_memory(&t.decision, memory[0]);
@@ -354,20 +356,9 @@ int main(int argc, char **argv)
             printf("safe stop, the okupa sleeps (http %d, net %d)\n", t.http_status, t.net_error);
             if (t.response_len) printf("    %.*s\n", (int)(t.response_len > 300 ? 300 : t.response_len), t.response);
         }
-        if (argc > 6 && ok_think_episode(&t, &p, (uint64_t)(seconds() * 1000.0), prev, episode, sizeof episode, &n) ==
-                            OK_OK) {
-            if (count == 1) {
-                save(argv[6], "request.json", t.request, t.request_len);
-                if (t.response) save(argv[6], "response.json", t.response, t.response_len);
-                if (t.signature[0]) save(argv[6], "signature.hex", t.signature, strlen(t.signature));
-                if (t.text[0]) save(argv[6], "signed_text.txt", t.text, strlen(t.text));
-                save(argv[6], "episode.json", episode, n);
-            } else {
-                snprintf(name, sizeof name, "episode-%03d.json", i + 1);
-                save(argv[6], name, episode, n);
-            }
-            ok_sha256(episode, n, hash);
-            for (j = 0; j < 32; j++) snprintf(prev + 2 * j, 3, "%02x", hash[j]);
+        if (argc > 6) {
+            snprintf(name, sizeof name, "%03d-", i + 1);
+            save_call(argv[6], count == 1 ? "" : name, &t);
         }
     }
     ok_wipe(key, sizeof key);

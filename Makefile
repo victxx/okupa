@@ -7,8 +7,8 @@ SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror $(NO_TRUNC) -f
 CPPFLAGS += -Icore/include -Igame/include -Ithird_party/tiny_sha3 -Ithird_party/secp256k1/include -Ithird_party/bearssl/inc -Ithird_party/font8x8 -Ithird_party/qrcodegen
 BUILD ?= build
 
-CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c core/src/sntp.c core/src/png.c core/src/unpng.c core/src/wav.c core/src/zgs.c core/src/session.c core/src/block.c core/src/discv4.c core/src/tls.c core/src/tls_anchors.c game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/music.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/mind.c game/src/think.c game/src/memory.c game/src/make.c game/src/store.c game/src/balance.c game/src/facts.c game/src/tech.c third_party/qrcodegen/qrcodegen.c third_party/tiny_sha3/sha3.c game/src/plant_art.c game/src/sky_art.c
-TESTS = core keccak rlp block secp keys tx act sha256 ecdh aes ecies rlpx snappy p2p eth enr dnsdisc dns zerog json http sntp png unpng wav zgs tls discv4 pet ui checks save mind think memory make balance
+CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c core/src/sntp.c core/src/png.c core/src/unpng.c core/src/wav.c core/src/session.c core/src/block.c core/src/discv4.c core/src/tls.c core/src/tls_anchors.c game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/music.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/mind.c game/src/think.c game/src/memory.c game/src/make.c game/src/jsonrpc.c game/src/balance.c game/src/facts.c game/src/tech.c third_party/qrcodegen/qrcodegen.c third_party/tiny_sha3/sha3.c game/src/plant_art.c game/src/sky_art.c
+TESTS = core keccak rlp block secp keys tx act sha256 ecdh aes ecies rlpx snappy p2p eth enr dnsdisc dns zerog json http sntp png unpng wav tls discv4 pet ui checks save mind think memory make balance
 
 # libsecp256k1 is built as upstream ships it, with its own warning level, plus
 # the modules we need: recoverable signatures and ECDH (for RLPx).
@@ -26,7 +26,7 @@ BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 .PHONY: all test sanitize clean peer preview perf
 # Keep library objects between builds.
 .SECONDARY:
-all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house $(BUILD)/okupa-music $(BUILD)/okupa-intro $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https $(BUILD)/okupa-crawl $(BUILD)/okupa-mind $(BUILD)/okupa-store
+all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house $(BUILD)/okupa-music $(BUILD)/okupa-intro $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https $(BUILD)/okupa-crawl $(BUILD)/okupa-mind
 
 # The host peer: sockets and entropy around the same core.
 $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
@@ -45,11 +45,6 @@ $(BUILD)/okupa-https: tools/https.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 
-# A file on 0G Storage with the core alone.
-$(BUILD)/okupa-store: tools/store.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
-	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
-
 # One decision of the okupa's mind on 0G Compute with the core alone.
 $(BUILD)/okupa-mind: tools/mind.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
 	@mkdir -p $(BUILD)
@@ -62,12 +57,6 @@ $(BUILD)/okupa-dnswalk: tools/dnswalk.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildca
 
 # Host renders of the DSi screens.
 $(BUILD)/okupa-preview: tools/preview.c tools/png.h $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
-	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
-
-# The demo video: frames and sound from the game's own code (no music).
-#   build/okupa-video run/video/sfx.wav | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i - ...
-$(BUILD)/okupa-video: tools/video.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
 

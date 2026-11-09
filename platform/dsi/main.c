@@ -32,7 +32,6 @@ static int top_bg, bottom_bg;
 static ok_ui *shown_ui;
 static ok_pet *shown_pet;
 static char save_path[40], temp_path[40], net_dir[40], key_path[40], look_path[40], wall_path[40], sent_path[40];
-static char letters_path[40]; /* the letters the okupa sent: "YYYY-MM-DD hash text" a line */
 static const char *save_status = "Save: no SD card, not saved";
 
 /* Timers 0 and 1 run cascaded at the bus clock (33.513982 MHz). */
@@ -128,7 +127,6 @@ static int open_storage(void)
         snprintf(look_path, sizeof look_path, "%sokupa/look.txt", roots[i]);
         snprintf(wall_path, sizeof wall_path, "%sokupa/wall.bin", roots[i]);
         snprintf(sent_path, sizeof sent_path, "%sokupa/drawing-sent.bin", roots[i]);
-        snprintf(letters_path, sizeof letters_path, "%sokupa/letters.txt", roots[i]);
         return 1;
     }
     return 0;
@@ -405,14 +403,13 @@ static void balance_take(ok_ui *u)
         struct tm *tm = localtime(&now);
         uint64_t used;
         uint8_t h[32];
-        /* A hello or letter still "on its way" whose nonce the node says is
-         * used got into a block the console never saw: let it go, so the
-         * next one can be sent. A drawing waits for the console's own proof. */
+        /* A transaction still "on its way" whose nonce the node says is used
+         * got into a block the console never saw: let it go, so the next one
+         * can be sent. A drawing waits for the console's own proof. */
         if (ok_dsi_mind_balance_nonce(&used) && ok_dsi_net_pending(h) && !sent_waiting &&
             used >= ok_dsi_net_peek_nonce()) {
             ok_dsi_net_forget();
-            snprintf(balance_said, sizeof balance_said, "My %s got in! A public node says so. Send another?",
-                     strcmp(ok_facts_now.tx_kind, "letter") ? "hello" : "letter");
+            snprintf(balance_said, sizeof balance_said, "My last one got in! A public node says so.");
             u->say = balance_said;
             u->say_ticks = 60 * 6;
         }
@@ -434,135 +431,6 @@ static void balance_take(ok_ui *u)
     } else if (r < 0) {
         snprintf(u->wallet_balance_note, sizeof u->wallet_balance_note, "%s%.32s", u->wallet_balance[0] ? "old; " : "", why);
     }
-}
-
-/* The day of the last letter the okupa sent, from letters.txt. */
-static void last_letter_day(char out[11])
-{
-    char line[256];
-    FILE *f;
-    out[0] = 0;
-    if (!letters_path[0] || !(f = fopen(letters_path, "r"))) return;
-    while (fgets(line, sizeof line, f))
-        if (strlen(line) > 10) snprintf(out, 11, "%.10s", line);
-    fclose(f);
-}
-
-/* Who the letters go to: sd:/okupa/letters-to.txt, "0x<address> [name]",
- * e.g. a friend's wallet and their ENS name (resolved elsewhere: the console
- * cannot read ENS without an RPC). No file: the console's own address. A
- * file that does not hold a valid address (or a checksum typo) stops the
- * letters rather than send them somewhere wrong. */
-static uint8_t letter_to[20];
-static int letter_to_state; /* 0 no file, 1 valid, -1 invalid */
-static char letter_to_name[32], letter_to_text[43];
-
-static void load_letter_to(const char *dir)
-{
-    char path[64], line[128];
-    FILE *f;
-    snprintf(path, sizeof path, "%.40sletters-to.txt", dir);
-    letter_to_state = 0;
-    if (!(f = fopen(path, "r"))) return;
-    letter_to_state = -1;
-    if (fgets(line, sizeof line, f) && ok_keys_parse_address(line, letter_to) == OK_OK) {
-        const char *name = line + 42;
-        letter_to_state = 1;
-        ok_keys_checksum(letter_to, letter_to_text);
-        while (*name == ' ' || *name == '\t') name++;
-        snprintf(letter_to_name, sizeof letter_to_name, "%.31s", name);
-        letter_to_name[strcspn(letter_to_name, "\r\n")] = 0;
-        ok_facts_log(0, 'D', "letters go to %.24s", letter_to_name[0] ? letter_to_name : letter_to_text);
-    }
-    fclose(f);
-}
-
-/* The recipient as people read it: its name, or the address shortened. */
-static const char *letter_to_label(void)
-{
-    static char shortened[16];
-    if (letter_to_state != 1) return "my own address";
-    if (letter_to_name[0]) return letter_to_name;
-    snprintf(shortened, sizeof shortened, "%.6s...%.4s", letter_to_text, letter_to_text + 38);
-    return shortened;
-}
-
-/* A letter its mind wrote, signed and handed to the network with capped
- * fees (account.c: at most 40 000 gas x 2 gwei); one a day. */
-static int send_letter(const char *text, char sent_day[11], const char *today)
-{
-    uint8_t tx[400], hash[32];
-    size_t len;
-    FILE *f;
-    if (ok_dsi_net_pending(hash)) return 0; /* one at a time */
-    if (letter_to_state < 0) return 0; /* letters-to.txt is wrong: never guess a recipient */
-    {
-        uint64_t nonce = ok_dsi_net_peek_nonce();
-        if (!ok_dsi_account_letter(ok_dsi_net_chain_id(), nonce, text, letter_to_state == 1 ? letter_to : NULL, tx,
-                                   sizeof tx, &len, hash))
-            return 0;
-        ok_dsi_net_commit_nonce(nonce); /* used up only once really signed */
-    }
-    ok_dsi_net_send(tx, len, hash);
-    ok_facts_log(ok_dsi_uptime(), 'E', "letter %02x%02x%02x%02x to %.16s", hash[0], hash[1], hash[2], hash[3],
-                 letter_to_label());
-    if ((f = fopen(letters_path, "a"))) {
-        fprintf(f, "%s %02x%02x%02x%02x%02x%02x%02x%02x %s\n", today, hash[0], hash[1], hash[2], hash[3], hash[4], hash[5],
-                hash[6], hash[7], text);
-        fclose(f);
-    }
-    snprintf(sent_day, 11, "%s", today);
-    return 1;
-}
-
-/* The Mail button: the letters the okupa sent (letters.txt: "date hash
- * text" a line), the newest one in the bubble. */
-/* A letter only when the player asks for one (Mail), never by itself: the
- * mind writes it in its own time, then the console signs and posts it. */
-static int letter_requested, letter_asked_now;
-static time_t letter_asked_at;
-
-static void show_mail(ok_ui *u, const char *dir)
-{
-    static char said[200];
-    char path[64], line[256], last[256] = "", on_path[64];
-    int count = 0, on = 0;
-    FILE *f;
-    snprintf(on_path, sizeof on_path, "%.40sletters-on.txt", dir);
-    if ((f = fopen(on_path, "r"))) {
-        on = 1;
-        fclose(f);
-    }
-    snprintf(path, sizeof path, "%.40sletters.txt", dir);
-    if ((f = fopen(path, "r"))) {
-        while (fgets(line, sizeof line, f))
-            if (strlen(line) > 28) {
-                count++;
-                snprintf(last, sizeof last, "%s", line);
-            }
-        fclose(f);
-    }
-    last[strcspn(last, "\r\n")] = 0;
-    if (letter_to_state < 0)
-        snprintf(said, sizeof said, "letters-to.txt has no valid address (check the 0x and its capitals).");
-    else if (!on)
-        snprintf(said, sizeof said, "Letters are off (letters-on.txt on the SD).");
-    else if (ok_dsi_net_pending(NULL))
-        snprintf(said, sizeof said, "My last letter is still on its way. One at a time!");
-    else if (letter_requested)
-        snprintf(said, sizeof said, "I'm still writing it... good letters take a moment.");
-    else {
-        letter_requested = 1;
-        letter_asked_now = 1;
-        letter_asked_at = time(NULL);
-        if (count)
-            snprintf(said, sizeof said, "Another letter for %.20s? Let me think. (%d sent, last %.10s)", letter_to_label(),
-                     count, last);
-        else
-            snprintf(said, sizeof said, "A letter for %.24s? Let me think what to say...", letter_to_label());
-    }
-    u->say = said;
-    u->say_ticks = 60 * 8;
 }
 
 int main(void)
@@ -731,8 +599,7 @@ int main(void)
                     hang_waiting = 1; /* hung below, in front of the player (not behind SELECT) */
                     snprintf(said, sizeof said, "Block %lu has my drawing. On the wall!", (unsigned long)inc_block);
                 } else {
-                    snprintf(said, sizeof said, "My %s is in block %lu!",
-                             strcmp(ok_facts_now.tx_kind, "letter") ? "hello" : "letter", (unsigned long)inc_block);
+                    snprintf(said, sizeof said, "My last one is in block %lu!", (unsigned long)inc_block);
                 }
                 ui.say = said;
                 ui.say_ticks = 600;
@@ -1234,44 +1101,14 @@ int main(void)
                 obey(&ui, &pet, &thought, (int64_t)now, (uint32_t)(now - last_input), got == 2);
             }
         }
-        /* What its mind made, drew, dreamed or wrote. */
+        /* What its mind made, drew or dreamed. */
         {
-            static char said[80], letter_day[11];
-            static int letter_day_read;
-            char today[11], text[141], name[21];
-            uint8_t pixels[512], hash[32];
+            static char said[80];
+            char name[21];
+            uint8_t pixels[512];
             const char *about;
             ok_object obj;
             int w, h;
-            strftime(today, sizeof today, "%Y-%m-%d", localtime(&now));
-            static int letters_allowed;
-            if (!letter_day_read && storage) {
-                load_letter_to(net_dir);
-                char on_path[48];
-                FILE *f;
-                last_letter_day(letter_day);
-                letter_day_read = 1;
-                /* Letters go to mainnet (real gas): only with the player's
-                 * opt-in (sd:/okupa/letters-on.txt), and each one only when
-                 * asked for through Mail. */
-                snprintf(on_path, sizeof on_path, "%.30sletters-on.txt", net_dir);
-                if ((f = fopen(on_path, "r"))) {
-                    letters_allowed = 1;
-                    ok_facts_now.og_features |= 64;
-                    fclose(f);
-                }
-            }
-            if (letter_asked_now) { /* tell the mind the player asked */
-                ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, "asked you to write them a letter");
-                letter_asked_now = 0;
-            }
-            if (letter_requested && now - letter_asked_at > 180) { /* the mind never wrote it: say so, drop it */
-                letter_requested = 0;
-                ui.say = "I couldn't find the words this time. Ask me again later?";
-                ui.say_ticks = 60 * 5;
-            }
-            ok_dsi_mind_letters(letter_requested && letters_allowed && letter_to_state >= 0 && storage &&
-                                !ok_dsi_net_pending(hash));
             if (ok_dsi_mind_take_object(&obj)) {
                 /* Its colour names onto the house's palette. */
                 static const uint8_t to_palette[OK_MAKE_COLOURS] = {2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 10, 11, 15, 1, 13, 0};
@@ -1344,15 +1181,6 @@ int main(void)
                 }
                 busy_dream = dream_waiting;
             }
-            if (ok_dsi_mind_take_letter(text)) {
-                letter_requested = 0;
-                if (send_letter(text, letter_day, today)) {
-                    ui.say = "I wrote and signed you a letter! Now to find a node that takes it.";
-                } else {
-                    ui.say = "I wrote you a letter... but could not post it.";
-                }
-                ui.say_ticks = 60 * 5;
-            }
         }
         if (tech_on) {
             if ((keysDown() & KEY_TOUCH)) {
@@ -1422,27 +1250,6 @@ int main(void)
                 ok_dsi_account_scribble(touch.px, touch.py, &ui);
                 if (!was && ui.wallet_ready) balance_ask(&ui);
             }
-            if (r == OK_UI_WALLET_HELLO && storage) {
-                /* One hello at a time: while one is waiting, pressing again
-                 * just keeps handing out the same bytes. */
-                static uint8_t tx[512];
-                uint8_t hash[32];
-                size_t len;
-                if (!ok_dsi_net_pending(hash)) {
-                    uint64_t nonce = ok_dsi_net_peek_nonce();
-                    if (ok_dsi_account_hello(ok_dsi_net_chain_id(), nonce, tx, sizeof tx, &len, hash)) {
-                        ok_dsi_net_commit_nonce(nonce);
-                        ok_dsi_net_send(tx, len, hash);
-                        ok_facts_log(ok_dsi_uptime(), 'E', "signed hello %02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
-                        ui.say = "Hello signed! Not on Ethereum yet: looking for a node.";
-                        ui.say_ticks = 60 * 5;
-                    }
-                } else {
-                    ui.say = "Still on its way... let me ask a node if it got in.";
-                    ui.say_ticks = 60 * 4;
-                    if (ui.wallet_address[0]) balance_ask(&ui); /* its answer may let it go (balance_take) */
-                }
-            }
             if (r == OK_UI_SEND_DRAWING && storage) {
                 static uint8_t tx[700];
                 uint8_t hash[32];
@@ -1476,7 +1283,7 @@ int main(void)
             }
             if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
             /* The menu's mind buttons do what the keys do: Photo is R, Games
-             * is X, Talk is L (held on the button), Mail shows the letters. */
+             * is X, Talk is L (held on the button). */
             if (r == OK_UI_PHOTO) menu_look = 1;
             if (r == OK_UI_GUESS) game_guess_wanted = 1;
             if (r == OK_UI_DREAM) dream_wanted = 1;
@@ -1489,11 +1296,6 @@ int main(void)
                 comment_wanted = 2;
             }
             if (r == OK_UI_TALK && !held) menu_talk = 1;
-            if (r == OK_UI_MAIL && storage) show_mail(&ui, net_dir);
-            if (r == OK_UI_MAIL && !storage) {
-                ui.say = "No SD card, so no letters.";
-                ui.say_ticks = 60 * 5;
-            }
             if (r != OK_UI_NOTHING) redraw = 1;
         } else if (held) {
             ok_ui_release(&ui);

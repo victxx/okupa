@@ -1,9 +1,0 @@
-{
-  "name": "okupa-zerog-store",
-  "private": true,
-  "description": "Host tool: store okupa decision episodes on 0G Storage (testnet)",
-  "dependencies": {
-    "@0gfoundation/0g-storage-ts-sdk": "1.2.13",
-    "ethers": "6.13.1"
-  }
-}

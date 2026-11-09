@@ -473,16 +473,16 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
 
 /* Buttons: four columns and two rows a menu, a second menu (and two tabs)
  * only when they do not all fit. A button is shown only when it does
- * something real: Photo, Talk, Games, Mail and Friend when the platform
+ * something real: Photo, Talk, Games and Friend when the platform
  * says it handles them (ok_ui.wired), Dream once there is a dream. The care
  * buttons fill like a glass with how full that need is. */
-enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_GALLERY, B_TALK, B_PHOTO, B_GAMES, B_MAIL, B_FRIEND, B_DREAM, B_DEV,
+enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_GALLERY, B_TALK, B_PHOTO, B_GAMES, B_FRIEND, B_DREAM, B_DEV,
        BUTTONS };
 static const char *labels[BUTTONS] = {"Feed", "Play", "Pet", "Sleep", "Draw", "Gallery", "Talk",
-                                      "Photo", "Games", "Mail", "Friend", "Dream", "Dev"};
+                                      "Photo", "Games", "Friend", "Dream", "Dev"};
 static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(31, 20, 21), RGB(20, 19, 30),
                                          RGB(30, 24, 16), RGB(31, 25, 12), RGB(29, 22, 28), RGB(22, 26, 30),
-                                         RGB(24, 29, 18), RGB(30, 27, 20), RGB(26, 22, 31), RGB(22, 22, 31),
+                                         RGB(24, 29, 18), RGB(26, 22, 31), RGB(22, 22, 31),
                                          RGB(21, 27, 22)};
 #define PER_PAGE 8
 #define BX(s) (8 + ((s) % 4) * 62)
@@ -512,9 +512,9 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 static int shown(const ok_ui *u, int list[BUTTONS])
 {
     static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, OK_UI_HAS_GAMES,
-                                            0, OK_UI_HAS_FRIEND, 0, 0};
+                                            OK_UI_HAS_FRIEND, 0, 0};
     /* What the mind says works here (ok_facts.og_features): 2 hearing, 4 the camera, 8 Pictionary, 16 dreams. */
-    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 0, 16, 0};
+    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 16, 0};
     int i, n = 0;
     for (i = 0; i < BUTTONS; i++) {
         if (needs_wire[i] && !(u->wired & needs_wire[i]) && !(ok_facts_now.og_features & needs_mind[i])) continue;
@@ -528,7 +528,7 @@ static void button(frame f, const uint8_t (*font)[8], int i, int s, const char *
                    const ok_pet *p)
 {
     static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY,  OK_ICON_PET,   OK_ICON_SLEEP,  OK_ICON_DRAW,
-                                      OK_ICON_GALLERY, OK_ICON_TALK, OK_ICON_PHOTO, OK_ICON_GAMES, OK_ICON_MAIL,
+                                      OK_ICON_GALLERY, OK_ICON_TALK, OK_ICON_PHOTO, OK_ICON_GAMES,
                                       OK_ICON_FRIEND, OK_ICON_DREAM, OK_ICON_DEV};
     static const int need[4] = {OK_NEED_HUNGER, OK_NEED_FUN, OK_NEED_LOVE, OK_NEED_ENERGY};
     int x = BX(s), y = BY(s) + (pressed ? 2 : 0);
@@ -868,11 +868,9 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
         centred(f, font, 128, WALLET_BAL_Y + 38, u->wallet_balance_note[0] ? u->wallet_balance_note : "tap to ask", RGB(24, 23, 21), 1);
         centred(f, font, 128, WALLET_BAL_Y + 51, "a public node's word (tap: ask again)", MUTED, 1);
         if (u->wallet_low && u->wallet_balance[0])
-            centred(f, font, 128, 118, "Low: a hello can cost up to 0.00006 ETH", RGB(31, 20, 12), 1);
+            centred(f, font, 128, 118, "Low: a drawing can cost up to 0.00012 ETH", RGB(31, 20, 12), 1);
         centred(f, font, 128, 130, "Sending never uses the RPC: P2P only", MUTED, 1);
         centred(f, font, 128, 152, u->wallet_status[0] ? u->wallet_status : "Show QR to receive ETH", PAPER, 1);
-        frame_box(f, 4, 166, 120, 22, PAPER, INK);
-        centred(f, font, 64, 173, "Send hello", INK, 1);
         frame_box(f, 126, 166, 62, 22, PAPER, INK);
         centred(f, font, 157, 173, "Show QR", INK, 1);
     } else {
@@ -899,8 +897,6 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
                     if (qrcodegen_getModule(qr, x, y)) rect(f, left + (x + 2) * scale, topq + (y + 2) * scale, scale, scale, RGB(0, 0, 0));
         }
         centred(f, font, 128, 156, u->wallet_balance[0] ? u->wallet_balance : "Scan to send ETH", PAPER, 1);
-        frame_box(f, 4, 166, 120, 22, PAPER, INK);
-        centred(f, font, 64, 173, "Send hello", INK, 1);
         frame_box(f, 126, 166, 62, 22, PAPER, INK);
         centred(f, font, 157, 173, "Hide QR", INK, 1);
     }
@@ -1474,7 +1470,6 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (u->scene == OK_UI_WALLET) {
         if (!u->wallet_ready && inside(x, y, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H)) return OK_UI_WALLET_SCRIBBLE;
-        if (u->wallet_ready && !held && inside(x, y, 4, 166, 120, 22)) return OK_UI_WALLET_HELLO;
         if (u->wallet_ready && !held && inside(x, y, 126, 166, 62, 22)) {
             u->wallet_qr = !u->wallet_qr;
             return OK_UI_CHANGED;
@@ -1630,7 +1625,6 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             say(u, "Draw something: I'll guess it!");
             return OK_UI_GAMES;
         case B_DRAW: u->scene = OK_UI_SKETCH; u->pictionary = 0; u->eraser = 0; return OK_UI_CHANGED;
-        case B_MAIL: return OK_UI_MAIL;
         case B_FRIEND: return OK_UI_FRIEND;
         case B_DREAM:
             if (u->dream_w) u->dream_ticks = 1200, u->dream_old = 1; /* the last one meanwhile, labelled as such */

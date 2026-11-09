@@ -106,7 +106,6 @@ static int fetch(void *ctx, const char *host, const char *head, size_t head_len,
 }
 
 static ok_think t;
-static char episode[65536];
 
 static ok_result run(ok_think_provider *p, const char *content)
 {
@@ -131,9 +130,6 @@ int main(void)
     static const char good[] = "{\\\"activity\\\":\\\"eat\\\",\\\"mood\\\":\\\"curious\\\",\\\"line\\\":\\\"A new book!\\\"}";
     uint8_t pub[64];
     ok_think_provider p = {"tee.example", "0x1cB95Eb66Cc67C62d4DE0CC96726C5A5d82e7C85", "0GM-1.0", {0}, 0};
-    ok_json root, v;
-    char s[8192];
-    size_t n;
 
     memset(fake.tee, 0x42, 32);
     assert(ok_keys_public(fake.tee, pub) == OK_OK);
@@ -154,15 +150,7 @@ int main(void)
         assert(!strcmp(t.recovered, want)); /* the signer recovered here, not just compared */
     }
 
-    /* The episode is JSON and carries the exact bytes. */
-    assert(ok_think_episode(&t, &p, 1800000000001ull, "ab12", episode, sizeof episode, &n) == OK_OK);
-    assert(ok_json_parse(episode, n, &root) == OK_OK);
-    assert(ok_json_member(&root, "request", &v) == OK_OK && ok_json_string(&v, s, sizeof s, &n) == OK_OK);
-    assert(n == t.request_len && !memcmp(s, t.request, n));
-    assert(ok_json_member(&root, "chat_id", &v) == OK_OK && ok_json_string(&v, s, sizeof s, &n) == OK_OK);
-    assert(!strcmp(s, "chat-abc_1"));
-    assert(strstr(episode, "\"prev_sha256\":\"ab12\""));
-    assert(strstr(episode, "\"stage\":\"decided\",\"verified\":true") && strstr(episode, "\"activity\":\"eat\""));
+    assert(!strcmp(t.chat_id, "chat-abc_1"));
 
     /* The broker renames the model to the upstream id the response names:
      * still ours byte for byte otherwise, so it verifies. */
@@ -174,8 +162,6 @@ int main(void)
         ok_sha256(fake.req_body, fake.req_len, h); /* the renamed request, as the TEE hashed it */
         assert(!memcmp(h, t.req_sha, 32) && fake.req_len == t.request_len + 5);
     }
-    assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
-    assert(strstr(episode, "\"upstream_model\":\"0GM-1.0-0427\""));
     fake.upstream = NULL;
 
     /* The wrong signer, or a signature over other bytes: refused, the okupa naps. */
@@ -188,8 +174,6 @@ int main(void)
     run(&p, good);
     assert(t.stage == OK_THINK_UNVERIFIED);
     fake.tamper = 0;
-    assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
-    assert(strstr(episode, "\"verified\":false") && strstr(episode, "\"safe_stop\":true"));
 
     /* A verified answer outside the closed sets is still refused. */
     run(&p, "{\\\"activity\\\":\\\"fly\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"hi\\\"}");
@@ -227,8 +211,6 @@ int main(void)
         assert(ok_think_hear(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
                OK_OK);
         assert(t.stage == OK_THINK_DECIDED && !strcmp(t.heard, "Hola, me llamo Victor.") && !t.body_json);
-        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK);
-        assert(strstr(episode, "\"kind\":\"hearing\"") && strstr(episode, "\"request_b64\":\"LS1va3Vw"));
         assert(ok_think_hear(&t, &p, device, 1, nonce, wav, sizeof wav, buf, 100, fetch, NULL) == OK_RANGE);
 
         /* Sight: one sentence from a vision answer, the image inside a
@@ -240,7 +222,6 @@ int main(void)
         assert(!t.quip[0]); /* no bar: what it saw, nothing to say */
         assert(strstr(fake.req_body, "\"url\":\"data:image/png;base64,UklGR"));
         assert(!strncmp(fake.req_body, "{\"chat_template_kwargs\":", 24));
-        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"sight\""));
 
         /* "what it sees | what Okupa says": split, quotes and spaces trimmed. */
         fake.content = "A man with dark hair, dim light | \\\"You look rad af. Kinda.\\\" "; /* JSON-escaped quotes */
@@ -266,13 +247,11 @@ int main(void)
                OK_OK);
         assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "a house"));
         assert(strstr(fake.req_body, "Pictionary") && strstr(fake.req_body, "\"max_tokens\":16"));
-        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"guess\":\"a house\""));
         fake.content = "A cosy little house! I want to live there!";
         assert(ok_think_comment(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
                OK_OK);
         assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "A cosy little house! I want to live there!"));
         assert(strstr(fake.req_body, "is showing it to you"));
-        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"comment\""));
         fake.content = "I think this might be a small cottage";
         assert(ok_think_guess(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
                OK_OK);
@@ -295,7 +274,6 @@ int main(void)
         assert(ok_think_plan(&t, &p, device, 1800000000000ull, nonce, &obs, fetch, NULL) == OK_OK);
         assert(t.stage == OK_THINK_DECIDED && !strcmp(t.plan.goal, "Learn the player's name"));
         assert(!strcmp(t.plan.plan, "Wave, then ask") && strstr(fake.req_body, "slow mind"));
-        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"plan\""));
         fake.content = "{\\\"entry\\\":\\\"Today a giant eye said hello. I waved. I think it likes me.\\\"}";
         obs.today[0] = "said: Hi!";
         obs.today[1] = "heard: hello okupa";
@@ -320,7 +298,6 @@ int main(void)
                               buf, sizeof buf, fetch, NULL) == OK_OK);
         assert(t.stage == OK_THINK_DECIDED && t.image_len == 10 && !memcmp(image, "\x89PNG\r\n\x1a\n\x3f\x00", 10));
         assert(!strncmp(fake.req_body, "{\"model\":\"0GM-1.0\",\"n\":1,\"output_format\":\"png\"", 46));
-        assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"dream\""));
         assert(ok_think_dream(&t, &p, device, 1, nonce, "a \"quoted\" dream", image, sizeof image, buf, sizeof buf, fetch,
                               NULL) == OK_ARGUMENT);
         fake.image_len = 0;

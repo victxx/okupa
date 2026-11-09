@@ -87,7 +87,6 @@ typedef struct {
     char og_request_id[48];
     uint32_t og_ms;
     char og_decision[40];    /* the closed-set action it chose */
-    char og_storage_root[67];
     char og_clock[32];       /* where UTC came from, e.g. "NTP, RTC 4d 2h slow" */
     char og_error[32];       /* why the last attempt stopped, "" if it did not */
     /* For the thought strip: the last verified decision as the okupa lived
@@ -97,7 +96,7 @@ typedef struct {
     char og_thought[64];     /* what it thought, or "" */
     char og_feature[40];     /* what else it did this time: "heard: ...", "saw: ...", "guessed: ..." */
     uint32_t og_decisions;   /* verified decisions since the console started */
-    uint32_t og_features;    /* what works here: 1 decide, 2 hear, 4 see, 8 guess, 16 dream, 32 store, 64 letters */
+    uint32_t og_features;    /* what works here: 1 decide, 2 hear, 4 see, 8 guess, 16 dream */
 
     /* The machine. */
     int dsi_mode;            /* 133 MHz DSi mode */

@@ -13,11 +13,11 @@
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM,
        OK_UI_GALLERY };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
-       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_HELLO, OK_UI_SEND_DRAWING, OK_UI_WALLET_BALANCE,
+       OK_UI_WALLET_SCRIBBLE, OK_UI_SEND_DRAWING, OK_UI_WALLET_BALANCE,
        /* Buttons the platform may act on (the okupa has already said a hint):
         * look through the camera, listen through the microphone, a game
-        * (it guesses the sketchbook's drawing), its letters, a friend. */
-       OK_UI_PHOTO, OK_UI_TALK, OK_UI_GAMES, OK_UI_MAIL, OK_UI_FRIEND,
+        * (it guesses the sketchbook's drawing), a friend. */
+       OK_UI_PHOTO, OK_UI_TALK, OK_UI_GAMES, OK_UI_FRIEND,
        /* Pictionary's Guess! (the doodle is in ok_ui.doodle); the sketchbook
         * closed with ink in it; a hung picture tapped in the gallery
         * (ok_ui.gallery_pick): the platform may ask 0G about each. */
@@ -30,7 +30,6 @@ enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_
 #define OK_UI_HAS_PHOTO 1
 #define OK_UI_HAS_TALK 2
 #define OK_UI_HAS_GAMES 4
-#define OK_UI_HAS_MAIL 8
 #define OK_UI_HAS_FRIEND 16
 #define OK_UI_DEV_LINES 14
 #define OK_UI_APS 5
