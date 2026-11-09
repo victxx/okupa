@@ -72,6 +72,7 @@ int main(void)
     memset(s.tx_pic, 0x3c, 512);
     s.watch_from = 26360000;
     s.tx_fee_level = 2;
+    s.tx_page = 1;
     s.tx_older = 2;
     memset(s.tx_older_hash[0], 0x61, 32);
     memset(s.tx_older_hash[1], 0x62, 32);
@@ -81,7 +82,7 @@ int main(void)
     assert(!memcmp(r.wall[0], s.wall[0], 512) && !memcmp(r.wall[1], s.wall[1], 1024) && r.wall_kind[1] == OK_PIC_TONES);
     assert(r.next_nonce == 7 && r.tx_len == 600 && !memcmp(r.tx, s.tx, 600) && !memcmp(r.tx_hash, s.tx_hash, 32));
     assert(r.tx_pic_kind == OK_PIC_DRAWING && !memcmp(r.tx_pic, s.tx_pic, 512) && r.watch_from == 26360000);
-    assert(r.tx_fee_level == 2 && r.tx_older == 2 && r.tx_older_hash[1][31] == 0x62); /* the versions a raised fee left */
+    assert(r.tx_page == 1 && r.tx_fee_level == 2 && r.tx_older == 2 && r.tx_older_hash[1][31] == 0x62); /* the versions a raised fee left */
 
     /* Any damage, a short read or trailing bytes: refused whole. */
     for (i = 0; i < n * 8; i += 13) {
@@ -155,7 +156,7 @@ int main(void)
         assert(!memcmp(r.pet.need, pet.need, OK_NEEDS) && !memcmp(r.page, s.page, 512));
         assert(r.wall_count == 2 && r.wall_kind[1] == OK_PIC_DRAWING && r.wall[1][0] == 0x22);
         assert(r.next_nonce == 3 && r.tx_len == 600 && !memcmp(r.tx, s.tx, 600) && !memcmp(r.tx_hash, s.tx_hash, 32));
-        assert(r.tx_kind == OK_TX_PICTURE && r.tx_pic_kind == OK_PIC_DRAWING && r.tx_pic[0] == 0x77);
+        assert(r.tx_kind == OK_TX_PICTURE && r.tx_page && r.tx_pic_kind == OK_PIC_DRAWING && r.tx_pic[0] == 0x77);
         assert(r.watch_from == 26360001);
         assert(ok_state_open(&st, DIR, &s) == 0 && ok_state_save(&st, &r) && ok_state_open(&st, DIR, &s) == 1);
         assert(s.next_nonce == 3 && s.tx_len == 600);

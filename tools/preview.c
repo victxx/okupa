@@ -297,6 +297,29 @@ int main(int argc, char **argv)
     shot(dir, "wallet", &u, &p, 15);
     u.wallet_qr = 1;
     shot(dir, "wallet-qr", &u, &p, 15);
+    { /* playing with a friend: waiting, the DS draws, the friend draws */
+        static ok_friend g;
+        int x;
+        u.wallet_qr = 0;
+        ok_friend_start(&g, 4821);
+        u.friend = &g;
+        strcpy(u.friend_where, "192.168.1.23:8080");
+        u.scene = OK_UI_FRIENDS;
+        shot(dir, "friend-waiting", &u, &p, 15);
+        strcpy(g.name, "Alex");
+        ok_friend_round(&g, OK_FRIEND_DS_DRAWS);
+        for (x = 10; x < 54; x++) ok_drawing_set(u.doodle, (unsigned)x, (unsigned)(20 + (x - 10) / 3), 1);
+        strcpy(g.guesses[0], "a mountain");
+        strcpy(g.guesses[1], "a hill");
+        g.guess_count = 2;
+        shot(dir, "friend-ds-draws", &u, &p, 15);
+        ok_friend_round(&g, OK_FRIEND_THEY_DRAW);
+        for (x = 8; x < 56; x++) ok_drawing_set(g.their_drawing, (unsigned)x, (unsigned)x, 1), ok_drawing_set(g.their_drawing, (unsigned)x, (unsigned)(63 - x), 1);
+        ok_friend_guess(&g, "a kiss");
+        g.ds_points = 2, g.friend_points = 2;
+        shot(dir, "friend-they-draw", &u, &p, 15);
+        u.friend = NULL;
+    }
     tech_shots(dir);
     return 0;
 }

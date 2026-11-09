@@ -1,6 +1,7 @@
 #ifndef OKUPA_UI_H
 #define OKUPA_UI_H
 
+#include "okupa_friend.h"
 #include "okupa_house.h"
 #include "okupa_music.h"
 #include "okupa_pet.h"
@@ -11,7 +12,7 @@
 #define OK_UI_W 256
 #define OK_UI_H 192
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM,
-       OK_UI_GALLERY };
+       OK_UI_GALLERY, OK_UI_FRIENDS };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
        OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_SPEED, OK_UI_SEND_DRAWING, OK_UI_WALLET_BALANCE,
        /* Buttons the platform may act on (the okupa has already said a hint):
@@ -24,7 +25,11 @@ enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_
        OK_UI_GUESS, OK_UI_DRAWING_DONE, OK_UI_GALLERY_LOOK,
        /* Dream, where the mind dreams (ok_facts og_features 16): a new dream
         * asked of 0G (the last one is shown meanwhile, if there is one). */
-       OK_UI_DREAM };
+       OK_UI_DREAM,
+       /* Playing with a friend (okupa_friend.h): their guess friend_pick was
+        * right; the DS player's own guess typed (in password); swap who
+        * draws; stop the game. */
+       OK_UI_FRIEND_RIGHT, OK_UI_FRIEND_TYPED, OK_UI_FRIEND_SWAP, OK_UI_FRIEND_STOP };
 /* What the platform really handles (ok_ui.wired): a button for any other
  * of these is hidden, never shown dead. */
 #define OK_UI_HAS_PHOTO 1
@@ -126,6 +131,12 @@ typedef struct {
      * caption of the player's own at the foot of the top screen. */
     char heard[OK_UI_CARD_TEXT + 1];
     int heard_ticks;
+    /* Playing with a friend: the game (the platform's), where to find it
+     * ("192.168.1.9:8080"), the guess tapped, and what the keyboard types
+     * for (0 a Wi-Fi password, 1 a guess at the friend's drawing). */
+    const ok_friend *friend;
+    char friend_where[24];
+    int friend_pick, typing;
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);

@@ -3,6 +3,7 @@
 #include "account.h"
 #include "audio.h"
 #include "mind.h"
+#include "friend_net.h"
 #include "senses.h"
 #include "net.h"
 #include "okupa_music.h"
@@ -216,7 +217,7 @@ static void forget_tx(void)
  * comes down when it is full), and a fresh page. */
 static void hang(ok_ui *u, const ok_pet *p)
 {
-    int drawing = state.tx_pic_kind != OK_PIC_TONES;
+    int drawing = state.tx_page; /* the sketchbook page was the picture */
     if (state.wall_count == OK_STATE_WALL) {
         memmove(state.wall[0], state.wall[1], sizeof state.wall[0] * (OK_STATE_WALL - 1));
         memmove(state.wall_kind, state.wall_kind + 1, OK_STATE_WALL - 1);
@@ -235,7 +236,7 @@ static void hang(ok_ui *u, const ok_pet *p)
 
 /* Signs a picture (a drawing, or a 4-tone photo), saves it with the nonce
  * moved on, and only then hands it to the postman. 1 if it is on its way. */
-static int send_picture(ok_ui *u, ok_pet *p, int kind, const uint8_t *pic)
+static int send_picture(ok_ui *u, ok_pet *p, int kind, const uint8_t *pic, int page)
 {
     static uint8_t tx[OK_STATE_TX_MAX];
     static ok_state before;
@@ -264,14 +265,15 @@ static int send_picture(ok_ui *u, ok_pet *p, int kind, const uint8_t *pic)
     memcpy(state.tx, tx, len);
     memcpy(state.tx_hash, hash, 32);
     state.tx_pic_kind = (uint8_t)kind;
+    state.tx_page = (uint8_t)page;
     memset(state.tx_pic, 0, sizeof state.tx_pic);
     memcpy(state.tx_pic, pic, ok_state_picture_size(kind));
     state.next_nonce++;
     state.watch_from = 0;
-    if (kind == OK_PIC_DRAWING) u->drawing_sent = 1;
+    if (page) u->drawing_sent = 1;
     if (!keep(u, p)) { /* not on the SD: it was never sent, and the nonce is still free */
         state = before;
-        if (kind == OK_PIC_DRAWING) u->drawing_sent = 0;
+        if (page) u->drawing_sent = 0;
         u->say = "I couldn't save it, so I didn't send it.";
         u->say_ticks = 300;
         return 0;
@@ -616,6 +618,7 @@ int main(void)
 
     ok_ui_init(&ui);
     if (isDSiMode()) ui.wired |= OK_UI_HAS_PHOTO; /* the cameras work without 0G: photos for the wall */
+    ui.wired |= OK_UI_HAS_FRIEND; /* a friend on the same Wi-Fi, with a phone or a computer */
     ok_tech_init(&tech);
     ok_pet_init(&pet, (int64_t)now);
     shown_ui = &ui;
@@ -686,7 +689,7 @@ int main(void)
             } else {
                 ok_dsi_net_send(state.tx, state.tx_len, state.tx_hash, state.watch_from);
                 for (k = 0; k < state.tx_older; k++) ok_dsi_net_also_watch(state.tx_older_hash[k]);
-                if (drawing_waiting() && state.tx_pic_kind == OK_PIC_DRAWING) {
+                if (drawing_waiting() && state.tx_page) {
                     ui.drawing_sent = 1;
                     memcpy(ui.drawing, state.tx_pic, 512);
                 }
@@ -772,6 +775,82 @@ int main(void)
             }
         }
         balance_take(&ui);
+        /* Playing with a friend: their browser's requests answered, and what
+         * they did told by the okupa. */
+        {
+            static ok_friend friend;
+            static int gift_waiting, was_here;
+            static uint8_t gift[512];
+            static char said[64];
+            ui.friend = &friend;
+            if (ui.scene == OK_UI_FRIENDS && friend.mode == OK_FRIEND_OFF && ok_dsi_friend_open()) {
+                ok_friend_start(&friend, (uint16_t)(cpuGetTiming() ^ (uint32_t)now));
+                ok_dsi_friend_where(ui.friend_where);
+                ok_facts_log(ok_dsi_uptime(), 'D', "friend game on %s, code %u", ui.friend_where, friend.code);
+            }
+            if (friend.mode != OK_FRIEND_OFF) {
+                int here;
+                ok_dsi_friend_step(&friend, (uint32_t)now);
+                if (friend.mode == OK_FRIEND_DS_DRAWS) memcpy(friend.ds_drawing, ui.doodle, 512); /* they see it grow */
+                here = ok_friend_here(&friend, (uint32_t)now);
+                if (here && !was_here) {
+                    snprintf(said, sizeof said, "%.16s is here! Let's play.", friend.name);
+                    ui.say = said, ui.say_ticks = 300;
+                    ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, "brought a friend to play Pictionary");
+                    local_did = "played with you";
+                    redraw = 1;
+                }
+                was_here = here;
+                if (friend.guesses_new) {
+                    friend.guesses_new = 0;
+                    snprintf(said, sizeof said, "%.12s says: %.24s?", friend.name, friend.guesses[0]);
+                    ui.say = said, ui.say_ticks = 240;
+                    redraw = 1;
+                }
+                if (friend.their_new) friend.their_new = 0, redraw = 1;
+                if (friend.judged_new) {
+                    friend.judged_new = 0;
+                    ui.say = friend.ds_guess_state == OK_GUESS_RIGHT ? "We got it! A point each." : "Not that one. Try again!";
+                    ui.say_ticks = 240;
+                    if (friend.ds_guess_state == OK_GUESS_RIGHT) {
+                        ok_monkey_event(&ui.anim, OK_EVENT_PLAY);
+                        ok_friend_round(&friend, OK_FRIEND_DS_DRAWS); /* your turn to draw */
+                        memset(ui.doodle, 0, sizeof ui.doodle);
+                    }
+                    redraw = 1;
+                }
+                if (friend.gift_new && !gift_waiting) { /* a drawing for the okupa: hang it only if the player says so */
+                    friend.gift_new = 0;
+                    gift_waiting = 1;
+                    memcpy(gift, friend.gift, sizeof gift);
+                    snprintf(said, sizeof said, "%.16s drew this for me!", friend.name);
+                    ok_ui_card_drawing(&ui, "A gift", said, gift, 0, "A: hang it (Ethereum)  B: no");
+                    ui.card_live = 1;
+                    redraw = 1;
+                }
+            }
+            if (gift_waiting) {
+                if (ui.card_ticks) ui.card_ticks = 600;
+                if (!tech_on && (keysDown() & KEY_A)) {
+                    gift_waiting = 0;
+                    ok_ui_card(&ui, NULL, NULL, NULL, 0, 0, 0, NULL);
+                    if (send_picture(&ui, &pet, OK_PIC_DRAWING, gift, 0)) {
+                        ui.say = "Signed! It goes on the wall once a block has it.";
+                        ui.say_ticks = 300;
+                    }
+                    redraw = 1;
+                } else if ((!tech_on && (keysDown() & KEY_B)) || !ui.card_ticks) {
+                    gift_waiting = 0;
+                    ok_ui_card(&ui, NULL, NULL, NULL, 0, 0, 0, NULL);
+                    redraw = 1;
+                }
+            }
+            if (ui.scene == OK_UI_FRIENDS && friend.mode == OK_FRIEND_OFF && !ui.friend_where[0]) {
+                ui.say = "I need Wi-Fi to play with a friend: Dev > Wi-Fi.";
+                ui.say_ticks = 300;
+                ui.scene = OK_UI_HOME;
+            }
+        }
         if (hang_waiting) { /* at once: a power cut before it hangs must not lose it */
             hang(&ui, &pet);
             hang_waiting = 0;
@@ -938,7 +1017,8 @@ int main(void)
                 inked |= page[k];
             }
             if (sum != doodle_sum) doodle_sum = sum, stroke_at = (uint32_t)now_us();
-            if (!tech_on && (keysDown() & KEY_X) && !ui.card_live && (ui.scene == OK_UI_HOME || ui.scene == OK_UI_SKETCH))
+            if (!tech_on && (keysDown() & KEY_X) && !ui.card_live && ui.pictionary != 2 &&
+                (ui.scene == OK_UI_HOME || ui.scene == OK_UI_SKETCH))
                 game_guess_wanted = 1;
             if (game_guess_wanted) {
                 game_guess_wanted = 0;
@@ -961,7 +1041,7 @@ int main(void)
                     game_since = now;
                     doodle_guessed = sum;
                 }
-            } else if (ui.scene == OK_UI_SKETCH && ui.pictionary && inked && !game_waiting && !game_asked && sum != doodle_guessed &&
+            } else if (ui.scene == OK_UI_SKETCH && ui.pictionary == 1 && inked && !game_waiting && !game_asked && sum != doodle_guessed &&
                        !(keysHeld() & KEY_TOUCH) && (uint32_t)now_us() - stroke_at > 1500000u && now - game_since >= 8 &&
                        ok_dsi_mind_alive()) { /* the stylus rests: what does it look like so far? */
                 if (ok_dsi_mind_guess(page)) {
@@ -1176,7 +1256,7 @@ int main(void)
                 } else if (!tech_on && (keysDown() & KEY_A)) { /* on the wall, once a block holds it */
                     photo_ready = 0;
                     ok_dsi_eye_preview_stop(0);
-                    if (send_picture(&ui, &pet, OK_PIC_TONES, photo))
+                    if (send_picture(&ui, &pet, OK_PIC_TONES, photo, 0))
                         ok_ui_card(&ui, "On its way", "Signed here. It goes up once a block has it.", px, 128, 96, 0, "");
                     else
                         ok_ui_card(&ui, NULL, NULL, NULL, 0, 0, 0, NULL);
@@ -1473,12 +1553,36 @@ int main(void)
             }
             if (r == OK_UI_WALLET_BALANCE) balance_ask(&ui);
             if (r == OK_UI_WALLET_SPEED) speed_up(&ui, &pet);
+            if (ui.friend && r == OK_UI_FRIEND_RIGHT) {
+                ok_friend_right((ok_friend *)ui.friend, ui.friend_pick); /* a point each; their turn to draw */
+                memset(ui.doodle, 0, sizeof ui.doodle);
+                ui.say = "Yes! A point each. Your friend draws now.";
+                ui.say_ticks = 300;
+                ok_monkey_event(&ui.anim, OK_EVENT_PLAY);
+            }
+            if (ui.friend && r == OK_UI_FRIEND_TYPED) {
+                ok_friend_guess((ok_friend *)ui.friend, ui.password);
+                ui.typing = 0;
+            }
+            if (ui.friend && r == OK_UI_FRIEND_SWAP) {
+                ok_friend_round((ok_friend *)ui.friend,
+                                ui.friend->mode == OK_FRIEND_DS_DRAWS ? OK_FRIEND_THEY_DRAW : OK_FRIEND_DS_DRAWS);
+                memset(ui.doodle, 0, sizeof ui.doodle);
+            }
+            if (ui.friend && r == OK_UI_FRIEND_STOP) {
+                ok_friend_stop((ok_friend *)ui.friend);
+                ok_dsi_friend_close();
+                ui.friend_where[0] = 0;
+                ui.pictionary = 0;
+                ui.say = "That was fun. Come back soon!";
+                ui.say_ticks = 300;
+            }
             if (r == OK_UI_WALLET_SCRIBBLE) {
                 int was = ui.wallet_ready;
                 ok_dsi_account_scribble(touch.px, touch.py, &ui);
                 if (!was && ui.wallet_ready) balance_ask(&ui);
             }
-            if (r == OK_UI_SEND_DRAWING && storage && send_picture(&ui, &pet, OK_PIC_DRAWING, ui.drawing)) {
+            if (r == OK_UI_SEND_DRAWING && storage && send_picture(&ui, &pet, OK_PIC_DRAWING, ui.drawing, 1)) {
                 memcpy(comment_px, ui.drawing, sizeof comment_px); /* its mind on 0G looks at it and says something */
                 comment_wanted = 3;
             }

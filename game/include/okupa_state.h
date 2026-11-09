@@ -38,6 +38,7 @@ typedef struct {
     /* The transaction on its way: kind, the signed bytes and their hash, and
      * the picture it hangs once a block holds it. */
     uint8_t tx_kind;
+    uint8_t tx_page;      /* 1: the picture is the sketchbook page, locked until it hangs */
     uint8_t tx_fee_level; /* how many times its fee was raised (same nonce, new bytes) */
     uint8_t tx_older;     /* earlier versions still to look for in blocks */
     uint8_t tx_older_hash[3][32];

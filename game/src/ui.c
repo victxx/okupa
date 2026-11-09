@@ -813,13 +813,15 @@ static void sketch(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
     const uint8_t *page = u->pictionary ? u->doodle : u->drawing;
     int x, y, i;
-    centred(f, font, 128, 12, u->pictionary ? "Pictionary: draw, I guess" : "Sketchbook", PAPER, 2);
+    centred(f, font, 128, 12, u->pictionary == 2 ? "Draw: your friend guesses" : u->pictionary ? "Pictionary: draw, I guess"
+                                                                                               : "Sketchbook", PAPER, 2);
     rect(f, CX - 2, CY - 2, 132, 132, INK);
     for (y = 0; y < 64; y++)
         for (x = 0; x < 64; x++) rect(f, CX + 2 * x, CY + 2 * y, 2, 2, ok_drawing_get(page, x, y) ? INK : PAPER);
     for (i = 0; i < TOOLS; i++) {
         int on = (i == T_PEN && !u->eraser) || (i == T_ERASER && u->eraser);
-        const char *label = i == T_SEND && u->pictionary ? "Guess!" : i == T_SEND && u->drawing_sent ? "On its way" : tools[i];
+        const char *label = i == T_SEND && u->pictionary == 2 ? "Guesses" : i == T_SEND && u->pictionary ? "Guess!"
+                            : i == T_SEND && u->drawing_sent ? "On its way" : tools[i];
         frame_box(f, TX, TY(i), TW, TH, on || (i == T_SEND && u->pictionary) ? RGB(29, 22, 6) : PAPER, INK);
         centred(f, font, TX + TW / 2, TY(i) + 9, label, INK, 1);
     }
@@ -945,7 +947,8 @@ static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
 {
     char head[33], shown[29];
     int r, c, n = u->password_len;
-    snprintf(head, sizeof head, "Password: %.22s", u->ap_selected >= 0 ? u->aps[u->ap_selected].ssid : "");
+    if (u->typing) snprintf(head, sizeof head, "Your guess:");
+    else snprintf(head, sizeof head, "Password: %.22s", u->ap_selected >= 0 ? u->aps[u->ap_selected].ssid : "");
     text(f, font, 6, 4, head, PAPER, 1);
     frame_box(f, 6, 14, 244, 18, PAPER, INK);
     snprintf(shown, sizeof shown, "%.28s", u->password + (n > 28 ? n - 28 : 0));
@@ -967,7 +970,71 @@ static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
     frame_box(f, 8, 166, 110, 22, PAPER, INK);
     centred(f, font, 63, 173, "Cancel", INK, 1);
     frame_box(f, 138, 166, 110, 22, RGB(29, 22, 6), INK);
-    centred(f, font, 193, 173, "Connect", INK, 1);
+    centred(f, font, 193, 173, u->typing ? "Guess" : "Connect", INK, 1);
+}
+
+/* ---- Playing with a friend ------------------------------------------------- */
+
+static void friends(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    const ok_friend *g = u->friend;
+    char s[48];
+    int k, x, y;
+    centred(f, font, 128, 6, "Play with a friend", PAPER, 2);
+    if (!g || g->mode == OK_FRIEND_OFF) {
+        centred(f, font, 128, 80, "Needs Wi-Fi: Dev > Wi-Fi", MUTED, 1);
+    } else if (g->mode == OK_FRIEND_WAITING) {
+        centred(f, font, 128, 34, "On a phone or computer on this Wi-Fi,", MUTED, 1);
+        centred(f, font, 128, 46, "open this in the browser:", MUTED, 1);
+        snprintf(s, sizeof s, "%s", u->friend_where);
+        centred(f, font, 128, 62, s, PAPER, 2);
+        centred(f, font, 128, 90, "and type the code", MUTED, 1);
+        snprintf(s, sizeof s, "%u", (unsigned)g->code);
+        centred(f, font, 128, 104, s, RGB(31, 26, 10), 2);
+        centred(f, font, 128, 134, "Waiting for a friend...", PAPER, 1);
+    } else {
+        snprintf(s, sizeof s, "You %d  -  %.16s %d", g->ds_points, g->name, g->friend_points);
+        centred(f, font, 128, 24, s, RGB(24, 23, 21), 1);
+        if (g->mode == OK_FRIEND_DS_DRAWS) { /* their guesses: tap the right one */
+            rect(f, 8, 36, 68, 68, INK);
+            for (y = 0; y < 64; y++)
+                for (x = 0; x < 64; x++) rect(f, 10 + x, 38 + y, 1, 1, ok_drawing_get(u->doodle, x, y) ? INK : PAPER);
+            snprintf(s, sizeof s, "%.16s guesses:", g->name);
+            text(f, font, 84, 36, s, PAPER, 1);
+            if (!g->guess_count) text(f, font, 84, 52, "nothing yet", MUTED, 1);
+            for (k = 0; k < g->guess_count; k++) {
+                frame_box(f, 84, 48 + k * 24, 164, 20, PAPER, INK);
+                snprintf(s, sizeof s, "%.22s", g->guesses[k]);
+                text(f, font, 90, 54 + k * 24, s, INK, 1);
+            }
+            centred(f, font, 128, 150, g->guess_count ? "Tap the one that is right" : "Draw: they see it as you go", MUTED, 1);
+        } else { /* their drawing, and the DS player's guess */
+            rect(f, 8, 36, 132, 132, INK);
+            for (y = 0; y < 64; y++)
+                for (x = 0; x < 64; x++) rect(f, 10 + 2 * x, 38 + 2 * y, 2, 2, ok_drawing_get(g->their_drawing, x, y) ? INK : PAPER);
+            snprintf(s, sizeof s, "%.14s draws.", g->name);
+            text(f, font, 146, 40, s, PAPER, 1);
+            text(f, font, 146, 58, g->ds_guess[0] ? "You said:" : "What is it?", MUTED, 1);
+            if (g->ds_guess[0]) {
+                snprintf(s, sizeof s, "%.16s", g->ds_guess);
+                text(f, font, 146, 70, s, PAPER, 1);
+            }
+            text(f, font, 146, 86,
+                 g->ds_guess_state == OK_GUESS_RIGHT ? "Right!" : g->ds_guess_state == OK_GUESS_WRONG ? "Not that."
+                 : g->ds_guess_state == OK_GUESS_ASKED ? "They're judging" : "",
+                 g->ds_guess_state == OK_GUESS_RIGHT ? RGB(12, 26, 12) : RGB(28, 20, 16), 1);
+            frame_box(f, 146, 108, 102, 22, RGB(29, 22, 6), INK);
+            centred(f, font, 197, 115, "Guess", INK, 1);
+        }
+    }
+    frame_box(f, 4, 166, 58, 22, PAPER, INK);
+    centred(f, font, 33, 173, g && g->mode == OK_FRIEND_DS_DRAWS ? "Draw" : "-", INK, 1);
+    frame_box(f, 64, 166, 62, 22, PAPER, INK);
+    centred(f, font, 95, 173, "Swap", INK, 1);
+    frame_box(f, 128, 166, 60, 22, PAPER, INK);
+    centred(f, font, 158, 173, "Stop", INK, 1);
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, "Back", INK, 1);
 }
 
 /* The mood the okupa shows: the pet's, or happy for a while after a treat. */
@@ -1020,7 +1087,8 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         }
         if (u->scene == OK_UI_SKETCH) {
             if (draw) sketch(bottom, font, u);
-            if (!u->say) line = u->pictionary ? "Draw something, I'll guess it!" : "Draw me something for the house!";
+            if (!u->say) line = u->pictionary == 2 ? "Ooh, what is it? Don't tell me!" : u->pictionary ? "Draw something, I'll guess it!"
+                                                                                   : "Draw me something for the house!";
         } else if (u->scene == OK_UI_DEV) {
             if (draw) dev(bottom, font, u);
         } else if (u->scene == OK_UI_WIFI) {
@@ -1038,6 +1106,9 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         } else if (u->scene == OK_UI_CLOSET) {
             if (draw) closet(bottom, font, u);
             if (!u->say) line = "How do I look?";
+        } else if (u->scene == OK_UI_FRIENDS) {
+            if (draw) friends(bottom, font, u);
+            if (!u->say) line = u->friend && u->friend->mode >= OK_FRIEND_DS_DRAWS ? "Ooh, a game!" : "A friend? For me?";
         } else if (draw) {
             home_buttons(bottom, font, u, p);
         }
@@ -1441,6 +1512,10 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             if (i == T_ERASER) u->eraser = 1;
             if (i == T_CLEAR && u->pictionary) memset(u->doodle, 0, sizeof u->doodle);
             else if (i == T_CLEAR && !u->drawing_sent) memset(u->drawing, 0, sizeof u->drawing);
+            if ((i == T_SEND || i == T_DONE) && u->pictionary == 2) { /* back to the game, the drawing stays */
+                u->scene = OK_UI_FRIENDS;
+                return OK_UI_CHANGED;
+            }
             if (i == T_SEND && u->pictionary) {
                 int k;
                 for (k = 0; k < (int)sizeof u->doodle && !u->doodle[k]; k++) {}
@@ -1515,6 +1590,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             u->password_len = 0;
             u->keys = 0;
             if (!u->aps[i].secure) return OK_UI_WIFI_CONNECT;
+            u->typing = 0; /* a Wi-Fi password */
             u->scene = OK_UI_PASSWORD;
             return OK_UI_CHANGED;
         }
@@ -1537,14 +1613,50 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         } else if (inside(x, y, 8, 166, 110, 22)) {
             memset(u->password, 0, sizeof u->password);
             u->password_len = 0;
-            u->scene = OK_UI_WIFI;
+            u->scene = u->typing ? OK_UI_FRIENDS : OK_UI_WIFI;
         } else if (inside(x, y, 138, 166, 110, 22)) {
-            u->scene = OK_UI_WIFI;
-            return OK_UI_WIFI_CONNECT;
+            u->scene = u->typing ? OK_UI_FRIENDS : OK_UI_WIFI;
+            return u->typing ? OK_UI_FRIEND_TYPED : OK_UI_WIFI_CONNECT;
         } else {
             return OK_UI_NOTHING;
         }
         return OK_UI_CHANGED;
+    }
+    if (u->scene == OK_UI_FRIENDS) {
+        const ok_friend *g = u->friend;
+        int k;
+        if (held) return OK_UI_NOTHING;
+        if (inside(x, y, 190, 166, 62, 22)) { /* Back: the game goes on, the page keeps working */
+            u->scene = OK_UI_HOME;
+            return OK_UI_CHANGED;
+        }
+        if (inside(x, y, 128, 166, 60, 22)) {
+            u->scene = OK_UI_HOME;
+            return OK_UI_FRIEND_STOP;
+        }
+        if (!g || g->mode < OK_FRIEND_DS_DRAWS) return OK_UI_NOTHING;
+        if (inside(x, y, 64, 166, 62, 22)) return OK_UI_FRIEND_SWAP;
+        if (g->mode == OK_FRIEND_DS_DRAWS) {
+            if (inside(x, y, 4, 166, 58, 22) || inside(x, y, 8, 36, 68, 68)) { /* draw on the sketchbook's own page */
+                u->scene = OK_UI_SKETCH;
+                u->pictionary = 2;
+                u->eraser = 0;
+                return OK_UI_CHANGED;
+            }
+            for (k = 0; k < g->guess_count; k++)
+                if (inside(x, y, 84, 48 + k * 24, 164, 20)) {
+                    u->friend_pick = k;
+                    return OK_UI_FRIEND_RIGHT;
+                }
+        } else if (inside(x, y, 146, 108, 102, 22) && g->ds_guess_state != OK_GUESS_ASKED) {
+            memset(u->password, 0, sizeof u->password);
+            u->password_len = 0;
+            u->keys = 0;
+            u->typing = 1;
+            u->scene = OK_UI_PASSWORD;
+            return OK_UI_CHANGED;
+        }
+        return OK_UI_NOTHING;
     }
     if (u->scene == OK_UI_GALLERY) {
         if (!held && inside(x, y, BACK_X, BACK_Y, 56, 22)) {
@@ -1632,7 +1744,9 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             say(u, "Draw something: I'll guess it!");
             return OK_UI_GAMES;
         case B_DRAW: u->scene = OK_UI_SKETCH; u->pictionary = 0; u->eraser = 0; return OK_UI_CHANGED;
-        case B_FRIEND: return OK_UI_FRIEND;
+        case B_FRIEND:
+            u->scene = OK_UI_FRIENDS;
+            return OK_UI_FRIEND;
         case B_DREAM:
             if (u->dream_w) u->dream_ticks = 1200, u->dream_old = 1; /* the last one meanwhile, labelled as such */
             return ok_facts_now.og_features & 16 ? OK_UI_DREAM : OK_UI_CHANGED;

@@ -27,7 +27,7 @@ ok_result ok_state_encode(const ok_state *s, uint64_t generation, uint8_t *out, 
 {
     uint8_t *q = out;
     int i;
-    size_t need = 8 + 8 + 29 + 512 + 1 + 8 + 8 + 1 + 2 + 2 + 32 + 1 + 8 + 32, pic;
+    size_t need = 8 + 8 + 29 + 512 + 1 + 8 + 8 + 1 + 3 + 2 + 32 + 1 + 8 + 32, pic;
     if (!s || !out || !len) return OK_ARGUMENT;
     if (s->wall_count < 0 || s->wall_count > OK_STATE_WALL || s->tx_len > OK_STATE_TX_MAX || !generation)
         return OK_ARGUMENT;
@@ -60,6 +60,7 @@ ok_result ok_state_encode(const ok_state *s, uint64_t generation, uint8_t *out, 
     put(q, s->chain_id, 8), q += 8;
     put(q, s->next_nonce, 8), q += 8;
     *q++ = s->tx_kind;
+    *q++ = s->tx_page;
     *q++ = s->tx_fee_level;
     *q++ = s->tx_older;
     for (i = 0; i < s->tx_older; i++) memcpy(q, s->tx_older_hash[i], 32), q += 32;
@@ -120,6 +121,9 @@ ok_result ok_state_decode(const uint8_t *in, size_t n, ok_state *s, uint64_t *ge
     t.chain_id = get(q, 8), q += 8;
     t.next_nonce = get(q, 8), q += 8;
     t.tx_kind = *q++;
+    NEED(2);
+    t.tx_page = *q++;
+    if (t.tx_page > 1) return OK_FORMAT;
     t.tx_fee_level = *q++;
     t.tx_older = *q++;
     if (t.tx_older > 3) return OK_FORMAT;
@@ -304,6 +308,7 @@ int ok_state_import(const char *dir, const char *net, ok_state *s)
         uint8_t hash[32];
         if (fread(hash, 1, 32, f) == 32 && !memcmp(hash, s->tx_hash, 32) && fread(s->tx_pic, 1, 512, f) == 512) {
             s->tx_kind = OK_TX_PICTURE;
+            s->tx_page = 1;
             s->tx_pic_kind = OK_PIC_DRAWING;
         }
         fclose(f);

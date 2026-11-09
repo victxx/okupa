@@ -44,7 +44,31 @@ int main(void)
     assert(u.scene == OK_UI_SKETCH && u.pictionary); /* Pictionary: its own page in the sketchbook */
     u.scene = OK_UI_HOME;
     u.pictionary = 0;
-    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_FRIEND);
+    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_FRIEND && u.scene == OK_UI_FRIENDS);
+    {
+        /* The friends screen: waiting shows the address and code; a guess tapped is reported; Back keeps the game. */
+        static ok_friend g;
+        ok_friend_start(&g, 1234);
+        u.friend = &g;
+        snprintf(u.friend_where, sizeof u.friend_where, "192.168.1.9:8080");
+        ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+        ok_friend_round(&g, OK_FRIEND_DS_DRAWS);
+        snprintf(g.guesses[0], sizeof g.guesses[0], "a cat");
+        g.guess_count = 1;
+        ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+        assert(ok_ui_touch(&u, &p, 120, 55, 0, t) == OK_UI_FRIEND_RIGHT && u.friend_pick == 0);
+        assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_SKETCH && u.pictionary == 2);
+        u.scene = OK_UI_FRIENDS;
+        ok_friend_round(&g, OK_FRIEND_THEY_DRAW);
+        ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+        assert(ok_ui_touch(&u, &p, 190, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_PASSWORD && u.typing);
+        assert(ok_ui_touch(&u, &p, 190, 176, 0, t) == OK_UI_FRIEND_TYPED && u.scene == OK_UI_FRIENDS);
+        assert(ok_ui_touch(&u, &p, 95, 176, 0, t) == OK_UI_FRIEND_SWAP);
+        assert(ok_ui_touch(&u, &p, 220, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
+        u.friend = NULL;
+        u.typing = 0;
+        u.pictionary = 0;
+    }
     assert(ok_ui_touch(&u, &p, 95, 157, 0, t) == OK_UI_CHANGED && u.page == 0); /* Care */
     u.wired = 0;
     ok_facts_now.og_features = 1 | 2 | 8; /* the mind hears and plays, no camera */
