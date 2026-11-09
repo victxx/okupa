@@ -7,8 +7,8 @@ SANITIZE_FLAGS = -std=c99 -g -O1 -Wall -Wextra -Wpedantic -Werror $(NO_TRUNC) -f
 CPPFLAGS += -Icore/include -Igame/include -Ithird_party/tiny_sha3 -Ithird_party/secp256k1/include -Ithird_party/bearssl/inc -Ithird_party/font8x8 -Ithird_party/qrcodegen
 BUILD ?= build
 
-CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/photo.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c core/src/sntp.c core/src/png.c core/src/unpng.c core/src/wav.c core/src/session.c core/src/block.c core/src/discv4.c core/src/tls.c core/src/tls_anchors.c game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/music.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/state.c game/src/seeds.c game/src/mind.c game/src/instinct.c game/src/think.c game/src/memory.c game/src/make.c game/src/jsonrpc.c game/src/balance.c game/src/facts.c game/src/tech.c third_party/qrcodegen/qrcodegen.c third_party/tiny_sha3/sha3.c game/src/plant_art.c game/src/sky_art.c
-TESTS = core keccak rlp block secp keys tx act sha256 ecdh aes ecies rlpx snappy p2p eth enr dnsdisc dns zerog json http sntp png unpng wav tls discv4 pet ui checks save mind think memory make balance instinct state seeds photo
+CORE = core/src/okupa.c core/src/keccak.c core/src/rlp.c core/src/keys.c core/src/tx.c core/src/act.c core/src/photo.c core/src/sha256.c core/src/ecdh.c core/src/aes.c core/src/ecies.c core/src/rlpx.c core/src/snappy.c core/src/p2p.c core/src/eth.c core/src/enr.c core/src/dnsdisc.c core/src/dns.c core/src/zerog.c core/src/json.c core/src/http.c core/src/sntp.c core/src/png.c core/src/unpng.c core/src/wav.c core/src/session.c core/src/block.c core/src/discv4.c core/src/tls.c core/src/tls_anchors.c game/src/pet.c game/src/ui.c game/src/r3d.c game/src/monkey.c game/src/house.c game/src/intro.c game/src/icons.c game/src/room_skin.c game/src/outside_skin.c game/src/ivy_art.c game/src/music.c game/src/font.c game/src/font_sans.c game/src/checks.c game/src/save.c game/src/state.c game/src/seeds.c game/src/friend.c game/src/friend_page.c game/src/mind.c game/src/instinct.c game/src/think.c game/src/memory.c game/src/make.c game/src/jsonrpc.c game/src/balance.c game/src/facts.c game/src/tech.c third_party/qrcodegen/qrcodegen.c third_party/tiny_sha3/sha3.c game/src/plant_art.c game/src/sky_art.c
+TESTS = core keccak rlp block secp keys tx act sha256 ecdh aes ecies rlpx snappy p2p eth enr dnsdisc dns zerog json http sntp png unpng wav tls discv4 pet ui checks save mind think memory make balance instinct state seeds photo friend
 
 # libsecp256k1 is built as upstream ships it, with its own warning level, plus
 # the modules we need: recoverable signatures and ECDH (for RLPx).
@@ -23,10 +23,10 @@ BEAR = third_party/bearssl
 BEAR_SRC = $(shell find $(BEAR)/src -name '*.c')
 BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 
-.PHONY: all test sanitize clean peer preview perf gallery-test
+.PHONY: all test sanitize clean peer preview perf gallery-test friend-page-check
 # Keep library objects between builds.
 .SECONDARY:
-all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house $(BUILD)/okupa-music $(BUILD)/okupa-intro $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https $(BUILD)/okupa-crawl $(BUILD)/okupa-mind $(BUILD)/okupa-seeds
+all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house $(BUILD)/okupa-music $(BUILD)/okupa-intro $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https $(BUILD)/okupa-crawl $(BUILD)/okupa-mind $(BUILD)/okupa-seeds $(BUILD)/okupa-friend
 
 # The host peer: sockets and entropy around the same core.
 $(BUILD)/okupa-peer: tools/peer.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
@@ -50,8 +50,16 @@ $(BUILD)/okupa-act-vectors: tools/gallery/vectors.c core/src/act.c core/src/okup
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< core/src/act.c core/src/okupa.c -o $@
 
+friend-page-check:
+	python3 tools/friend/embed.py --check
+
 gallery-test: $(BUILD)/okupa-act-vectors
 	node tools/gallery/test.mjs $(BUILD)/okupa-act-vectors
+
+# The friend game's server on a computer, with a pretend DS player.
+$(BUILD)/okupa-friend: tools/friend.c game/src/friend.c game/src/friend_page.c core/src/act.c core/src/okupa.c $(wildcard core/include/*.h game/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< game/src/friend.c game/src/friend_page.c core/src/act.c core/src/okupa.c -lm -o $@
 
 # One-use seeds for the console's entropy, from this computer's random source.
 $(BUILD)/okupa-seeds: tools/seeds.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)
