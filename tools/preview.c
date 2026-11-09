@@ -320,6 +320,23 @@ int main(int argc, char **argv)
         shot(dir, "friend-they-draw", &u, &p, 15);
         u.friend = NULL;
     }
+    { /* the small games */
+        int k;
+        u.scene = OK_UI_GAMES_MENU;
+        shot(dir, "games", &u, &p, 15);
+        u.scene = OK_UI_PLAY;
+        u.game = 1;
+        ok_catch_start(&u.catching, 5);
+        for (k = 0; k < 400; k++) ok_catch_tick(&u.catching);
+        u.catching.caught = 7;
+        shot(dir, "game-banana", &u, &p, 15);
+        u.game = 2;
+        ok_simon_start(&u.copying, 9);
+        u.copying.rounds = 3;
+        u.copying.lit = 2;
+        shot(dir, "game-copy", &u, &p, 15);
+        u.game = 0;
+    }
     tech_shots(dir);
     return 0;
 }

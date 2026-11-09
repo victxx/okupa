@@ -30,9 +30,37 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && p.asleep);
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Zzz... (it's sleeping)"));
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && !p.asleep);
-    /* No mind: one menu (Feed..Sleep, Draw, Gallery, Dev), no tabs, no dead buttons. */
+    /* No mind: one menu (Feed..Sleep, Draw, Gallery, Games, Dev), no tabs, no dead buttons. */
     assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_NOTHING);
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_NOTHING);
+    /* Games: its own small games, no network needed. Banana catch feeds it. */
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GAMES_MENU);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    p.need[OK_NEED_HUNGER] = 40;
+    assert(ok_ui_touch(&u, &p, 100, 40, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_PLAY && u.game == 1);
+    for (i = 0; i < 300; i++) ok_ui_tick(&u, &p);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    {
+        int k, tapped = 0;
+        for (k = 0; k < OK_CATCH_BANANAS; k++)
+            if (u.catching.y[k] >= 0) tapped += ok_ui_touch(&u, &p, u.catching.x[k] + 5, u.catching.y[k] + 5, 0, t) == OK_UI_CHANGED;
+        assert(tapped && u.catching.caught == tapped);
+    }
+    u.catching.caught = 8; /* two bites' worth */
+    assert(ok_ui_touch(&u, &p, 220, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME && p.need[OK_NEED_HUNGER] > 40);
+    assert(u.did && strstr(u.did, "banana"));
+    u.did = NULL;
+    /* Copy me: wrong pad at once ends it; Done goes home. */
+    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GAMES_MENU);
+    assert(ok_ui_touch(&u, &p, 100, 70, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_PLAY && u.game == 2);
+    for (i = 0; i < 300 && u.copying.state == OK_SIMON_SHOW; i++) ok_ui_tick(&u, &p);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    {
+        int wrong = (u.copying.row[0] + 1) % 4;
+        assert(ok_ui_touch(&u, &p, 16 + (wrong % 2) * 116 + 20, 34 + (wrong / 2) * 62 + 20, 0, t) == OK_UI_CHANGED);
+        assert(u.copying.state == OK_SIMON_OVER);
+    }
+    assert(ok_ui_touch(&u, &p, 220, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
+    u.did = NULL;
     assert(ok_ui_touch(&u, &p, 97, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GALLERY);
     assert(ok_ui_touch(&u, &p, 210, 175, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME); /* Back */
     /* Everything wired: Talk, Photo on the first menu; Games, Friend, Dev on More. */
@@ -40,8 +68,10 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK && u.scene == OK_UI_HOME);
     assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_PHOTO);
     assert(ok_ui_touch(&u, &p, 161, 157, 0, t) == OK_UI_CHANGED && u.page == 1); /* More */
-    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_GAMES && p.need[OK_NEED_HUNGER] == 100);
-    assert(u.scene == OK_UI_SKETCH && u.pictionary); /* Pictionary: its own page in the sketchbook */
+    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GAMES_MENU);
+    ok_facts_now.og_features = 8; /* with its mind, Pictionary is one of the games */
+    assert(ok_ui_touch(&u, &p, 100, 100, 0, t) == OK_UI_GAMES && u.scene == OK_UI_SKETCH && u.pictionary == 1);
+    ok_facts_now.og_features = 0;
     u.scene = OK_UI_HOME;
     u.pictionary = 0;
     assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_FRIEND && u.scene == OK_UI_FRIENDS);
@@ -73,7 +103,8 @@ int main(void)
     u.wired = 0;
     ok_facts_now.og_features = 1 | 2 | 8; /* the mind hears and plays, no camera */
     assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_TALK);
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_GAMES);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GAMES_MENU);
+    assert(ok_ui_touch(&u, &p, 100, 100, 0, t) == OK_UI_GAMES);
     /* Pictionary draws on its own page: the drawing to send is untouched; Guess! needs ink. */
     assert(u.scene == OK_UI_SKETCH && u.pictionary);
     assert(ok_ui_touch(&u, &p, 198, 140, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Draw something first!"));
@@ -94,15 +125,15 @@ int main(void)
     inked = 0;
     /* Dreams configured: Dream is there with no dream yet, and asks for one; one kept is shown meanwhile. */
     ok_facts_now.og_features = 16;
-    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_DREAM && !u.dream_ticks);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && !u.dream_ticks);
     {
         static uint16_t sky[4] = {0x8000, 0x801f, 0x83e0, 0xfc00};
         ok_ui_dream_keep(&u, sky, 2, 2);
         assert(u.dream_w == 2 && !u.dream_ticks);
-        assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_DREAM && u.dream_ticks);
-        assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_CHANGED && !u.dream_ticks); /* a tap puts it away */
+        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && u.dream_ticks);
+        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && !u.dream_ticks); /* a tap puts it away */
         ok_facts_now.og_features = 0;
-        assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_CHANGED && u.dream_ticks); /* no mind: the kept one only */
+        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && u.dream_ticks); /* no mind: the kept one only */
         u.dream_ticks = 0;
         u.dream_w = u.dream_h = 0;
     }
@@ -150,12 +181,12 @@ int main(void)
     u.scene = OK_UI_HOME;
 
     /* Dev (on the second menu) asks the platform to run the checks; Back returns. */
-    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Wi-Fi from Dev: search, pick a secured network, type its password. */
-    assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_RUN_CHECKS);
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS);
     assert(ok_ui_touch(&u, &p, 90, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
     u.ap_count = 2;
     strcpy(u.aps[0].ssid, "iPhone de Okupa");

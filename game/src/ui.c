@@ -511,7 +511,7 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 /* The buttons shown, in order; returns how many. */
 static int shown(const ok_ui *u, int list[BUTTONS])
 {
-    static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, OK_UI_HAS_GAMES,
+    static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, 0,
                                             OK_UI_HAS_FRIEND, 0, 0};
     /* What the mind says works here (ok_facts.og_features): 2 hearing, 4 the camera, 8 Pictionary, 16 dreams. */
     static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 16, 0};
@@ -973,6 +973,77 @@ static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
     centred(f, font, 193, 173, u->typing ? "Guess" : "Connect", INK, 1);
 }
 
+/* ---- The small games ---------------------------------------------------------- */
+
+#define GAME_ROW_Y(i) (32 + (i) * 30)
+static const char *const game_names[4] = {"Banana catch", "Copy me", "Pictionary with me", "With a friend"};
+static const char *const game_notes[4] = {"feeds me", "makes me laugh", "my mind guesses (0G)", "phone or computer"};
+
+static int game_shown(int i) { return i != 2 || (ok_facts_now.og_features & 8); }
+
+static void games_menu(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    int i, row = 0;
+    (void)u;
+    centred(f, font, 128, 6, "Games", PAPER, 2);
+    for (i = 0; i < 4; i++) {
+        if (!game_shown(i)) continue;
+        frame_box(f, 16, GAME_ROW_Y(row), 224, 26, PAPER, INK);
+        text(f, font, 26, GAME_ROW_Y(row) + 5, game_names[i], INK, 2);
+        text(f, font, 26, GAME_ROW_Y(row) + 16, game_notes[i], MUTED, 1);
+        row++;
+    }
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, "Back", INK, 1);
+}
+
+static const uint16_t pad_dim[4] = {RGB(6, 18, 8), RGB(20, 6, 6), RGB(6, 9, 22), RGB(20, 18, 4)};
+static const uint16_t pad_lit[4] = {RGB(14, 31, 16), RGB(31, 14, 14), RGB(14, 20, 31), RGB(31, 29, 12)};
+#define PAD_X(i) (16 + ((i) % 2) * 116)
+#define PAD_Y(i) (34 + ((i) / 2) * 62)
+
+static void play(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    char s[40];
+    int k;
+    rect(f, 0, 0, OK_UI_W, OK_UI_H, RGB(9, 10, 13));
+    if (u->game == 1) {
+        const ok_catch *g = &u->catching;
+        snprintf(s, sizeof s, "Caught %d", g->caught);
+        text(f, font, 8, 6, s, PAPER, 2);
+        snprintf(s, sizeof s, "%d s", (OK_CATCH_TICKS - g->ticks + 59) / 60);
+        text(f, font, 200, 6, s, PAPER, 2);
+        rect(f, 0, OK_CATCH_FLOOR, OK_UI_W, 2, RGB(16, 12, 8));
+        for (k = 0; k < OK_CATCH_BANANAS; k++) {
+            int x = g->x[k], y = g->y[k];
+            if (y < 22 || g->over) continue;
+            round_box(f, x, y + 4, OK_CATCH_SIZE, OK_CATCH_SIZE - 8, 5, RGB(31, 27, 6));
+            rect(f, x + 2, y + 6, OK_CATCH_SIZE - 6, 2, RGB(31, 31, 18));
+            rect(f, x + OK_CATCH_SIZE - 4, y + 2, 3, 4, RGB(12, 8, 3));
+        }
+        if (g->over) {
+            snprintf(s, sizeof s, "%d banana%s!", g->caught, g->caught == 1 ? "" : "s");
+            centred(f, font, 128, 70, s, PAPER, 2);
+            centred(f, font, 128, 94, g->caught >= 4 ? "Mmm, I'm full of them." : "Next time, faster!", MUTED, 1);
+        }
+    } else {
+        const ok_simon *g = &u->copying;
+        snprintf(s, sizeof s, "%s", g->state == OK_SIMON_SHOW ? "Watch me..." : g->state == OK_SIMON_YOURS ? "Your turn!"
+                                                                                                         : "Oops!");
+        text(f, font, 8, 6, s, PAPER, 2);
+        snprintf(s, sizeof s, "Round %d", g->rounds + 1);
+        text(f, font, 176, 6, s, PAPER, 2);
+        for (k = 0; k < 4; k++) round_box(f, PAD_X(k), PAD_Y(k), 108, 56, 8, g->lit == k ? pad_lit[k] : pad_dim[k]);
+        if (g->state == OK_SIMON_OVER) {
+            snprintf(s, sizeof s, "%d round%s!", g->rounds, g->rounds == 1 ? "" : "s");
+            round_box(f, 64, 70, 128, 30, 8, INK);
+            centred(f, font, 128, 80, s, PAPER, 2);
+        }
+    }
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, (u->game == 1 ? u->catching.over : u->copying.state == OK_SIMON_OVER) ? "Done" : "Stop", INK, 1);
+}
+
 /* ---- Playing with a friend ------------------------------------------------- */
 
 static void friends(frame f, const uint8_t (*font)[8], const ok_ui *u)
@@ -1073,7 +1144,8 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         static uint32_t last_tick;
         int draw = bottom != last_buf || u->scene != last_scene || u->pressed != last_pressed || u->page != last_page ||
                    u->pressed_ticks ||
-                   u->scene == OK_UI_SKETCH || (u->scene == OK_UI_WALLET && !u->wallet_ready) || u->ticks - last_tick >= 6 ||
+                   u->scene == OK_UI_SKETCH || u->scene == OK_UI_PLAY || (u->scene == OK_UI_WALLET && !u->wallet_ready) ||
+                   u->ticks - last_tick >= 6 ||
                    u->ticks < last_tick;
         if (draw) {
             last_buf = bottom;
@@ -1106,6 +1178,12 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         } else if (u->scene == OK_UI_CLOSET) {
             if (draw) closet(bottom, font, u);
             if (!u->say) line = "How do I look?";
+        } else if (u->scene == OK_UI_GAMES_MENU) {
+            if (draw) games_menu(bottom, font, u);
+            if (!u->say) line = "Play with me!";
+        } else if (u->scene == OK_UI_PLAY) {
+            if (draw) play(bottom, font, u);
+            if (!u->say) line = u->game == 1 ? "Bananas! Catch them!" : "Copy me, if you can!";
         } else if (u->scene == OK_UI_FRIENDS) {
             if (draw) friends(bottom, font, u);
             if (!u->say) line = u->friend && u->friend->mode >= OK_FRIEND_DS_DRAWS ? "Ooh, a game!" : "A friend? For me?";
@@ -1355,6 +1433,10 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
             u->intro_t = 0;
         }
         return u->intro_t % 2 == 0 ? OK_UI_CHANGED : OK_UI_NOTHING;
+    }
+    if (u->scene == OK_UI_PLAY) { /* the game moves every frame */
+        if (u->game == 1) ok_catch_tick(&u->catching);
+        else ok_simon_tick(&u->copying);
     }
     if (ok_house_where() == OK_PLACE_GARDEN && p->asleep) go(u, p, OK_PLACE_ATTIC); /* bed is indoors */
     if (u->mind_ticks) u->mind_ticks--;
@@ -1622,6 +1704,82 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         }
         return OK_UI_CHANGED;
     }
+    if (u->scene == OK_UI_GAMES_MENU) {
+        int i, row = 0;
+        if (held) return OK_UI_NOTHING;
+        if (inside(x, y, 190, 166, 62, 22)) {
+            u->scene = OK_UI_HOME;
+            return OK_UI_CHANGED;
+        }
+        for (i = 0; i < 4; i++) {
+            if (!game_shown(i)) continue;
+            if (inside(x, y, 16, GAME_ROW_Y(row), 224, 26)) {
+                uint32_t seed = u->ticks * 2654435761u + (uint32_t)now;
+                if (i == 0) ok_catch_start(&u->catching, seed);
+                if (i == 1) ok_simon_start(&u->copying, seed);
+                if (i < 2) {
+                    u->game = i + 1;
+                    u->scene = OK_UI_PLAY;
+                    say(u, i == 0 ? "Bananas! Catch them before they land!" : "Watch me, then copy me!");
+                    return OK_UI_CHANGED;
+                }
+                if (i == 2) { /* Pictionary: its own page in the sketchbook */
+                    u->scene = OK_UI_SKETCH;
+                    u->pictionary = 1;
+                    u->eraser = 0;
+                    say(u, "Draw something: I'll guess it!");
+                    return OK_UI_GAMES;
+                }
+                u->scene = OK_UI_FRIENDS;
+                return OK_UI_FRIEND;
+            }
+            row++;
+        }
+        return OK_UI_NOTHING;
+    }
+    if (u->scene == OK_UI_PLAY) {
+        int over = u->game == 1 ? u->catching.over : u->copying.state == OK_SIMON_OVER, k;
+        if (!held && inside(x, y, 190, 166, 62, 22)) { /* Done (or Stop): what it was worth, to the okupa */
+            static char said[48];
+            if (u->game == 1) {
+                int bites = u->catching.caught / 4, fed = 0;
+                for (k = 0; k < bites && k < 3; k++) fed += ok_pet_do(p, OK_DO_FEED, now);
+                snprintf(said, sizeof said, fed ? "%d bananas! Yum!" : "%d bananas... still peckish.", u->catching.caught);
+                u->did = u->catching.caught ? "played banana catch and fed you" : "played banana catch with you";
+            } else {
+                int fun = u->copying.rounds >= 2, rounds = u->copying.rounds;
+                if (fun) ok_pet_do(p, OK_DO_PLAY, now);
+                if (rounds >= 6) ok_pet_do(p, OK_DO_PET, now);
+                snprintf(said, sizeof said, rounds >= 6 ? "%d rounds! You're a genius!" : "%d round%s. Again sometime?", rounds,
+                         rounds == 1 ? "" : "s");
+                u->did = "played copy me with you";
+            }
+            (void)over;
+            say(u, said);
+            ok_monkey_event(&u->anim, OK_EVENT_PLAY);
+            u->sound = 1 + OK_SFX_YAY;
+            u->game = 0;
+            u->scene = OK_UI_HOME;
+            return OK_UI_CHANGED;
+        }
+        if (over) return OK_UI_NOTHING;
+        if (u->game == 1) {
+            if (held) return OK_UI_NOTHING;
+            if (ok_catch_tap(&u->catching, x, y)) {
+                u->sound = 1 + OK_SFX_EAT;
+                return OK_UI_CHANGED;
+            }
+            return OK_UI_NOTHING;
+        }
+        if (held) return OK_UI_NOTHING;
+        for (k = 0; k < 4; k++)
+            if (inside(x, y, PAD_X(k), PAD_Y(k), 108, 56)) {
+                int r = ok_simon_tap(&u->copying, k);
+                if (r >= 0) u->sound = 1 + (r ? OK_SFX_POP : OK_SFX_NOPE);
+                return OK_UI_CHANGED;
+            }
+        return OK_UI_NOTHING;
+    }
     if (u->scene == OK_UI_FRIENDS) {
         const ok_friend *g = u->friend;
         int k;
@@ -1737,12 +1895,9 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
         case B_PHOTO: return OK_UI_PHOTO; /* the platform shows what the camera and 0G are doing */
         case B_TALK: say(u, "I'm listening!"); return OK_UI_TALK;
-        case B_GAMES: /* Pictionary: its own page in the sketchbook */
-            u->scene = OK_UI_SKETCH;
-            u->pictionary = 1;
-            u->eraser = 0;
-            say(u, "Draw something: I'll guess it!");
-            return OK_UI_GAMES;
+        case B_GAMES: /* the games: its own ones, Pictionary with its mind, a friend's */
+            u->scene = OK_UI_GAMES_MENU;
+            return OK_UI_CHANGED;
         case B_DRAW: u->scene = OK_UI_SKETCH; u->pictionary = 0; u->eraser = 0; return OK_UI_CHANGED;
         case B_FRIEND:
             u->scene = OK_UI_FRIENDS;
