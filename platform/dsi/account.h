@@ -20,5 +20,8 @@ void ok_dsi_account_scribble(int x, int y, ok_ui *u);
  * success. */
 int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
                        uint8_t hash[32]);
+/* The same with a 64x64 photo in 4 tones (1024 bytes, okupa_photo.h). */
+int ok_dsi_account_photo(uint64_t chain_id, uint64_t nonce, const uint8_t *tones, uint8_t *out, size_t cap, size_t *len,
+                         uint8_t hash[32]);
 
 #endif

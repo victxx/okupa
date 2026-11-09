@@ -28,6 +28,15 @@ ok_result ok_act_drawing(const uint8_t pixels[OK_DRAWING_BYTES], uint8_t *out, s
     return r;
 }
 
+ok_result ok_act_photo(const uint8_t tones[OK_PHOTO_BYTES], uint8_t *out, size_t cap, size_t *len)
+{
+    ok_result r;
+    if (!tones) return OK_ARGUMENT;
+    r = header(OK_ACT_PHOTO, OK_PHOTO_BYTES, out, cap, len);
+    if (r == OK_OK) memcpy(out + OK_ACT_HEADER, tones, OK_PHOTO_BYTES);
+    return r;
+}
+
 static int printable(const uint8_t *s, size_t n)
 {
     size_t i;
@@ -52,6 +61,7 @@ ok_result ok_act_decode(const uint8_t *data, size_t n, ok_act *act)
 {
     if (!data || !act) return OK_ARGUMENT;
     act->drawing = NULL;
+    act->photo = NULL;
     act->text = NULL;
     act->text_len = 0;
     if (n < OK_ACT_HEADER || memcmp(data, magic, 4) || data[4] != 1) return OK_FORMAT;
@@ -59,6 +69,10 @@ ok_result ok_act_decode(const uint8_t *data, size_t n, ok_act *act)
     if (act->kind == OK_ACT_HELLO && n == OK_ACT_HEADER) return OK_OK;
     if (act->kind == OK_ACT_DRAWING && n == OK_ACT_HEADER + OK_DRAWING_BYTES) {
         act->drawing = data + OK_ACT_HEADER;
+        return OK_OK;
+    }
+    if (act->kind == OK_ACT_PHOTO && n == OK_ACT_HEADER + OK_PHOTO_BYTES) {
+        act->photo = data + OK_ACT_HEADER;
         return OK_OK;
     }
     if (act->kind == OK_ACT_LETTER && n > OK_ACT_HEADER && n <= OK_ACT_HEADER + OK_LETTER_MAX &&
@@ -83,4 +97,18 @@ void ok_drawing_set(uint8_t pixels[OK_DRAWING_BYTES], unsigned x, unsigned y, in
     bit = (uint8_t)(0x80 >> (x % 8));
     if (ink) pixels[y * 8 + x / 8] |= bit;
     else pixels[y * 8 + x / 8] &= (uint8_t)~bit;
+}
+
+unsigned ok_photo_get(const uint8_t tones[OK_PHOTO_BYTES], unsigned x, unsigned y)
+{
+    if (x >= OK_DRAWING_SIDE || y >= OK_DRAWING_SIDE) return 0;
+    return (tones[y * 16 + x / 4] >> (6 - 2 * (x % 4))) & 3;
+}
+
+void ok_photo_set(uint8_t tones[OK_PHOTO_BYTES], unsigned x, unsigned y, unsigned tone)
+{
+    unsigned shift;
+    if (x >= OK_DRAWING_SIDE || y >= OK_DRAWING_SIDE) return;
+    shift = 6 - 2 * (x % 4);
+    tones[y * 16 + x / 4] = (uint8_t)((tones[y * 16 + x / 4] & ~(3u << shift)) | ((tone & 3u) << shift));
 }

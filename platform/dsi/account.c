@@ -199,3 +199,14 @@ int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels,
     if (!pixels || ok_act_drawing(pixels, act, sizeof act, &act_len) != OK_OK) return 0;
     return sign_act(chain_id, nonce, act, act_len, 60000, "drawing", out, cap, len, hash);
 }
+
+/* A 4-tone photo: 1030 bytes of calldata, about 62 200 gas at the calldata
+ * floor; 80 000 leaves room. */
+int ok_dsi_account_photo(uint64_t chain_id, uint64_t nonce, const uint8_t *tones, uint8_t *out, size_t cap, size_t *len,
+                         uint8_t hash[32])
+{
+    uint8_t act[OK_ACT_MAX];
+    size_t act_len;
+    if (!tones || ok_act_photo(tones, act, sizeof act, &act_len) != OK_OK) return 0;
+    return sign_act(chain_id, nonce, act, act_len, 80000, "photo", out, cap, len, hash);
+}

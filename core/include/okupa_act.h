@@ -9,20 +9,24 @@
 #define OK_ACT_HEADER 6
 #define OK_DRAWING_SIDE 64
 #define OK_DRAWING_BYTES (OK_DRAWING_SIDE * OK_DRAWING_SIDE / 8) /* 1 bpp, MSB first, row-major */
-#define OK_ACT_MAX (OK_ACT_HEADER + OK_DRAWING_BYTES)
+#define OK_PHOTO_BYTES (OK_DRAWING_SIDE * OK_DRAWING_SIDE / 4) /* 2 bits a pixel: 0 light .. 3 dark */
+#define OK_ACT_MAX (OK_ACT_HEADER + OK_PHOTO_BYTES)
 
-enum { OK_ACT_HELLO = 0, OK_ACT_DRAWING = 1, OK_ACT_LETTER = 2 };
+enum { OK_ACT_HELLO = 0, OK_ACT_DRAWING = 1, OK_ACT_LETTER = 2, OK_ACT_PHOTO = 3 };
 #define OK_LETTER_MAX 140 /* a letter: plain ASCII text, 1..140 bytes */
 
 typedef struct {
     int kind;
     const uint8_t *drawing; /* OK_DRAWING_BYTES, points into the calldata */
+    const uint8_t *photo;   /* OK_PHOTO_BYTES: 4 tones, row-major, leftmost pixel in the top 2 bits */
     const char *text;       /* a letter: not NUL-terminated, text_len bytes, points into the calldata */
     size_t text_len;
 } ok_act;
 
 ok_result ok_act_hello(uint8_t *out, size_t cap, size_t *len);
 ok_result ok_act_drawing(const uint8_t pixels[OK_DRAWING_BYTES], uint8_t *out, size_t cap, size_t *len);
+/* A 64x64 photo in 4 tones (okupa_photo.h). */
+ok_result ok_act_photo(const uint8_t tones[OK_PHOTO_BYTES], uint8_t *out, size_t cap, size_t *len);
 /* A letter the okupa writes to the player: printable ASCII only. */
 ok_result ok_act_letter(const char *text, uint8_t *out, size_t cap, size_t *len);
 /* Exactly one of the known shapes, or OK_FORMAT. */
@@ -31,5 +35,8 @@ ok_result ok_act_decode(const uint8_t *data, size_t n, ok_act *act);
 /* Pixel helpers: 1 = ink. */
 int ok_drawing_get(const uint8_t pixels[OK_DRAWING_BYTES], unsigned x, unsigned y);
 void ok_drawing_set(uint8_t pixels[OK_DRAWING_BYTES], unsigned x, unsigned y, int ink);
+/* Tone helpers: 0 light .. 3 dark. */
+unsigned ok_photo_get(const uint8_t tones[OK_PHOTO_BYTES], unsigned x, unsigned y);
+void ok_photo_set(uint8_t tones[OK_PHOTO_BYTES], unsigned x, unsigned y, unsigned tone);
 
 #endif

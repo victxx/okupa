@@ -166,6 +166,9 @@ static void halve(void)
 
 int ok_dsi_eye_outer(void) { return want_outer; }
 
+/* The frame kept by ok_dsi_eye_preview_stop(1), or NULL. */
+const uint16_t *ok_dsi_eye_frame(void) { return held ? frame : NULL; }
+
 /* The viewfinder, from the main loop: never waits. */
 int ok_dsi_eye_preview_start(int outer, char why[33])
 {

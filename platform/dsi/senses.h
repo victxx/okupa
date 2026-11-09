@@ -36,5 +36,8 @@ int ok_dsi_eye_preview_start(int outer, char why[33]);
 int ok_dsi_eye_preview_step(void);
 void ok_dsi_eye_preview_stop(int keep);
 int ok_dsi_eye_outer(void);
+/* The whole 256x192 frame kept by ok_dsi_eye_preview_stop(1) (NULL if none):
+ * the photo the player chose, before it goes anywhere. */
+const uint16_t *ok_dsi_eye_frame(void);
 
 #endif

@@ -13,6 +13,7 @@
 #include "okupa_monkey.h"
 #include "okupa_state.h"
 #include "okupa_seeds.h"
+#include "okupa_photo.h"
 #include "okupa_facts.h"
 #include "okupa_keys.h"
 #include "okupa_tech.h"
@@ -173,8 +174,10 @@ static void wall_to_ui(ok_ui *u)
 {
     int i;
     u->wall_count = 0;
-    for (i = 0; i < state.wall_count && u->wall_count < OK_UI_WALL; i++)
+    for (i = 0; i < state.wall_count && u->wall_count < OK_UI_WALL; i++) {
         if (state.wall_kind[i] == OK_PIC_DRAWING) memcpy(u->wall[u->wall_count++], state.wall[i], 512);
+        else if (state.wall_kind[i] == OK_PIC_TONES) ok_photo_to_ink(state.wall[i], u->wall[u->wall_count++]);
+    }
 }
 
 /* The live game into the snapshot, saved and read back. 1 if it is on the SD. */
@@ -199,6 +202,7 @@ static void forget_tx(void)
  * comes down when it is full), and a fresh page. */
 static void hang(ok_ui *u, const ok_pet *p)
 {
+    int drawing = state.tx_pic_kind != OK_PIC_TONES;
     if (state.wall_count == OK_STATE_WALL) {
         memmove(state.wall[0], state.wall[1], sizeof state.wall[0] * (OK_STATE_WALL - 1));
         memmove(state.wall_kind, state.wall_kind + 1, OK_STATE_WALL - 1);
@@ -208,9 +212,72 @@ static void hang(ok_ui *u, const ok_pet *p)
     memcpy(state.wall[state.wall_count++], state.tx_pic, OK_STATE_PICTURE);
     forget_tx();
     wall_to_ui(u);
-    u->drawing_sent = 0;
-    memset(u->drawing, 0, sizeof u->drawing);
+    if (drawing) { /* the page it was drawn on is free again */
+        u->drawing_sent = 0;
+        memset(u->drawing, 0, sizeof u->drawing);
+    }
     keep(u, p);
+}
+
+/* Signs a picture (a drawing, or a 4-tone photo), saves it with the nonce
+ * moved on, and only then hands it to the postman. 1 if it is on its way. */
+static int send_picture(ok_ui *u, ok_pet *p, int kind, const uint8_t *pic)
+{
+    static uint8_t tx[OK_STATE_TX_MAX];
+    static ok_state before;
+    uint8_t hash[32];
+    size_t len;
+    int ok;
+    const char *why = NULL;
+    if (!u->wallet_ready) why = "I need my key first: Dev > Wallet.";
+    else if (!send_ok) why = "My save files need a look first: nothing sent.";
+    else if (state.tx_len) why = "One at a time: my last one is still on its way.";
+    if (why) {
+        u->say = why;
+        u->say_ticks = 300;
+        return 0;
+    }
+    ok = kind == OK_PIC_TONES ? ok_dsi_account_photo(state.chain_id, state.next_nonce, pic, tx, sizeof tx, &len, hash)
+                              : ok_dsi_account_act(state.chain_id, state.next_nonce, pic, tx, sizeof tx, &len, hash);
+    if (!ok) {
+        u->say = "I couldn't sign it.";
+        u->say_ticks = 300;
+        return 0;
+    }
+    before = state;
+    state.tx_kind = OK_TX_PICTURE;
+    state.tx_len = (uint16_t)len;
+    memcpy(state.tx, tx, len);
+    memcpy(state.tx_hash, hash, 32);
+    state.tx_pic_kind = (uint8_t)kind;
+    memset(state.tx_pic, 0, sizeof state.tx_pic);
+    memcpy(state.tx_pic, pic, ok_state_picture_size(kind));
+    state.next_nonce++;
+    state.watch_from = 0;
+    if (kind == OK_PIC_DRAWING) u->drawing_sent = 1;
+    if (!keep(u, p)) { /* not on the SD: it was never sent, and the nonce is still free */
+        state = before;
+        if (kind == OK_PIC_DRAWING) u->drawing_sent = 0;
+        u->say = "I couldn't save it, so I didn't send it.";
+        u->say_ticks = 300;
+        return 0;
+    }
+    ok_dsi_net_send(state.tx, state.tx_len, state.tx_hash, 0);
+    ok_facts_log(ok_dsi_uptime(), 'E', "signed %s %02x%02x%02x%02x", kind == OK_PIC_TONES ? "photo" : "drawing", hash[0],
+                 hash[1], hash[2], hash[3]);
+    return 1;
+}
+
+/* A 4-tone photo on a card: 64x64 shown 96x96 in the middle of 128x96. */
+static void tones_card(const uint8_t tones[OK_PHOTO_BYTES], uint16_t px[128 * 96])
+{
+    static const uint16_t ink[4] = {RGB15(29, 28, 26) | 0x8000, RGB15(19, 18, 17) | 0x8000, RGB15(10, 9, 9) | 0x8000,
+                                    RGB15(2, 2, 2) | 0x8000};
+    int x, y;
+    for (y = 0; y < 96; y++)
+        for (x = 0; x < 128; x++)
+            px[y * 128 + x] = x < 16 || x >= 112 ? (uint16_t)(RGB15(6, 6, 6) | 0x8000)
+                                                 : ink[ok_photo_get(tones, (unsigned)(x - 16) * 2 / 3, (unsigned)y * 2 / 3)];
 }
 
 /* The machine's own facts, and the core's timed checks for the DSi page. */
@@ -487,6 +554,7 @@ int main(void)
     if (isDSiMode()) setCpuClock(true);
 
     ok_ui_init(&ui);
+    if (isDSiMode()) ui.wired |= OK_UI_HAS_PHOTO; /* the cameras work without 0G: photos for the wall */
     ok_tech_init(&tech);
     ok_pet_init(&pet, (int64_t)now);
     shown_ui = &ui;
@@ -554,7 +622,7 @@ int main(void)
                 else forget_tx(), keep(&ui, &pet);
             } else {
                 ok_dsi_net_send(state.tx, state.tx_len, state.tx_hash, state.watch_from);
-                if (drawing_waiting()) {
+                if (drawing_waiting() && state.tx_pic_kind == OK_PIC_DRAWING) {
                     ui.drawing_sent = 1;
                     memcpy(ui.drawing, state.tx_pic, 512);
                 }
@@ -626,7 +694,8 @@ int main(void)
                 static char said[48];
                 if (drawing_waiting() && !memcmp(inc_hash, state.tx_hash, 32)) {
                     hang_waiting = 1; /* hung below, in front of the player (not behind SELECT) */
-                    snprintf(said, sizeof said, "Block %lu has my drawing. On the wall!", (unsigned long)inc_block);
+                    snprintf(said, sizeof said, "Block %lu has my %s. On the wall!", (unsigned long)inc_block,
+                             state.tx_pic_kind == OK_PIC_TONES ? "photo" : "drawing");
                 } else {
                     snprintf(said, sizeof said, "My last one is in block %lu!", (unsigned long)inc_block);
                     forget_tx();
@@ -805,7 +874,8 @@ int main(void)
                 inked |= page[k];
             }
             if (sum != doodle_sum) doodle_sum = sum, stroke_at = (uint32_t)now_us();
-            if (!tech_on && (keysDown() & KEY_X) && (ui.scene == OK_UI_HOME || ui.scene == OK_UI_SKETCH)) game_guess_wanted = 1;
+            if (!tech_on && (keysDown() & KEY_X) && !ui.card_live && (ui.scene == OK_UI_HOME || ui.scene == OK_UI_SKETCH))
+                game_guess_wanted = 1;
             if (game_guess_wanted) {
                 game_guess_wanted = 0;
                 if (game_waiting && !game_auto) {
@@ -966,7 +1036,8 @@ int main(void)
          * happens, and a failure is told as it is. */
         {
             enum { LOOK_ROUNDS = 8 };
-            static int look_waiting, look_live, look_rounds, finder, cam_outer;
+            static int look_waiting, look_live, look_rounds, finder, cam_outer, photo_ready;
+            static uint8_t photo[OK_PHOTO_BYTES];
             static time_t look_asked_at;
             static char cam_why[33];
             static char text[OK_MIND_TEXT + 1], why[48], foot[40], said[96];
@@ -974,8 +1045,8 @@ int main(void)
             uint32_t ms;
             int r;
             if (!tech_on && ((keysDown() & KEY_R) || menu_look || ((keysDown() & KEY_B) && (look_live || finder) && !game_asked))) {
-                if (finder) { /* the viewfinder is put away: no photo */
-                    finder = 0;
+                if (finder || photo_ready) { /* the viewfinder, or the photo, put away */
+                    finder = photo_ready = 0;
                     ok_dsi_eye_preview_stop(0);
                     ok_ui_card(&ui, NULL, NULL, NULL, 0, 0, 0, NULL);
                 } else if (look_live || look_waiting) { /* looking already: stop the live look (the answer under way still shows) */
@@ -983,9 +1054,6 @@ int main(void)
                     ui.card_live = 0;
                     ok_dsi_mind_live(0);
                 } else if (keysDown() & KEY_B) {
-                } else if (!ok_dsi_mind_alive()) {
-                    snprintf(said, sizeof said, "I can't look: %s.", ok_dsi_mind_why_not());
-                    ok_ui_card(&ui, "My eyes", said, NULL, 0, 0, 0, "Photo needs the 0G mind running");
                 } else if (!ok_dsi_eye_preview_start(cam_outer, cam_why)) {
                     ok_ui_card(&ui, "My eyes failed", cam_why, NULL, 0, 0, 0, "nothing made up");
                 } else { /* first the viewfinder: the player sees what the camera sees and chooses */
@@ -1022,20 +1090,43 @@ int main(void)
                 } else if (!tech_on && (keysDown() & KEY_A)) { /* this one: the frame on screen is the photo */
                     finder = 0;
                     ok_dsi_eye_preview_stop(1);
-                    if (!ok_dsi_mind_alive()) {
-                        ok_dsi_eye_preview_stop(0);
-                        snprintf(said, sizeof said, "I can't look: %s.", ok_dsi_mind_why_not());
-                        ok_ui_card(&ui, "My eyes", said, NULL, 0, 0, 0, "Photo needs the 0G mind running");
+                    if (ok_dsi_eye_frame() && ok_photo_from_frame(ok_dsi_eye_frame(), photo) == OK_OK) {
+                        photo_ready = 1;
+                        tones_card(photo, px);
+                        ok_ui_card(&ui, "Your photo", ok_dsi_mind_alive() ? "A: hang it (Ethereum)  X: what is it?"
+                                                                          : "A: hang it on the wall (Ethereum)",
+                                   px, 128, 96, 0, "B or tap: throw it away");
+                        ui.card_live = 1;
                     } else {
-                        look_live = 0;
-                        look_rounds = 0;
-                        ok_dsi_mind_live(0);
-                        ok_dsi_mind_look();
-                        look_waiting = 1;
-                        look_asked_at = now;
-                        ok_ui_card(&ui, "Click!", "Let me see...", ok_dsi_eye_thumb(), 128, 96, 0, "");
-                        ui.card_live = 0;
+                        ok_dsi_eye_preview_stop(0);
+                        ok_ui_card(&ui, "Not yet", "My eyes were still opening. Try again?", NULL, 0, 0, 0, "");
                     }
+                    redraw = 1;
+                }
+            }
+            if (photo_ready) {
+                if (ui.card_ticks) ui.card_ticks = 600;
+                if (!ui.card_ticks) { /* tapped away: thrown away */
+                    photo_ready = 0;
+                    ok_dsi_eye_preview_stop(0);
+                } else if (!tech_on && (keysDown() & KEY_A)) { /* on the wall, once a block holds it */
+                    photo_ready = 0;
+                    ok_dsi_eye_preview_stop(0);
+                    if (send_picture(&ui, &pet, OK_PIC_TONES, photo))
+                        ok_ui_card(&ui, "On its way", "Signed here. It goes up once a block has it.", px, 128, 96, 0, "");
+                    else
+                        ok_ui_card(&ui, NULL, NULL, NULL, 0, 0, 0, NULL);
+                    redraw = 1;
+                } else if (!tech_on && (keysDown() & KEY_X) && ok_dsi_mind_alive()) { /* 0G's eyes on it */
+                    photo_ready = 0;
+                    look_live = 0;
+                    look_rounds = 0;
+                    ok_dsi_mind_live(0);
+                    ok_dsi_mind_look(); /* the kept frame is the one it sees */
+                    look_waiting = 1;
+                    look_asked_at = now;
+                    ok_ui_card(&ui, "Your photo", "Let me see...", px, 128, 96, 0, "");
+                    ui.card_live = 0;
                     redraw = 1;
                 }
             }
@@ -1322,47 +1413,9 @@ int main(void)
                 ok_dsi_account_scribble(touch.px, touch.py, &ui);
                 if (!was && ui.wallet_ready) balance_ask(&ui);
             }
-            if (r == OK_UI_SEND_DRAWING && storage) {
-                static uint8_t tx[700];
-                static ok_state before;
-                uint8_t hash[32];
-                size_t len;
-                if (!ui.wallet_ready) {
-                    ui.say = "I need my key first: Dev > Wallet.";
-                    ui.say_ticks = 300;
-                } else if (!send_ok) {
-                    ui.say = "My save files need a look first: nothing sent.";
-                    ui.say_ticks = 300;
-                } else if (state.tx_len) {
-                    ui.say = "One at a time: my last one is still on its way.";
-                    ui.say_ticks = 300;
-                } else if (ok_dsi_account_act(state.chain_id, state.next_nonce, ui.drawing, tx, sizeof tx, &len, hash)) {
-                    /* Saved first, the nonce moved on; only then the postman
-                     * sees it. A save that fails means it was never sent. */
-                    before = state;
-                    state.tx_kind = OK_TX_PICTURE;
-                    state.tx_len = (uint16_t)len;
-                    memcpy(state.tx, tx, len);
-                    memcpy(state.tx_hash, hash, 32);
-                    state.tx_pic_kind = OK_PIC_DRAWING;
-                    memset(state.tx_pic, 0, sizeof state.tx_pic);
-                    memcpy(state.tx_pic, ui.drawing, 512);
-                    state.next_nonce++;
-                    state.watch_from = 0;
-                    ui.drawing_sent = 1;
-                    if (keep(&ui, &pet)) {
-                        ok_dsi_net_send(state.tx, state.tx_len, state.tx_hash, 0);
-                        ok_facts_log(ok_dsi_uptime(), 'E', "signed drawing %02x%02x%02x%02x", hash[0], hash[1], hash[2],
-                                     hash[3]);
-                        memcpy(comment_px, ui.drawing, sizeof comment_px); /* its mind on 0G looks at it and says something */
-                        comment_wanted = 3;
-                    } else {
-                        state = before;
-                        ui.drawing_sent = 0;
-                        ui.say = "I couldn't save it, so I didn't send it.";
-                        ui.say_ticks = 300;
-                    }
-                }
+            if (r == OK_UI_SEND_DRAWING && storage && send_picture(&ui, &pet, OK_PIC_DRAWING, ui.drawing)) {
+                memcpy(comment_px, ui.drawing, sizeof comment_px); /* its mind on 0G looks at it and says something */
+                comment_wanted = 3;
             }
             if (r == OK_UI_RUN_NETWORK) show_net = 1, show_mind = 0; /* the postman is always running: just show it */
             /* The menu's mind buttons do what the keys do: Photo is R, Games
