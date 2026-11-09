@@ -2,6 +2,24 @@
 
 Qué está hecho y con qué evidencia. Los registros completos quedan en `run/` (fuera de Git).
 
+## 2026-11-09: después de Mumbai (rama `mumbai26` = la entrega)
+
+Probado en el ordenador (`make test`, `make sanitize`, ROM compilada); **nada de esto se ha probado aún en la DSi**.
+
+| Pieza | Evidencia |
+|---|---|
+| Fuera lo que era para premios | 0G Storage, `web/`, `arkiv/`, cartas, hellos, cadena de episodios y el render del vídeo; −6700 líneas |
+| 0G opcional | `game/src/instinct.c`: mente propia (necesidades, hora, lo que haces, libro de frases); decide sin 0G o si 0G calla 3 min. Test `instinct` |
+| Guardado | Instantánea OKST en `state-a/b.bin`, sincronizada y releída; un guardado cortado deja la anterior, el daño bloquea sin sobrescribir; importa los archivos viejos. La tx se guarda antes de enviarse. Test `state` |
+| Entropía | `seeds.bin` de un solo uso (`build/okupa-seeds`): se pone a cero en la SD y se relee antes de usarla; mezclada con la de los temporizadores. Test `seeds` |
+| Fotos | 4 tonos (1 KB, acto OKPA 3): visor → A firma y cuelga; sin 0G. Test `photo` |
+| Galería | `tools/gallery/index.html`: lee los actos de cualquier cuenta con cualquier RPC de lectura (bisección del nonce). Probada contra mainnet con la cuenta de la consola; `make gallery-test` |
+| Entrega | Dos nodos distintos deben servir el mismo bloque con la tx; Speed up (mismo nonce, doble comisión, ×3 máx.) vigilando todas las versiones; peers con `kept=N`, los mejores primero |
+| Juegos | Banana catch y Copy me (sin red); Pictionary con un amigo en cualquier móvil u ordenador de la misma Wi-Fi: la DSi sirve la página (`friend_net.c`), regalos que se pueden colgar. Página probada de punta a punta en el navegador con `build/okupa-friend` |
+| Investigación | `docs/RESEARCH.md`: firmador QR ERC-4527 viable (primero); cliente ligero posible (5–6 s por actualización, calibrado) |
+
+Siguiente: probar en la DSi (guardado nuevo, fotos, juegos, amigo en la Wi-Fi de casa) y el spike de leer un QR de MetaMask con la cámara.
+
 ## 2026-11-06
 
 | Pieza | Evidencia |
