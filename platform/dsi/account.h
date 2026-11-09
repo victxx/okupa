@@ -9,6 +9,8 @@
  * the player's scribbles (the DSi has no random generator) and kept in a file
  * on the SD card; it never leaves the console otherwise. */
 void ok_dsi_account_open(const char *path, ok_ui *u);
+/* Real entropy for a new key, mixed with the strokes (never used alone). */
+void ok_dsi_account_seed(const uint8_t s[32]);
 /* One stylus sample while scribbling; creates the key once there is enough. */
 void ok_dsi_account_scribble(int x, int y, ok_ui *u);
 

@@ -12,6 +12,7 @@
 #include "okupa_house.h"
 #include "okupa_monkey.h"
 #include "okupa_state.h"
+#include "okupa_seeds.h"
 #include "okupa_facts.h"
 #include "okupa_keys.h"
 #include "okupa_tech.h"
@@ -519,6 +520,30 @@ int main(void)
             wall_to_ui(&ui);
             send_ok = state.chain_id == ok_dsi_net_chain_id();
             if (!send_ok) save_status = "Save: from another network";
+        }
+        /* One seed from seeds.bin (if there is one) for this run's keys: a
+         * different hash of it for the handshakes, the TLS and a new wallet. */
+        {
+            static const char *const use[3] = {"okupa seed: rlpx", "okupa seed: tls", "okupa seed: wallet"};
+            uint8_t seed[OK_SEED_BYTES], part[32];
+            char path[64];
+            int left, got, k;
+            snprintf(path, sizeof path, "%.48sseeds.bin", net_dir);
+            got = ok_seeds_take(path, seed, &left);
+            for (k = 0; got == 1 && k < 3; k++) {
+                ok_keccak h;
+                ok_keccak_init(&h);
+                ok_keccak_update(&h, use[k], strlen(use[k]));
+                ok_keccak_update(&h, seed, sizeof seed);
+                ok_keccak_final(&h, part);
+                if (k == 0) ok_dsi_net_seed(part);
+                else if (k == 1) ok_dsi_mind_seed(part);
+                else ok_dsi_account_seed(part);
+            }
+            ok_wipe(seed, sizeof seed);
+            ok_wipe(part, sizeof part);
+            ok_facts_now.seeds_left = got == 1 ? left : got == 0 ? 0 : -1;
+            ok_facts_log(0, 'D', got == 1 ? "entropy: a seed from seeds.bin, %d left" : got == 0 ? "entropy: no seeds.bin seed (%d)" : "entropy: seeds.bin damaged (%d)", got == 1 ? left : got);
         }
         ok_dsi_account_open(key_path, &ui); /* the key is there from the start, not only after Dev > Wallet */
         /* The transaction on its way: seen in a block meanwhile (hang it now),

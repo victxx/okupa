@@ -226,6 +226,14 @@ const char (*ok_dsi_net_lines(void))[33] { return (const char (*)[33])lines; }
  * and the MAC address. Weak by design; enough for throwaway keys. */
 static ok_keccak pool;
 static uint32_t pool_counter;
+static uint8_t seed[32];
+static int have_seed;
+
+void ok_dsi_net_seed(const uint8_t s[32])
+{
+    memcpy(seed, s, sizeof seed);
+    have_seed = 1;
+}
 
 static void stir(void)
 {
@@ -1084,6 +1092,11 @@ static int postman(void *arg)
     ok_yield = let_others_run; /* block checks hash hundreds of KB: let the game breathe */
     ok_keccak_init(&pool);
     stir();
+    if (have_seed) { /* a one-use seed from seeds.bin, mixed in (never used alone) */
+        ok_keccak_update(&pool, seed, sizeof seed);
+        ok_wipe(seed, sizeof seed);
+        have_seed = 0;
+    }
     for (;;) {
         while (ui_wifi) next_frame();
         say("Wi-Fi: connecting");

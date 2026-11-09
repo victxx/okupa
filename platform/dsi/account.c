@@ -15,6 +15,14 @@
 static const char *key_path;
 static ok_keccak pool;
 static int samples, last_x = -1, last_y = -1, started;
+static uint8_t seed[32];
+static int have_seed;
+
+void ok_dsi_account_seed(const uint8_t s[32])
+{
+    memcpy(seed, s, sizeof seed);
+    have_seed = 1;
+}
 
 static void show_address(const uint8_t priv[32], ok_ui *u)
 {
@@ -58,6 +66,11 @@ void ok_dsi_account_scribble(int x, int y, ok_ui *u)
         ok_keccak_init(&pool);
         ok_keccak_update(&pool, "okupa account", 13);
         ok_keccak_update(&pool, &now, sizeof now);
+        if (have_seed) { /* a one-use seed from seeds.bin, mixed with the strokes */
+            ok_keccak_update(&pool, seed, sizeof seed);
+            ok_wipe(seed, sizeof seed);
+            have_seed = 0;
+        }
         started = 1;
     }
     ok_keccak_update(&pool, &x, sizeof x);

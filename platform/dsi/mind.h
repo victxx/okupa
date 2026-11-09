@@ -19,6 +19,9 @@
  * Without settings, Wi-Fi or a verified answer the okupa decides nothing
  * new through 0G: nothing is made up. */
 void ok_dsi_mind_start(const char *dir);
+/* Real entropy for the TLS seeds and token nonces, before ok_dsi_mind_start:
+ * mixed into the console's own, never used alone. */
+void ok_dsi_mind_seed(const uint8_t s[32]);
 /* What the okupa notices, from the game loop (cheap: call every frame).
  * did: something the player just did, or NULL; it is told to the mind once. */
 void ok_dsi_mind_observe(const ok_pet *p, int outside, uint32_t seconds_since_player, const char *did);

@@ -34,6 +34,9 @@ void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32], uint64
 uint64_t ok_dsi_net_watch_from(void);
 int ok_dsi_net_pending(uint8_t hash[32]); /* 1 if one is waiting */
 int ok_dsi_net_handed(void);               /* nodes it was handed to */
+/* Real entropy for the handshake keys, before ok_dsi_net_start: mixed into
+ * the console's own timer entropy, never used alone. */
+void ok_dsi_net_seed(const uint8_t s[32]);
 /* Let the pending one go (a public node says its nonce was used). */
 void ok_dsi_net_forget(void);
 uint64_t ok_dsi_net_chain_id(void);
