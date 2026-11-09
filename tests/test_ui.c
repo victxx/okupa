@@ -178,6 +178,11 @@ int main(void)
     ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom); /* the QR is encoded once, then reused */
     assert(ok_ui_touch(&u, &p, 100, 60, 0, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 150, 176, 0, t) == OK_UI_CHANGED && !u.wallet_qr);
+    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_NOTHING); /* nothing on its way: no Speed up */
+    u.tx_waiting = 1;
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 50, 176, 0, t) == OK_UI_WALLET_SPEED);
+    u.tx_waiting = 0;
     assert(ok_ui_touch(&u, &p, 50, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 1, t) == OK_UI_NOTHING);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DEV);

@@ -30,6 +30,11 @@ const char *ok_dsi_net_name(void);
  * postman keeps it in memory only. from: the block to start looking from
  * (0: the head of the first node that takes it). */
 void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32], uint64_t from);
+/* The same transaction signed again with a higher fee (same nonce): these
+ * bytes go out from now on, and a block holding any version counts. */
+void ok_dsi_net_replace(const uint8_t *tx, size_t n, const uint8_t hash[32]);
+/* An earlier version to look for too (after a restart). */
+void ok_dsi_net_also_watch(const uint8_t hash[32]);
 /* Where the postman is looking for it now, to save with it (0: none). */
 uint64_t ok_dsi_net_watch_from(void);
 int ok_dsi_net_pending(uint8_t hash[32]); /* 1 if one is waiting */

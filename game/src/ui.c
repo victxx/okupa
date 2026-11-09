@@ -590,6 +590,8 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
         if (fa->incl_state == 2)
             snprintf(out, 48, u->drawing_sent ? "In block #%llu: it's on the wall!" : "In block #%llu: on Ethereum",
                      (unsigned long long)fa->incl_block);
+        else if (fa->incl_state == 4)
+            snprintf(out, 48, "In block #%llu? 1 node says so, asking another", (unsigned long long)fa->incl_block);
         else if (fa->tx_handed > 0)
             snprintf(out, 48, "%s: given to %d node%s, no block yet", cap, fa->tx_handed, fa->tx_handed == 1 ? "" : "s");
         else if (fa->reached_status > 0)
@@ -871,6 +873,10 @@ static void wallet(frame f, const uint8_t (*font)[8], const ok_ui *u)
             centred(f, font, 128, 118, "Low: a drawing can cost up to 0.00012 ETH", RGB(31, 20, 12), 1);
         centred(f, font, 128, 130, "Sending never uses the RPC: P2P only", MUTED, 1);
         centred(f, font, 128, 152, u->wallet_status[0] ? u->wallet_status : "Show QR to receive ETH", PAPER, 1);
+        if (u->tx_waiting) { /* stuck behind a fee too low: sign it again, same nonce, double the fee */
+            frame_box(f, 4, 166, 120, 22, PAPER, INK);
+            centred(f, font, 64, 173, "Speed up (2x fee)", INK, 1);
+        }
         frame_box(f, 126, 166, 62, 22, PAPER, INK);
         centred(f, font, 157, 173, "Show QR", INK, 1);
     } else {
@@ -1470,6 +1476,7 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
     }
     if (u->scene == OK_UI_WALLET) {
         if (!u->wallet_ready && inside(x, y, SCRIBBLE_X, SCRIBBLE_Y, SCRIBBLE_W, SCRIBBLE_H)) return OK_UI_WALLET_SCRIBBLE;
+        if (u->wallet_ready && u->tx_waiting && !held && inside(x, y, 4, 166, 120, 22)) return OK_UI_WALLET_SPEED;
         if (u->wallet_ready && !held && inside(x, y, 126, 166, 62, 22)) {
             u->wallet_qr = !u->wallet_qr;
             return OK_UI_CHANGED;

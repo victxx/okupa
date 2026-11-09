@@ -178,7 +178,8 @@ static int dial(const char *enode, const uint8_t priv[32])
         io.tx_count = 1;
     }
     if (watching) {
-        io.watch = watch;
+        io.watch = (const uint8_t (*)[32])watch;
+        io.watch_count = 1;
         io.watch_from = watch_from;
         io.seconds = seconds;
         io.block = block_seen;

@@ -216,14 +216,15 @@ ok_result ok_trie_ordered_root(const uint8_t *const *vals, const size_t *lens, s
 static const uint8_t *tx_vals[OK_BLOCK_MAX_TXS];
 static size_t tx_lens[OK_BLOCK_MAX_TXS];
 
-ok_result ok_body_check_tx(const ok_rlp_item *body, const ok_header *h, const uint8_t want[32], ok_body_check *out)
+ok_result ok_body_check_tx(const ok_rlp_item *body, const ok_header *h, const uint8_t (*want)[32], size_t wants,
+                           ok_body_check *out)
 {
     ok_rlp_item txs, tx;
     size_t pos = 0, tpos = 0;
     ok_result r;
     if (!body || !h || !out) return OK_ARGUMENT;
     memset(out, 0, sizeof *out);
-    out->found = -1;
+    out->found = out->which = -1;
     if (!body->list || ok_rlp_next(body, &pos, &txs) != OK_OK || !txs.list) return OK_FORMAT;
     for (;;) {
         size_t before = tpos;
@@ -240,7 +241,15 @@ ok_result ok_body_check_tx(const ok_rlp_item *body, const ok_header *h, const ui
         }
         ok_keccak256(tx_vals[out->count], tx_lens[out->count], hash);
         if (ok_yield && out->count % 32 == 31) ok_yield();
-        if (want && out->found < 0 && !memcmp(hash, want, 32)) out->found = (int32_t)out->count;
+        if (want && out->found < 0) {
+            size_t k;
+            for (k = 0; k < wants; k++)
+                if (!memcmp(hash, want[k], 32)) {
+                    out->found = (int32_t)out->count;
+                    out->which = (int32_t)k;
+                    break;
+                }
+        }
         out->count++;
     }
     if (r != OK_RANGE) return r;

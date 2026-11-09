@@ -70,7 +70,7 @@ typedef struct {
 
     /* Inclusion, checked by the console itself over P2P: a peer's header
      * whose transactions root commits to our transaction. Not finality. */
-    int incl_state;          /* 0 not looked, 1 looking, 2 found, 3 root mismatch */
+    int incl_state;          /* 0 not looked, 1 looking, 2 found (two nodes), 3 root mismatch, 4 one node says so */
     uint64_t incl_block;
     uint8_t incl_block_hash[32];
     uint8_t incl_tx_root[32];

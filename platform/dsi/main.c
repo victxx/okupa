@@ -169,6 +169,18 @@ static int hang_waiting;
 
 static int drawing_waiting(void) { return state.tx_kind == OK_TX_PICTURE && state.tx_len; }
 
+/* The transaction on its way, in any of its versions (a sped-up one keeps
+ * its nonce, so the older bytes may be the ones a block holds). */
+static int ours(const uint8_t hash[32])
+{
+    int k;
+    if (!state.tx_len) return 0;
+    if (!memcmp(hash, state.tx_hash, 32)) return 1;
+    for (k = 0; k < state.tx_older; k++)
+        if (!memcmp(hash, state.tx_older_hash[k], 32)) return 1;
+    return 0;
+}
+
 /* The wall as the screen shows it: the drawings, 1 bit a pixel. */
 static void wall_to_ui(ok_ui *u)
 {
@@ -192,6 +204,8 @@ static int keep(const ok_ui *u, const ok_pet *p)
 
 static void forget_tx(void)
 {
+    state.tx_fee_level = 0;
+    state.tx_older = 0;
     state.tx_kind = OK_TX_NONE;
     state.tx_len = 0;
     state.tx_pic_kind = OK_PIC_NONE;
@@ -237,8 +251,8 @@ static int send_picture(ok_ui *u, ok_pet *p, int kind, const uint8_t *pic)
         u->say_ticks = 300;
         return 0;
     }
-    ok = kind == OK_PIC_TONES ? ok_dsi_account_photo(state.chain_id, state.next_nonce, pic, tx, sizeof tx, &len, hash)
-                              : ok_dsi_account_act(state.chain_id, state.next_nonce, pic, tx, sizeof tx, &len, hash);
+    ok = kind == OK_PIC_TONES ? ok_dsi_account_photo(state.chain_id, state.next_nonce, pic, 0, tx, sizeof tx, &len, hash)
+                              : ok_dsi_account_act(state.chain_id, state.next_nonce, pic, 0, tx, sizeof tx, &len, hash);
     if (!ok) {
         u->say = "I couldn't sign it.";
         u->say_ticks = 300;
@@ -266,6 +280,53 @@ static int send_picture(ok_ui *u, ok_pet *p, int kind, const uint8_t *pic)
     ok_facts_log(ok_dsi_uptime(), 'E', "signed %s %02x%02x%02x%02x", kind == OK_PIC_TONES ? "photo" : "drawing", hash[0],
                  hash[1], hash[2], hash[3]);
     return 1;
+}
+
+/* Stuck behind a fee that is too low: the same picture signed again with the
+ * same nonce and twice the fee, saved first, then handed out instead; a block
+ * holding any version counts. */
+static void speed_up(ok_ui *u, ok_pet *p)
+{
+    static uint8_t tx[OK_STATE_TX_MAX];
+    static ok_state before;
+    static char said[64];
+    uint8_t hash[32];
+    size_t len;
+    int level = state.tx_fee_level + 1, ok;
+    u->say_ticks = 300;
+    if (!state.tx_len || !send_ok) return;
+    if (state.tx_kind != OK_TX_PICTURE) {
+        u->say = "That one was signed by an older me: I can't redo it.";
+        return;
+    }
+    if (level > OK_DSI_FEE_LEVELS) {
+        u->say = "It already has the highest fee I'll pay.";
+        return;
+    }
+    ok = state.tx_pic_kind == OK_PIC_TONES
+             ? ok_dsi_account_photo(state.chain_id, state.next_nonce - 1, state.tx_pic, level, tx, sizeof tx, &len, hash)
+             : ok_dsi_account_act(state.chain_id, state.next_nonce - 1, state.tx_pic, level, tx, sizeof tx, &len, hash);
+    if (!ok) {
+        u->say = "I couldn't sign it again.";
+        return;
+    }
+    before = state;
+    if (state.tx_older == 3) memmove(state.tx_older_hash[0], state.tx_older_hash[1], 64), state.tx_older--;
+    memcpy(state.tx_older_hash[state.tx_older++], state.tx_hash, 32);
+    state.tx_fee_level = (uint8_t)level;
+    state.tx_len = (uint16_t)len;
+    memcpy(state.tx, tx, len);
+    memcpy(state.tx_hash, hash, 32);
+    if (!keep(u, p)) {
+        state = before;
+        u->say = "I couldn't save it, so nothing changed.";
+        return;
+    }
+    ok_dsi_net_replace(state.tx, state.tx_len, state.tx_hash);
+    ok_facts_log(ok_dsi_uptime(), 'E', "sped up to %u gwei max: %02x%02x%02x%02x", 2u << level, hash[0], hash[1], hash[2],
+                 hash[3]);
+    snprintf(said, sizeof said, "Signed again: up to %u gwei now. Same picture.", 2u << level);
+    u->say = said;
 }
 
 /* A 4-tone photo on a card: 64x64 shown 96x96 in the middle of 128x96. */
@@ -617,11 +678,14 @@ int main(void)
         /* The transaction on its way: seen in a block meanwhile (hang it now),
          * or handed out again, the very same bytes. */
         if (send_ok && state.tx_len) {
-            if (ok_dsi_net_was_included(state.tx_hash)) {
+            int k, seen = ok_dsi_net_was_included(state.tx_hash);
+            for (k = 0; k < state.tx_older; k++) seen = seen || ok_dsi_net_was_included(state.tx_older_hash[k]);
+            if (seen) {
                 if (drawing_waiting()) hang(&ui, &pet);
                 else forget_tx(), keep(&ui, &pet);
             } else {
                 ok_dsi_net_send(state.tx, state.tx_len, state.tx_hash, state.watch_from);
+                for (k = 0; k < state.tx_older; k++) ok_dsi_net_also_watch(state.tx_older_hash[k]);
                 if (drawing_waiting() && state.tx_pic_kind == OK_PIC_DRAWING) {
                     ui.drawing_sent = 1;
                     memcpy(ui.drawing, state.tx_pic, 512);
@@ -692,7 +756,7 @@ int main(void)
             uint64_t inc_block;
             if (ok_dsi_net_take_included(inc_hash, &inc_block)) {
                 static char said[48];
-                if (drawing_waiting() && !memcmp(inc_hash, state.tx_hash, 32)) {
+                if (drawing_waiting() && ours(inc_hash)) {
                     hang_waiting = 1; /* hung below, in front of the player (not behind SELECT) */
                     snprintf(said, sizeof said, "Block %lu has my %s. On the wall!", (unsigned long)inc_block,
                              state.tx_pic_kind == OK_PIC_TONES ? "photo" : "drawing");
@@ -1408,6 +1472,7 @@ int main(void)
                 balance_ask(&ui); /* display only: sending never looks at it */
             }
             if (r == OK_UI_WALLET_BALANCE) balance_ask(&ui);
+            if (r == OK_UI_WALLET_SPEED) speed_up(&ui, &pet);
             if (r == OK_UI_WALLET_SCRIBBLE) {
                 int was = ui.wallet_ready;
                 ok_dsi_account_scribble(touch.px, touch.py, &ui);

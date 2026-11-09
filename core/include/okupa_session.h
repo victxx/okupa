@@ -25,10 +25,12 @@ typedef struct {
     const size_t *tx_lens;
     size_t tx_count;
     /* Optional: once admitted, follow the chain from block watch_from (0 =
-     * the peer's head) and look for the transaction whose hash is watch in
-     * each new block: headers, then bodies, each checked by hashing. seconds
-     * paces the requests; block hears about every block checked. */
-    const uint8_t *watch;
+     * the peer's head) and look for a transaction whose hash is one of the
+     * watch_count in watch (the versions of one transaction) in each new
+     * block: headers, then bodies, each checked by hashing. seconds paces the
+     * requests; block hears about every block checked. */
+    const uint8_t (*watch)[32];
+    size_t watch_count;
     uint64_t watch_from;
     uint32_t (*seconds)(void *ctx);
     void (*block)(void *ctx, const ok_header *h, const ok_body_check *c);

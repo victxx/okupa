@@ -322,7 +322,8 @@ static void step_data(frame f, const uint8_t (*font)[8], const ok_tech *t, const
             kv(f, font, y + 12, "In block", v, GOOD);
             kv(f, font, y + 24, "Trie root", "recomputed, matches", GOOD);
         } else {
-            kv(f, font, y + 12, "Found", fa->incl_state == 3 ? "root MISMATCH" : "not yet", fa->incl_state == 3 ? BAD : DIM);
+            kv(f, font, y + 12, "Found", fa->incl_state == 3 ? "root MISMATCH" : fa->incl_state == 4 ? "1 node so far" : "not yet",
+               fa->incl_state == 3 ? BAD : DIM);
         }
         break;
     case 7:

@@ -14,6 +14,7 @@
 #include <nds.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -49,6 +50,14 @@ static char log_path[48], peers_path[48], wifi_path[48],
     included_path[48];
 static uint8_t pending[1200], pending_hash[32];
 static size_t pending_len;
+/* Every version of the pending transaction (a fee raised keeps its nonce, and
+ * any of them may be the one a block holds), the current one first. */
+#define VERSIONS 4
+static uint8_t versions[VERSIONS][32];
+static size_t version_count;
+/* A block one node said holds it: a second, different node must agree. */
+static uint64_t first_block;
+static uint8_t first_block_hash[32], first_peer[64];
 static int handed;
 static uint64_t watch_from; /* next block to look at for the pending transaction */
 static int included_event; /* one-shot for the game: the pending transaction was seen in a block */
@@ -61,6 +70,7 @@ static uint16_t dns_id = 0x4f4b;
 static struct {
     uint8_t pub[64], ip[4];
     uint16_t tcp;
+    uint16_t kept; /* times it kept us (peers file): the best are tried first */
 } nodes[MAX_NODES];
 static int node_count;
 static int ready_peers; /* remembered nodes that reached Status: they can take a transaction */
@@ -195,11 +205,32 @@ void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32], uint64
     if (n > sizeof pending) return;
     memcpy(pending, tx, n);
     memcpy(pending_hash, hash, 32);
+    memcpy(versions[0], hash, 32);
+    version_count = 1;
+    first_block = 0;
     pending_len = n;
     handed = 0;
     watch_from = from;
     ok_facts_now.incl_state = 0;
     ok_facts_now.blocks_checked = 0;
+}
+
+void ok_dsi_net_also_watch(const uint8_t hash[32])
+{
+    size_t k;
+    for (k = 0; k < version_count; k++)
+        if (!memcmp(versions[k], hash, 32)) return;
+    if (version_count < VERSIONS) memcpy(versions[version_count++], hash, 32);
+}
+
+void ok_dsi_net_replace(const uint8_t *tx, size_t n, const uint8_t hash[32])
+{
+    if (!pending_len || n > sizeof pending) return;
+    memcpy(pending, tx, n);
+    memcpy(pending_hash, hash, 32);
+    pending_len = n;
+    handed = 0;
+    ok_dsi_net_also_watch(hash);
 }
 
 uint64_t ok_dsi_net_watch_from(void) { return pending_len ? watch_from : 0; }
@@ -606,6 +637,7 @@ static int add_node(const uint8_t pub[64], const uint8_t ip[4], uint16_t tcp)
     memcpy(nodes[node_count].pub, pub, 64);
     memcpy(nodes[node_count].ip, ip, 4);
     nodes[node_count].tcp = tcp;
+    nodes[node_count].kept = 0;
     node_count++;
     return 1;
 }
@@ -636,7 +668,11 @@ static int load_peers(void)
         ip[1] = (uint8_t)b;
         ip[2] = (uint8_t)c;
         ip[3] = (uint8_t)d;
-        added += add_node(pub, ip, (uint16_t)port);
+        if (add_node(pub, ip, (uint16_t)port)) {
+            const char *kept = strstr(text, " kept=");
+            if (kept) nodes[node_count - 1].kept = (uint16_t)atoi(kept + 6);
+            added++;
+        }
     }
     fclose(f);
     return added;
@@ -664,6 +700,39 @@ static void remember_peer(int i)
         fputs(text, f);
         fclose(f);
         ready_peers++;
+    }
+}
+
+/* It kept us once more: its line in the peers file says so (" kept=N"), so
+ * it is tried first next time. The file is rewritten whole, then swapped in. */
+static void bump_peer(int i)
+{
+    static char file[64][200];
+    char want[140], tmp[56];
+    int lines = 0, k, n;
+    FILE *f;
+    if (!peers_path[0]) return;
+    nodes[i].kept++;
+    n = snprintf(want, sizeof want, "enode://");
+    for (k = 0; k < 64; k++) n += snprintf(want + n, sizeof want - (size_t)n, "%02x", nodes[i].pub[k]);
+    if (!(f = fopen(peers_path, "r"))) return;
+    while (lines < 64 && fgets(file[lines], sizeof file[0], f)) lines++;
+    fclose(f);
+    snprintf(tmp, sizeof tmp, "%.50s.tmp", peers_path);
+    if (!(f = fopen(tmp, "w"))) return;
+    for (k = 0; k < lines; k++) {
+        if (!strncmp(file[k], want, strlen(want))) {
+            char *end = strstr(file[k], " kept=");
+            if (!end) end = file[k] + strcspn(file[k], "\r\n");
+            *end = 0;
+            fprintf(f, "%s kept=%u\n", file[k], (unsigned)nodes[i].kept);
+        } else {
+            fputs(file[k], f);
+        }
+    }
+    if (fclose(f) == 0) {
+        remove(peers_path);
+        rename(tmp, peers_path);
     }
 }
 
@@ -794,6 +863,7 @@ static int hold(void *ctx)
         admitted = 1;
         read_ms = 15000;
         remember_peer(current_node);
+        bump_peer(current_node);
         snprintf(text, sizeof text, "Online: %.24s", current_client);
         say(text);
         line(LINES - 1, "%s", text);
@@ -852,6 +922,23 @@ static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
     ok_facts_log(ok_dsi_uptime(), 'E', "block %llu: %u tx, root %s", (unsigned long long)h->number, (unsigned)c->count,
                  c->root_ok ? "ok" : "BAD");
     if (c->found < 0) return;
+    if (c->root_ok && (!first_block || memcmp(first_block_hash, h->hash, 32) ||
+                       !memcmp(first_peer, nodes[current_node].pub, 64))) {
+        /* One node says so: the next one is asked for this very block, and
+         * only a different node finding it in the same block counts. */
+        if (!first_block || memcmp(first_block_hash, h->hash, 32)) {
+            first_block = h->number;
+            memcpy(first_block_hash, h->hash, 32);
+            memcpy(first_peer, nodes[current_node].pub, 64);
+            ok_facts_log(ok_dsi_uptime(), 'E', "our tx in block %llu, 1 node: asking another",
+                         (unsigned long long)h->number);
+        }
+        watch_from = first_block;
+        f->incl_block = h->number;
+        memcpy(f->incl_block_hash, h->hash, 32);
+        f->incl_state = 4;
+        return;
+    }
     f->incl_block = h->number;
     memcpy(f->incl_block_hash, h->hash, 32);
     memcpy(f->incl_tx_root, c->root, 32);
@@ -865,20 +952,21 @@ static void block_seen(void *ctx, const ok_header *h, const ok_body_check *c)
         FILE *fp = fopen(included_path, "a");
         int k;
         if (fp) {
-            for (k = 0; k < 32; k++) fprintf(fp, "%02x", pending_hash[k]);
+            for (k = 0; k < 32; k++) fprintf(fp, "%02x", versions[c->which >= 0 ? c->which : 0][k]);
             fprintf(fp, " block %llu index %u of %u\n", (unsigned long long)h->number, (unsigned)c->found,
                     (unsigned)c->count);
             fclose(fp);
         }
     }
-    memcpy(included_hash, pending_hash, 32);
+    memcpy(included_hash, versions[c->which >= 0 ? c->which : 0], 32);
     included_block = h->number;
     included_event = 1;
     pending_len = 0;
     {
         char text[48];
         snprintf(text, sizeof text, "In block %llu!", (unsigned long long)h->number);
-        ok_facts_log(ok_dsi_uptime(), 'E', "OUR TX in block %llu (#%u)", (unsigned long long)h->number, (unsigned)c->found);
+        ok_facts_log(ok_dsi_uptime(), 'E', "OUR TX in block %llu (#%u), 2 nodes", (unsigned long long)h->number,
+                     (unsigned)c->found);
         say(text);
         line(LINES - 1, "%s", text);
     }
@@ -962,7 +1050,8 @@ static int dial(int i, int row)
         io.tx_lens = &pending_len;
         io.tx_count = 1;
         /* And look for it in every new block while a node keeps us. */
-        io.watch = pending_hash;
+        io.watch = (const uint8_t (*)[32])versions;
+        io.watch_count = version_count;
         io.watch_from = watch_from;
     }
     io.seconds = seconds_now;
@@ -1029,15 +1118,25 @@ static int dial(int i, int row)
  * scroll. 1 if one let us in (and we have since been disconnected). */
 static int try_nodes(int from, int to)
 {
-    int n = to - from, rows = LINES - 5, full = 0, k;
+    static uint8_t order[MAX_NODES];
+    int n = to - from, rows = LINES - 5, full = 0, k, j;
     int start = n > 0 ? (int)(cpuGetTiming() % (unsigned)n) : 0;
     char text[48];
+    /* Nodes that kept us before go first, the most often first; the rest
+     * from a different start each time. */
+    for (k = 0; k < n; k++) order[k] = (uint8_t)(from + (start + k) % n);
+    for (k = 1; k < n; k++)
+        for (j = k; j > 0 && nodes[order[j]].kept > nodes[order[j - 1]].kept; j--) {
+            uint8_t t = order[j];
+            order[j] = order[j - 1];
+            order[j - 1] = t;
+        }
     for (k = 0; k < n && !ui_wifi; k++) {
         int row = 4 + k % rows;
         if (k >= rows) line(row, " ");
         snprintf(text, sizeof text, "Looking for a node %d/%d", k + 1, n);
         say(text);
-        if (dial(from + (start + k) % n, row)) return 1;
+        if (dial(order[k], row)) return 1;
         full += strstr(lines[row], "full") != NULL;
         line(LINES - 1, "Tried %d of %d, %d full", k + 1, n, full);
     }

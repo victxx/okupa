@@ -155,7 +155,7 @@ static void note_tx(const ok_tx *tx, const uint8_t *raw, size_t len, const uint8
  * the console's key. The fees are capped: a 0.1 gwei tip and at most 2 gwei a
  * unit of gas (today's base fee is far below), on a gas limit just above what
  * the act needs, so the most it can ever cost is gas_limit x 2 gwei. */
-static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_t act_len, uint64_t gas_limit,
+static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_t act_len, uint64_t gas_limit, int level,
                     const char *kind, uint8_t *out, size_t cap, size_t *len, uint8_t hash[32])
 {
     char text[80] = {0};
@@ -172,8 +172,8 @@ static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_
             memset(&tx, 0, sizeof tx);
             tx.chain_id = chain_id;
             tx.nonce = nonce;
-            tx.max_priority_fee = 100000000ull; /* 0.1 gwei */
-            tx.max_fee = 2000000000ull;         /* 2 gwei */
+            tx.max_priority_fee = 100000000ull << level; /* 0.1 gwei, doubled each time it is sped up */
+            tx.max_fee = 2000000000ull << level;         /* 2 gwei, the same */
             tx.gas_limit = gas_limit;
             ok_keys_address(pub, tx.to); /* to itself */
             tx.data = act;
@@ -191,22 +191,24 @@ static int sign_act(uint64_t chain_id, uint64_t nonce, const uint8_t *act, size_
 
 /* A drawing: about 21 000 + 16 x 518 gas, or the calldata floor (with room
  * for a higher one). */
-int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, uint8_t *out, size_t cap, size_t *len,
-                       uint8_t hash[32])
+int ok_dsi_account_act(uint64_t chain_id, uint64_t nonce, const uint8_t *pixels, int level, uint8_t *out, size_t cap,
+                       size_t *len, uint8_t hash[32])
 {
     uint8_t act[OK_ACT_MAX];
     size_t act_len;
     if (!pixels || ok_act_drawing(pixels, act, sizeof act, &act_len) != OK_OK) return 0;
-    return sign_act(chain_id, nonce, act, act_len, 60000, "drawing", out, cap, len, hash);
+    if (level < 0 || level > OK_DSI_FEE_LEVELS) return 0;
+    return sign_act(chain_id, nonce, act, act_len, 60000, level, "drawing", out, cap, len, hash);
 }
 
 /* A 4-tone photo: 1030 bytes of calldata, about 62 200 gas at the calldata
  * floor; 80 000 leaves room. */
-int ok_dsi_account_photo(uint64_t chain_id, uint64_t nonce, const uint8_t *tones, uint8_t *out, size_t cap, size_t *len,
-                         uint8_t hash[32])
+int ok_dsi_account_photo(uint64_t chain_id, uint64_t nonce, const uint8_t *tones, int level, uint8_t *out, size_t cap,
+                         size_t *len, uint8_t hash[32])
 {
     uint8_t act[OK_ACT_MAX];
     size_t act_len;
     if (!tones || ok_act_photo(tones, act, sizeof act, &act_len) != OK_OK) return 0;
-    return sign_act(chain_id, nonce, act, act_len, 80000, "photo", out, cap, len, hash);
+    if (level < 0 || level > OK_DSI_FEE_LEVELS) return 0;
+    return sign_act(chain_id, nonce, act, act_len, 80000, level, "photo", out, cap, len, hash);
 }

@@ -71,12 +71,17 @@ int main(void)
     s.tx_pic_kind = OK_PIC_DRAWING;
     memset(s.tx_pic, 0x3c, 512);
     s.watch_from = 26360000;
+    s.tx_fee_level = 2;
+    s.tx_older = 2;
+    memset(s.tx_older_hash[0], 0x61, 32);
+    memset(s.tx_older_hash[1], 0x62, 32);
     assert(ok_state_encode(&s, 5, wire, sizeof wire, &n) == OK_OK && !memcmp(wire, "OKST\x01\0\0\0", 8));
     assert(ok_state_decode(wire, n, &r, &gen) == OK_OK && gen == 5);
     assert(!memcmp(&r.pet, &s.pet, sizeof s.pet) && !memcmp(r.page, s.page, 512) && r.wall_count == 2);
     assert(!memcmp(r.wall[0], s.wall[0], 512) && !memcmp(r.wall[1], s.wall[1], 1024) && r.wall_kind[1] == OK_PIC_TONES);
     assert(r.next_nonce == 7 && r.tx_len == 600 && !memcmp(r.tx, s.tx, 600) && !memcmp(r.tx_hash, s.tx_hash, 32));
     assert(r.tx_pic_kind == OK_PIC_DRAWING && !memcmp(r.tx_pic, s.tx_pic, 512) && r.watch_from == 26360000);
+    assert(r.tx_fee_level == 2 && r.tx_older == 2 && r.tx_older_hash[1][31] == 0x62); /* the versions a raised fee left */
 
     /* Any damage, a short read or trailing bytes: refused whole. */
     for (i = 0; i < n * 8; i += 13) {

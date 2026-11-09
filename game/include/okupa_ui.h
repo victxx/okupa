@@ -13,7 +13,7 @@
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM,
        OK_UI_GALLERY };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
-       OK_UI_WALLET_SCRIBBLE, OK_UI_SEND_DRAWING, OK_UI_WALLET_BALANCE,
+       OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_SPEED, OK_UI_SEND_DRAWING, OK_UI_WALLET_BALANCE,
        /* Buttons the platform may act on (the okupa has already said a hint):
         * look through the camera, listen through the microphone, a game
         * (it guesses the sketchbook's drawing), a friend. */

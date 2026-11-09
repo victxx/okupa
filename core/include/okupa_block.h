@@ -33,13 +33,17 @@ ok_result ok_trie_ordered_root(const uint8_t *const *vals, const size_t *lens, s
 
 typedef struct {
     uint32_t count;     /* transactions in the body */
-    int32_t found;      /* index of the wanted transaction, -1 if absent */
+    int32_t found;      /* index of a wanted transaction, -1 if none is there */
+    int32_t which;      /* which of the wanted hashes it was, -1 if none */
     uint8_t root[32];   /* transactions root recomputed from the body */
     int root_ok;        /* equals the header's */
 } ok_body_check;
 
-/* body: one item of a BlockBodies list ([transactions, ommers, withdrawals]). */
-ok_result ok_body_check_tx(const ok_rlp_item *body, const ok_header *h, const uint8_t want[32], ok_body_check *out);
+/* body: one item of a BlockBodies list ([transactions, ommers, withdrawals]).
+ * want: wants hashes (the versions of one transaction: a fee replaced keeps
+ * its nonce, so any of them may be the one a block holds). */
+ok_result ok_body_check_tx(const ok_rlp_item *body, const ok_header *h, const uint8_t (*want)[32], size_t wants,
+                           ok_body_check *out);
 
 /* Requests (payloads; send with OK_P2P_ETH_OFFSET + the id). */
 ok_result ok_eth_get_headers(uint64_t request, uint64_t origin, uint64_t amount, uint8_t *out, size_t cap, size_t *len);

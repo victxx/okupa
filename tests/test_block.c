@@ -34,10 +34,17 @@ static void real_block(const char *path, const char *root_hex, const char *tx_he
     memset(&h, 0, sizeof h);
     hex(root_hex, h.tx_root, 32);
     hex(tx_hex, want, 32);
-    assert(ok_body_check_tx(&item, &h, want, &c) == OK_OK);
-    assert(c.count == txs && c.root_ok && c.found == index);
+    {
+        uint8_t wants[3][32];
+        memset(wants, 0x5a, sizeof wants);
+        memcpy(wants[2], want, 32); /* the third version is the one in the block */
+        assert(ok_body_check_tx(&item, &h, (const uint8_t (*)[32])want, 1, &c) == OK_OK);
+        assert(c.count == txs && c.root_ok && c.found == index && c.which == 0);
+        assert(ok_body_check_tx(&item, &h, (const uint8_t (*)[32])wants, 3, &c) == OK_OK && c.found == index && c.which == 2);
+        assert(ok_body_check_tx(&item, &h, (const uint8_t (*)[32])wants, 2, &c) == OK_OK && c.found == -1 && c.which == -1);
+    }
     h.tx_root[0] ^= 1;
-    assert(ok_body_check_tx(&item, &h, NULL, &c) == OK_OK && !c.root_ok && c.found == -1);
+    assert(ok_body_check_tx(&item, &h, NULL, 0, &c) == OK_OK && !c.root_ok && c.found == -1);
 }
 
 int main(void)

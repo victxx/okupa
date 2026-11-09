@@ -194,7 +194,7 @@ static void watch_answer(const ok_io *io, ok_rlpx_session *s, int snappy, watche
     } else if (id == OK_P2P_ETH_OFFSET + OK_ETH_BLOCK_BODIES && w->waiting == 2) {
         ok_body_check c;
         w->waiting = 0;
-        if (ok_rlp_next(&list, &pos, &item) != OK_OK || ok_body_check_tx(&item, &w->h[w->at], io->watch, &c) != OK_OK)
+        if (ok_rlp_next(&list, &pos, &item) != OK_OK || ok_body_check_tx(&item, &w->h[w->at], io->watch, io->watch_count, &c) != OK_OK)
             return; /* not served: ask again later */
         rep->blocks++;
         if (io->block) io->block(io->ctx, &w->h[w->at], &c);

@@ -27,7 +27,7 @@ ok_result ok_state_encode(const ok_state *s, uint64_t generation, uint8_t *out, 
 {
     uint8_t *q = out;
     int i;
-    size_t need = 8 + 8 + 29 + 512 + 1 + 8 + 8 + 1 + 2 + 32 + 1 + 8 + 32, pic;
+    size_t need = 8 + 8 + 29 + 512 + 1 + 8 + 8 + 1 + 2 + 2 + 32 + 1 + 8 + 32, pic;
     if (!s || !out || !len) return OK_ARGUMENT;
     if (s->wall_count < 0 || s->wall_count > OK_STATE_WALL || s->tx_len > OK_STATE_TX_MAX || !generation)
         return OK_ARGUMENT;
@@ -36,6 +36,8 @@ ok_result ok_state_encode(const ok_state *s, uint64_t generation, uint8_t *out, 
         need += 1 + pic;
     }
     if (s->tx_kind != OK_TX_NONE && !s->tx_len) return OK_ARGUMENT;
+    if (s->tx_older > 3) return OK_ARGUMENT;
+    need += 32u * s->tx_older;
     if (s->tx_pic_kind && !ok_state_picture_size(s->tx_pic_kind)) return OK_ARGUMENT;
     need += s->tx_len + ok_state_picture_size(s->tx_pic_kind);
     if (need > cap) return OK_RANGE;
@@ -58,6 +60,9 @@ ok_result ok_state_encode(const ok_state *s, uint64_t generation, uint8_t *out, 
     put(q, s->chain_id, 8), q += 8;
     put(q, s->next_nonce, 8), q += 8;
     *q++ = s->tx_kind;
+    *q++ = s->tx_fee_level;
+    *q++ = s->tx_older;
+    for (i = 0; i < s->tx_older; i++) memcpy(q, s->tx_older_hash[i], 32), q += 32;
     put(q, s->tx_len, 2), q += 2;
     memcpy(q, s->tx, s->tx_len), q += s->tx_len;
     memcpy(q, s->tx_hash, 32), q += 32;
@@ -115,6 +120,11 @@ ok_result ok_state_decode(const uint8_t *in, size_t n, ok_state *s, uint64_t *ge
     t.chain_id = get(q, 8), q += 8;
     t.next_nonce = get(q, 8), q += 8;
     t.tx_kind = *q++;
+    t.tx_fee_level = *q++;
+    t.tx_older = *q++;
+    if (t.tx_older > 3) return OK_FORMAT;
+    NEED(32u * t.tx_older + 2);
+    for (i = 0; i < t.tx_older; i++) memcpy(t.tx_older_hash[i], q, 32), q += 32;
     t.tx_len = (uint16_t)get(q, 2), q += 2;
     if (t.tx_kind > OK_TX_PICTURE || t.tx_len > OK_STATE_TX_MAX || (t.tx_kind == OK_TX_NONE) != (t.tx_len == 0))
         return OK_FORMAT;
