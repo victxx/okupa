@@ -116,5 +116,14 @@ ok_result ok_balance_ask(const char *host, const char *address0x, ok_think_fetch
         for (i = 24; i < 32; i++) low = low << 8 | v[i];
         b->low = !big && low < OK_BALANCE_LOW_WEI;
     }
+    { /* how many it has sent: tells whether a transaction we are waiting on got in */
+        char why[48];
+        k = snprintf(body, sizeof body,
+                     "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"eth_getTransactionCount\",\"params\":[\"%s\",\"0x%llx\"]}",
+                     address0x, (unsigned long long)b->block);
+        if (ok_jsonrpc_call(fetch, ctx, host, body, (size_t)k, buf, cap, &result, why, sizeof why) &&
+            quantity64(&result, &b->nonce))
+            b->have_nonce = 1;
+    }
     return OK_OK;
 }

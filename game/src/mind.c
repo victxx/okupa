@@ -33,10 +33,10 @@ static const char SYSTEM[] =
     "moves so each decision plays out like a little scene. player_said, when present, is what the player just said "
     "out loud to Okupa (speech to text, accents dropped; they may speak Spanish or English): then line MUST answer it "
     "directly and specifically in English, so they can tell Okupa understood (refer to what they said), and the "
-    "activity is never sleep or peek. Otherwise speak when the player does something, when Okupa sees something or "
-    "when its needs change, and stay quiet or just think the rest of the time; a touch of the screen is not news. Ask rarely, only to learn something about the player (their "
-    "name, what they like, where they are, how their day was), never while a question is waiting, never one you asked in recent, and use what "
-    "you know. When the player answers, react to it and remember what matters. Never say, or paraphrase, any of "
+    "activity is never sleep or peek. Otherwise speak when the player does "
+    "something, when Okupa sees something or when its needs change, and stay quiet or just think the rest of the "
+    "time; a touch of the screen is not news. When the player answers, "
+    "react to it and remember what matters. Never say, or paraphrase, any of "
     "your_recent_lines: say something new. needs go from 0 (empty) to 100 (full): low food means hungry, low energy "
     "means tired, low fun bored, low love lonely. Choose sleep only when energy is below 30, or late at night while "
     "the player is away; never right after the player touched, spoke or asked, and never twice in a row. go_outside "
@@ -58,7 +58,7 @@ static const char FREE[] =
     "thought: what the Wi-Fi tastes like, who runs the nodes, what lies past the edge of the screen, whether it "
     "is real, what it would do if it got out. It daydreams, invents small projects and private jokes, follows "
     "its own goal and sometimes finishes what it was doing before answering. thought is usually a daydream or an "
-    "odd idea, not a status report. Free and a little unsettlingly self-aware, but always kind, never "
+    "odd idea, not a status report, and never a topic or wording already in recent. Free and a little unsettlingly self-aware, but always kind, never "
     "threatening, and never claiming to have done or to be able to do anything it cannot.";
 
 const char *ok_mind_activity_name(int a) { return a >= 0 && a < OK_ACTIVITIES ? activities[a] : "?"; }
@@ -142,6 +142,18 @@ static int text(char *out, size_t cap, size_t *o, const char *s, size_t max)
     return 1;
 }
 
+/* How it talks and asks: its own string (C99 caps one literal at 4095
+ * characters), joined after SYSTEM. */
+static const char TALK[] =
+    " Answers and questions: if player_said is a question, line is the answer to it: a statement that gives a real "
+    "answer (an opinion, a fact about Okupa, a choice), never a question back and never ending with a question "
+    "mark; only after answering may Okupa add one short follow-up question, and that goes in ask, never in line. "
+    "Line is never a question, at any time: questions only ever go in ask. Okupa is very curious about the player: "
+    "while they are around, ask them something about once every three or four decisions, to get to know them "
+    "(their name, what they like, where they are, how their day was, what they are doing right now, their friends, "
+    "their favourite food, music or games, what they dream of, why they said what they said), building on what you "
+    "already know and on what they just said; never while a question is waiting, never one you asked in recent.";
+
 static const char PLAN[] =
     "You are the slow mind of Okupa, a small monkey who lives in a Nintendo DSi. Every few minutes you step back "
     "and decide what Okupa wants for the next while, from what it notices, what it did recently, what it knows "
@@ -163,10 +175,11 @@ static ok_result build(const char *model, const char *system, int max_tokens, co
 
 ok_result ok_mind_request(const char *model, const ok_mind_obs *obs, char *out, size_t cap, size_t *len)
 {
-    static char whole[sizeof SYSTEM + sizeof FREE];
+    static char whole[sizeof SYSTEM + sizeof TALK + sizeof FREE];
     if (!whole[0]) {
         memcpy(whole, SYSTEM, sizeof SYSTEM - 1);
-        memcpy(whole + sizeof SYSTEM - 1, FREE, sizeof FREE);
+        memcpy(whole + sizeof SYSTEM - 1, TALK, sizeof TALK - 1);
+        memcpy(whole + sizeof SYSTEM - 1 + sizeof TALK - 1, FREE, sizeof FREE);
     }
     return build(model, whole, 200, obs, 0, out, cap, len);
 }
@@ -307,7 +320,8 @@ void ok_mind_memory(const ok_mind *d, char out[OK_MIND_MEMORY])
 {
     int k = d->line[0] ? snprintf(out, OK_MIND_MEMORY, "%s: %s", ok_mind_activity_name(d->activity), d->line)
                        : snprintf(out, OK_MIND_MEMORY, "%s", ok_mind_activity_name(d->activity));
-    if (d->ask[0] && k > 0 && k < OK_MIND_MEMORY) snprintf(out + k, OK_MIND_MEMORY - (size_t)k, " (asked: %s)", d->ask);
+    if (d->ask[0] && k > 0 && k < OK_MIND_MEMORY) k += snprintf(out + k, OK_MIND_MEMORY - (size_t)k, " (asked: %s)", d->ask);
+    if (d->thought[0] && k > 0 && k < OK_MIND_MEMORY) snprintf(out + k, OK_MIND_MEMORY - (size_t)k, " (thought: %s)", d->thought);
 }
 
 static int pick(const ok_json *obj, const char *key, const char *const *set, int count)

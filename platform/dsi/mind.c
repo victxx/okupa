@@ -57,6 +57,7 @@ static int said_count;
 /* The newest verified decision, handed out once. */
 static ok_mind mailbox;
 static int mailbox_new;
+static int mailbox_answer; /* the decision in the mailbox answers what the player said */
 
 /* The big buffers: in DSi mode they live in the DSi's own RAM (TWL_BSS); in
  * DS mode (an emulator set to DS, say) smaller ones come from the heap and
@@ -110,6 +111,7 @@ static const uint8_t *clip;
 static size_t clip_len;
 static uint32_t looked_at;
 TWL_BSS static uint16_t look_px[128 * 96]; /* the photo behind the last verified look */
+static char look_quip[49];                 /* what Okupa said about that photo, or "" */
 static volatile int live;                  /* the player keeps looking: no decisions meanwhile */
 TWL_BSS static uint8_t photo_twl[64 * 1024]; /* a camera PNG (37 KB) or a drawing */
 static uint8_t *photo;
@@ -132,15 +134,18 @@ typedef struct {
 static request req[OK_DSI_ASKS];
 static request *serving; /* the one whose call is under way: fetch() moves its stage */
 static volatile int alive;
-static const char *not_alive = "my 0G mind is off (no mind.txt / mind.key)";
+static const char *not_alive = "my mind is off (no mind.txt / mind.key)";
 static int read_ms = 60000; /* how long a reply may take; shorter while the player waits */
 static int reply_due;       /* the player just spoke: answer it before anything else */
+static int heard_retry;     /* an answer that failed was tried once more */
 /* The wallet's balance, read from a public JSON-RPC node for the screen:
  * not 0G, not part of sending; served even while the mind is paused. */
 static volatile int balance_wanted, balance_result;
 static char balance_addr[43], balance_eth[24], balance_why[48];
 static uint64_t balance_block;
 static int balance_low;
+static uint64_t balance_nonce;
+static int balance_have_nonce;
 TWL_BSS static char sense_twl[OK_EAR_RATE * OK_EAR_SECONDS + 20 * 1024]; /* a clip's multipart, or a photo in base64 */
 static char *sense_buf;
 static size_t sense_cap;
@@ -306,6 +311,12 @@ void ok_dsi_mind_balance(const char *address0x)
     balance_wanted = 1;
 }
 
+int ok_dsi_mind_balance_nonce(uint64_t *nonce)
+{
+    *nonce = balance_nonce;
+    return balance_have_nonce;
+}
+
 int ok_dsi_mind_take_balance(char eth[24], uint64_t *block, int *low, char why[48])
 {
     int s = balance_result;
@@ -319,6 +330,7 @@ int ok_dsi_mind_take_balance(char eth[24], uint64_t *block, int *low, char why[4
 }
 void ok_dsi_mind_live(int on) { live = on; }
 void ok_dsi_mind_look_photo(uint16_t out[128 * 96]) { memcpy(out, look_px, sizeof look_px); }
+void ok_dsi_mind_look_quip(char out[49]) { memcpy(out, look_quip, sizeof look_quip); }
 
 void ok_dsi_mind_letters(int allowed) { letters_ok = allowed; }
 
@@ -381,7 +393,7 @@ int ok_dsi_mind_take(ok_mind *d)
     if (!mailbox_new) return 0;
     *d = mailbox;
     mailbox_new = 0;
-    return 1;
+    return mailbox_answer ? 2 : 1;
 }
 
 /* ---- Entropy: the DSi has none, so timer jitter around network events,
@@ -481,6 +493,7 @@ static int resolve(const char *host, struct in_addr *out)
 static int64_t clock_offset; /* add to time(NULL) for UTC */
 static int clock_synced;
 static uint32_t clock_synced_at; /* seconds, for a resync every half hour */
+static uint32_t clock_tried_at;  /* seconds: without an answer, try again every 5 min, not every turn */
 /* Seconds since boot, for "every so often" (frames are not time at 8 fps). */
 static uint32_t now_s(void) { return ok_dsi_uptime(); }
 
@@ -510,6 +523,7 @@ static int clock_sync(void)
     uint8_t q[OK_SNTP_SIZE], r[64], stamp[8];
     unsigned i;
     int64_t utc;
+    clock_tried_at = now_s();
     for (i = 0; i < sizeof servers / sizeof servers[0]; i++) {
         int fd, n;
         memset(&addr, 0, sizeof addr);
@@ -911,9 +925,11 @@ static void wait_real(uint32_t ms, int early)
     }
 }
 
+/* Never ask dswifi directly: before it is started that is a data abort, and
+ * while the postman or the player is changing networks it is not ours. */
 static int wifi_ready(void)
 {
-    return Wifi_AssocStatus() == ASSOCSTATUS_ASSOCIATED && Wifi_GetIP() != 0 && Wifi_GetIP() != 0xffffffffu;
+    return ok_dsi_wifi_usable();
 }
 
 static void remember(const ok_mind *d)
@@ -1055,7 +1071,7 @@ static void failed(void)
     feed("safe stop: %.28s", ok_facts_now.og_error);
     hang_up();
     /* A certificate the clock cannot place: ask NTP again first. */
-    if (t.net_error == BR_ERR_X509_EXPIRED || t.net_error == BR_ERR_X509_TIME_UNKNOWN) clock_synced = 0;
+    if (t.net_error == BR_ERR_X509_EXPIRED || t.net_error == BR_ERR_X509_TIME_UNKNOWN) clock_synced = 0, clock_tried_at = 0;
 }
 
 /* Plain HTTP to a storage node, host "ip:port". */
@@ -1367,8 +1383,10 @@ static void look(request *q)
         feed("saw: %.33s", t.saw);
         snprintf(ok_facts_now.og_feature, sizeof ok_facts_now.og_feature, "saw: %.34s", t.saw);
         today_add("saw: %.75s", t.saw);
+        if (t.quip[0]) feed("says: %.32s", t.quip);
         if (q) {
             memcpy(look_px, ok_dsi_eye_thumb(), sizeof look_px);
+            snprintf(look_quip, sizeof look_quip, "%s", t.quip);
             finish(q, 1, t.saw);
         }
     } else {
@@ -1539,9 +1557,12 @@ static void balance_step(void)
         snprintf(balance_eth, sizeof balance_eth, "%s", b.eth);
         balance_block = b.block;
         balance_low = b.low;
+        balance_nonce = b.nonce;
+        balance_have_nonce = b.have_nonce;
         feed("balance: %.16s at block %llu", b.eth, (unsigned long long)b.block);
         balance_result = 1;
     } else {
+        balance_have_nonce = 0;
         snprintf(balance_why, sizeof balance_why, "%.47s", b.error[0] ? b.error : "no answer");
         feed("balance: %.28s", balance_why);
         hang_up();
@@ -1592,7 +1613,7 @@ static void decide(void)
     if (yesterday[0]) obs.diary = yesterday;
     if (heard_text[0]) obs.heard = heard_text;
     if (saw_text[0]) obs.saw = saw_text;
-    if (asked[0] && now_s() - asked_at > 180) asked[0] = 0; /* nobody answered in 3 minutes */
+    if (asked[0] && now_s() - asked_at > 90) asked[0] = 0; /* nobody answered in 90 s: it may ask something else */
     if (asked[0]) obs.asked = asked;
     if (cfg.city[0]) obs.city = cfg.city;
     obs.can_write_letter = letters_ok;
@@ -1670,9 +1691,11 @@ static void decide(void)
         {
             const char *lines[OK_MIND_LINES];
             for (j = 0; j < said_count; j++) lines[j] = said[j];
-            if (ok_mind_dedupe(&mailbox, lines, said_count)) feed("said that lately: not shown again");
+            if (!obs.heard && ok_mind_dedupe(&mailbox, lines, said_count)) feed("said that lately: not shown again");
         }
         if (mailbox.line[0]) keep_said(mailbox.line);
+        mailbox_answer = obs.heard != NULL;
+        heard_retry = 0;
         mailbox_new = 1;
     } else {
         fails++;
@@ -1680,6 +1703,10 @@ static void decide(void)
         line(10, " ");
         line(11, "Safe stop: no decision");
         failed();
+        if (obs.heard && !heard_retry) { /* the player is waiting for an answer: one more try at once */
+            heard_retry = 1;
+            reply_due = 1;
+        }
     }
     line(3, "#%u: HTTP %d in %lu ms, %d known", count, t.http_status, (unsigned long)ms_last, facts.count);
     line(0, "0G mind: alive, %u/%u verified", verified, count);
@@ -1850,7 +1877,7 @@ static int thinker(void *arg)
     if (!dir_path[0] || !load_settings(key)) {
         line(1, "No mind.txt / mind.key on SD");
         stopped("no mind.txt / mind.key");
-        not_alive = "my 0G mind is off (mind.txt / mind.key)";
+        not_alive = "my mind is off (mind.txt / mind.key)";
         drop_requests(not_alive);
         started = 0; /* nothing serves requests: they fail at once */
         return 0;
@@ -1888,7 +1915,7 @@ static int thinker(void *arg)
         if (balance_wanted) balance_step(); /* not 0G: served even while the mind is paused */
         if (paused || !wifi_ready() || !have_pet) {
             alive = 0;
-            not_alive = paused ? "my 0G mind is paused (Dev > Y)" : "my 0G mind is waiting for Wi-Fi";
+            not_alive = paused ? "my mind is paused (Dev > Y)" : "my mind is waiting for Wi-Fi";
             drop_requests(not_alive); /* never leave the player waiting on an answer that cannot come */
             if (paused) {
                 line(0, "0G mind: paused (Y resumes)");
@@ -1905,7 +1932,9 @@ static int thinker(void *arg)
         alive = 1;
         Wifi_GetData(WIFIGETDATA_MACADDRESS, sizeof mac, mac);
         ok_keccak_update(&pool, mac, sizeof mac);
-        if (!clock_synced || now_s() - clock_synced_at > 1800) clock_sync();
+        if ((!clock_synced && (!clock_tried_at || now_s() - clock_tried_at > 300)) ||
+            (clock_synced && now_s() - clock_synced_at > 1800))
+            clock_sync();
 
         /* The player first: what they said, a guess, a look, a comment. */
         serve_player();
@@ -1914,12 +1943,12 @@ static int thinker(void *arg)
             continue;
         }
         ok_dsi_eye_close();
-        if (!player_waiting() && cfg.look_every > 0 && seen_idle < 60 && now_s() - looked_at > (uint32_t)cfg.look_every)
+        if (!reply_due && !player_waiting() && cfg.look_every > 0 && seen_idle < 60 && now_s() - looked_at > (uint32_t)cfg.look_every)
             look(NULL);
         /* Dreams of its own: asleep, every 20 min; awake and alone for a
          * while, a daydream every 45 min (verified like any other). */
-        if (cfg.have_dream && !player_waiting() && now_s() - dream_tried_at > 600 &&
-            ((seen_pet.asleep && (!dreamt || now_s() - dreamt_at > 1200)) ||
+        if (cfg.have_dream && !reply_due && !player_waiting() && now_s() - dream_tried_at > 600 &&
+            ((seen_pet.asleep && seen_idle > 120 && (!dreamt || now_s() - dreamt_at > 1200)) ||
              (!seen_pet.asleep && seen_idle > 300 && (!dreamt || now_s() - dreamt_at > 2700)))) {
             dream_tried_at = now_s();
             feed(seen_pet.asleep ? "asleep: a dream of its own" : "alone: a daydream");
@@ -2022,14 +2051,14 @@ void ok_dsi_mind_start(const char *dir)
     if (!buffers()) {
         line(0, "0G mind: not enough memory");
         stopped("not enough memory (DS mode)");
-        not_alive = "my 0G mind is off (not enough memory)";
+        not_alive = "my mind is off (not enough memory)";
         return;
     }
     if (cothread_create(thinker, NULL, MIND_STACK, COTHREAD_DETACHED) < 0) {
         line(0, "0G mind: no thread");
-        not_alive = "my 0G mind could not start (no thread)";
+        not_alive = "my mind could not start (no thread)";
         return;
     }
-    not_alive = "my 0G mind is starting";
+    not_alive = "my mind is starting";
     started = 1;
 }

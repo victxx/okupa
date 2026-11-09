@@ -114,6 +114,7 @@ typedef struct {
     uint16_t dream[128 * 128];
     int dream_w, dream_h, dream_ticks;
     int dream_old; /* the dream shown is the saved one, not a new one */
+    const char *did; /* what the player just did to it (fed, played, petted...), for the mind; main clears it */
     /* A card on the top screen for what 0G looked at: the picture it was
      * sent (a photo, a drawing), its verified words or why there are none,
      * and a footer (how long it took). card_live: the platform keeps it

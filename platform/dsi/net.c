@@ -274,6 +274,21 @@ void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32])
     }
 }
 
+/* A public node says the account has used this nonce: the pending one got
+ * into a block the console never watched. It stops being handed out (and
+ * nothing claims the console saw the block). */
+void ok_dsi_net_forget(void)
+{
+    if (!pending_len) return;
+    pending_len = 0;
+    handed = 0;
+    watch_from = 0;
+    remove(pending_path);
+    remove(from_path);
+    ok_facts_now.incl_state = 0;
+    ok_facts_log(ok_dsi_uptime(), 'E', "pending let go: a public node says its nonce is used");
+}
+
 const char *ok_dsi_net_name(void) { return net->name; }
 const char *ok_dsi_net_summary(void) { return summary; }
 const char (*ok_dsi_net_lines(void))[33] { return (const char (*)[33])lines; }
@@ -317,33 +332,67 @@ static void draw_key(uint8_t key[32])
 
 /* ---- Wi-Fi ---------------------------------------------------------------- */
 
+/* Who may touch the Wi-Fi. dswifi has one state machine: two threads changing
+ * it at once (the postman joining while the player scans or connects from the
+ * Dev screen) is how the console crashed with a data abort at the final, on
+ * "Wi-Fi: console settings". So one owner at a time: the player first, the
+ * postman stands back, and the mind only uses a connection nobody is
+ * changing. Before Wifi_InitDefault nothing may ask dswifi anything at all
+ * (that was the earlier data abort with the MAC address). */
+static volatile int wifi_inited, wifi_initialising, postman_wifi;
+
 static int wifi_init(void)
 {
-    static int initialised;
+    while (wifi_initialising) next_frame(); /* the other thread is starting it */
+    if (wifi_inited) return 1;
+    wifi_initialising = 1;
     ok_dsi_net_where = "Wifi_InitDefault";
-    if (!initialised) initialised = Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE);
+    wifi_inited = Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE) ? 1 : 0;
     ok_dsi_net_where = "after Wifi init";
-    return initialised;
+    wifi_initialising = 0;
+    return wifi_inited;
 }
 
 static int online(void)
 {
-    return Wifi_AssocStatus() == ASSOCSTATUS_ASSOCIATED && Wifi_GetIP() != 0 && Wifi_GetIP() != 0xffffffffu;
+    return wifi_inited && Wifi_AssocStatus() == ASSOCSTATUS_ASSOCIATED && Wifi_GetIP() != 0 &&
+           Wifi_GetIP() != 0xffffffffu;
 }
 
-/* Up to 30 s for an address; report(seconds) twice a second. */
-static int wait_online(void (*report)(int seconds))
+int ok_dsi_wifi_usable(void)
+{
+    return wifi_inited && !wifi_initialising && !ui_wifi && !postman_wifi && online();
+}
+
+/* Up to 30 s for an address; report(seconds) twice a second. The postman's
+ * wait gives up at once when the player opens the Wi-Fi screen. */
+static int wait_online(void (*report)(int seconds), int for_postman)
 {
     int frames;
     for (frames = 0; frames < 60 * 30; frames++) {
         int status = Wifi_AssocStatus();
         next_frame();
         stir();
+        if (for_postman && ui_wifi) return 0;
         if (status == ASSOCSTATUS_CANNOTCONNECT) return 0;
         if (online()) return 1;
         if (frames % 30 == 0 && report) report(frames / 60);
     }
     return 0;
+}
+
+/* The player's Wi-Fi screen takes the Wi-Fi: wait for the postman to let go. */
+static void ui_take_wifi(char status[33], void (*show)(void))
+{
+    int frames = 0;
+    ui_wifi = 1;
+    while (postman_wifi || wifi_initialising) {
+        if (frames++ % 30 == 0) {
+            snprintf(status, 33, "Wi-Fi busy, one moment");
+            show();
+        }
+        next_frame();
+    }
 }
 
 static void start_connect(const char *ssid, const char *password)
@@ -397,15 +446,20 @@ static int bars(int rssi)
     return rssi >= -55 ? 3 : rssi >= -67 ? 2 : rssi >= -80 ? 1 : 0;              /* DSi mode: dBm */
 }
 
-/* Scans for about 3 s into found_ap[]; returns how many. */
+/* Scans for about 3 s into found_ap[]; returns how many. tick (the screen's
+ * redraw when the player is scanning) runs every few frames so the game does
+ * not look frozen. */
 static Wifi_AccessPoint found_ap[24];
-static int scan(void)
+static int scan(void (*tick)(void))
 {
     int frames, n, i;
     ok_dsi_net_where = "scan";
     Wifi_EnableWifi();
     Wifi_ScanMode();
-    for (frames = 0; frames < 60 * 3; frames++) next_frame();
+    for (frames = 0; frames < 60 * 3; frames++) {
+        next_frame();
+        if (tick && frames % 6 == 0) tick();
+    }
     n = Wifi_GetNumAP();
     if (n > 24) n = 24;
     for (i = 0; i < n; i++) Wifi_GetAPData(i, &found_ap[i]);
@@ -419,15 +473,30 @@ static void report_wifi(int seconds)
     say(text);
 }
 
+/* The player has the Wi-Fi screen busy: wait for them, then use whatever
+ * they connected to. Never "no Wi-Fi" just because they were quicker. */
+static int after_player(void)
+{
+    ok_dsi_net_where = "Wi-Fi: player has it";
+    while (ui_wifi) next_frame();
+    return online();
+}
+
 /* Joins the strongest remembered network in range, or else the console's own
  * saved settings. */
 static int wifi_up(void)
 {
-    int n, i, k, best = -1, best_bars = -1;
+    int n, i, k, ok, best = -1, best_bars = -1;
+    if (ui_wifi) return after_player();
     if (!wifi_init()) return 0;
     if (online()) return 1;
+    postman_wifi = 1;
     if (known_count) {
-        n = scan();
+        n = scan(NULL);
+        if (ui_wifi) { /* the player opened the Wi-Fi screen meanwhile: theirs now */
+            postman_wifi = 0;
+            return after_player();
+        }
         for (i = 0; i < n; i++)
             for (k = 0; k < known_count; k++)
                 if (!strcmp(found_ap[i].ssid, known[k].ssid) && bars(found_ap[i].rssi) > best_bars) {
@@ -435,6 +504,9 @@ static int wifi_up(void)
                     best_bars = bars(found_ap[i].rssi);
                 }
     }
+    /* Start from a clean state: an attempt left half way (timed out, not
+     * refused) must not still be running when the next one begins. */
+    Wifi_DisconnectAP();
     Wifi_EnableWifi();
     if (best >= 0) {
         line(0, "Wi-Fi: joining %.17s", known[best].ssid);
@@ -444,13 +516,23 @@ static int wifi_up(void)
         Wifi_AutoConnect();
     }
     ok_dsi_net_where = "wait_online";
-    return wait_online(report_wifi);
+    ok = wait_online(report_wifi, 1);
+    if (!ok && ui_wifi) {
+        postman_wifi = 0;
+        return after_player();
+    }
+    if (!ok) {
+        ok_dsi_net_where = "Wi-Fi give up";
+        Wifi_DisconnectAP(); /* stop this attempt before the next scan */
+    }
+    postman_wifi = 0;
+    return ok;
 }
 
 int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void))
 {
     int n, i, j, count = 0;
-    ui_wifi = 1;
+    ui_take_wifi(status, show);
     if (!wifi_init()) {
         snprintf(status, 33, "Wi-Fi did not start");
         show();
@@ -459,7 +541,8 @@ int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void)
     }
     snprintf(status, 33, "Searching...");
     show();
-    n = scan();
+    if (!online()) Wifi_DisconnectAP(); /* no half-made attempt left running under the scan */
+    n = scan(show);
     /* Strongest first; skip hidden names and repeats. */
     for (i = 0; i < n; i++)
         for (j = i + 1; j < n; j++)
@@ -497,8 +580,10 @@ int ok_dsi_wifi_connect(const char *ssid, const char *password, char status[33],
 {
     struct in_addr ip;
     int ok;
-    ui_wifi = 1;
+    ui_take_wifi(status, show);
     if (!wifi_init()) {
+        snprintf(status, 33, "Wi-Fi did not start");
+        show();
         ui_wifi = 0;
         return 0;
     }
@@ -507,7 +592,7 @@ int ok_dsi_wifi_connect(const char *ssid, const char *password, char status[33],
     Wifi_DisconnectAP();
     Wifi_EnableWifi();
     start_connect(ssid, password);
-    ok = wait_online(report_connect);
+    ok = wait_online(report_connect, 0);
     if (ok) {
         ip.s_addr = Wifi_GetIP();
         snprintf(status, 33, "Connected: %s", inet_ntoa(ip));
@@ -896,7 +981,7 @@ static void end_peer_fact(const ok_session_report *rep)
             memcpy(ok_facts_now.best_head_hash, rep->remote.latest_hash, 32);
         }
     }
-    if (rep->tx_written) ok_facts_now.tx_handed = handed;
+    ok_facts_now.tx_handed = handed;
 }
 
 static int dial(int i, int row)
@@ -972,7 +1057,12 @@ static int dial(int i, int row)
         watch_from = rep.remote.latest;
         save_watch_from();
     }
-    if (rep.tx_written) {
+    /* A node that hangs up "too many peers" right after Status drops what
+     * it was given: written to the socket is not taken. Only a session that
+     * was not refused counts as a node that has it. */
+    if (rep.tx_written && rep.outcome == OK_SESSION_DISCONNECTED && rep.disconnect == 4)
+        ok_facts_log(ok_dsi_uptime(), 'E', "tx written, but the node was full: not counted");
+    if (rep.tx_written && !(rep.outcome == OK_SESSION_DISCONNECTED && rep.disconnect == 4)) {
         char text[48];
         handed++;
         ok_facts_log(ok_dsi_uptime(), 'E', "tx %02x%02x%02x%02x handed (%d)", pending_hash[0], pending_hash[1],
@@ -1076,7 +1166,15 @@ static int postman(void *arg)
         if (!wifi_up()) {
             say(known_count ? "No Wi-Fi in range" : "No Wi-Fi: Dev > Wi-Fi");
             line(0, "Wi-Fi: none, retry in 20 s");
-            pause_seconds(20);
+            {
+                /* ...or at once, when the player connects from Dev > Wi-Fi. */
+                int frames;
+                ok_dsi_net_where = "no Wi-Fi: pause";
+                for (frames = 0; frames < 20 * 60; frames++) {
+                    next_frame();
+                    if (!ui_wifi && wifi_inited && online()) break;
+                }
+            }
             continue;
         }
         Wifi_GetData(WIFIGETDATA_MACADDRESS, sizeof mac, mac); /* only after init: before it is a data abort */
@@ -1149,6 +1247,21 @@ static int postman(void *arg)
             say(text);
         } else {
             say(pending_len && handed ? "Letter out, nodes full: again" : "All nodes full, trying more");
+        }
+        /* Something to deliver and nodes that answered before: they are full
+         * now, but a slot opens when one of their peers leaves. Knock again
+         * every 20 s for a few minutes before the next long round. */
+        if (pending_len && ready_peers) {
+            int round, in = 0;
+            for (round = 0; round < 8 && pending_len && !ui_wifi && !in; round++) {
+                line(LINES - 1, "Known nodes again in 20 s (%d/8)", round + 1);
+                pause_seconds(20);
+                in = try_nodes(0, ready_peers);
+            }
+            if (in) {
+                after_admission();
+                continue;
+            }
         }
         /* Nothing to send and a few nodes known to take letters: rest, so
          * the game gets the CPU. A new letter wakes the postman early. */

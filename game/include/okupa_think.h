@@ -60,6 +60,7 @@ typedef struct {
     ok_mind decision; /* a decision: valid only when stage == OK_THINK_DECIDED */
     char heard[OK_MIND_TEXT + 1]; /* ok_think_hear: the transcript */
     char saw[OK_MIND_TEXT + 1];   /* ok_think_see: what the camera shows */
+    char quip[49];                /* ok_think_see: what Okupa says about it (cheeky), or "" */
     ok_mind_plan plan;            /* ok_think_plan: its goal for the next while */
     char diary[OK_MIND_DIARY + 1]; /* ok_think_diary: today's entry */
     char dream[OK_MIND_DREAM + 1]; /* ok_think_diary: tonight's dream, as a picture to make */

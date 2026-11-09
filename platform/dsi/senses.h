@@ -27,5 +27,14 @@ int ok_dsi_eye_snap(uint8_t *png, size_t cap, size_t *len, char why[33]);
 void ok_dsi_eye_close(void);
 /* The last photo halved to 128x96 DS colours (bit 15 set): what was sent. */
 const uint16_t *ok_dsi_eye_thumb(void);
+/* The viewfinder, driven by the main loop without ever waiting: start with
+ * the front (0) or back (1) camera, step once a frame (1 when ok_dsi_eye_thumb
+ * holds a new picture), stop. stop(1) keeps the frame on screen for the next
+ * ok_dsi_eye_snap, so the photo sent is the one the player chose. While the
+ * viewfinder is open the mind's snaps and closes wait. */
+int ok_dsi_eye_preview_start(int outer, char why[33]);
+int ok_dsi_eye_preview_step(void);
+void ok_dsi_eye_preview_stop(int keep);
+int ok_dsi_eye_outer(void);
 
 #endif

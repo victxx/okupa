@@ -30,6 +30,8 @@ const char *ok_dsi_net_name(void);
 void ok_dsi_net_send(const uint8_t *tx, size_t n, const uint8_t hash[32]);
 int ok_dsi_net_pending(uint8_t hash[32]); /* 1 if one is waiting */
 int ok_dsi_net_handed(void);               /* nodes it was handed to */
+/* Let the pending one go (a public node says its nonce was used). */
+void ok_dsi_net_forget(void);
 uint64_t ok_dsi_net_chain_id(void);
 /* One-shot: the pending transaction was seen in a block (header hash and
  * transactions root recomputed on the console). Clears the pending one. */
@@ -41,6 +43,11 @@ uint64_t ok_dsi_net_peek_nonce(void);
 void ok_dsi_net_commit_nonce(uint64_t used);
 /* 1 if this hash was seen in a block (included-<network>.txt). */
 int ok_dsi_net_was_included(const uint8_t hash[32]);
+
+/* 1 when the Wi-Fi is started, associated with an address and nobody (the
+ * postman or the player's Wi-Fi screen) is changing it: the only time other
+ * threads may ask dswifi anything or open sockets. */
+int ok_dsi_wifi_usable(void);
 
 /* Wi-Fi set-up from the Dev screen; the postman stands back meanwhile. */
 int ok_dsi_wifi_scan(ok_ui_ap *aps, int max, char status[33], void (*show)(void));

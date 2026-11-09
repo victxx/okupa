@@ -15,6 +15,8 @@ static int fetch(void *ctx, const char *host, const char *head, size_t head_len,
     if (fail_net) return -3;
     if (strstr(body, "eth_blockNumber"))
         answer = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x1474f5e\"}";
+    else if (strstr(body, "eth_getTransactionCount"))
+        answer = "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"0x1\"}";
     else if (error_object)
         answer = "{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}";
     else {
@@ -48,8 +50,9 @@ int main(void)
     assert(ok_wei_to_eth("0x10000000000000000000000000000000000000000000000000000000000000000", eth, sizeof eth) == OK_FORMAT);
 
     /* The block number, then the balance at that block, from the node. */
-    assert(ok_balance_ask(host, addr, fetch, NULL, buf, sizeof buf, &b) == OK_OK && calls == 2);
+    assert(ok_balance_ask(host, addr, fetch, NULL, buf, sizeof buf, &b) == OK_OK && calls == 3);
     assert(!b.error[0] && b.block == 0x1474f5e && !strcmp(b.eth, "0.000026 ETH") && b.low);
+    assert(b.have_nonce && b.nonce == 1); /* and how many it has sent */
     chunked = 1;
     assert(ok_balance_ask(host, addr, fetch, NULL, buf, sizeof buf, &b) == OK_OK && !strcmp(b.eth, "0.000026 ETH"));
     chunked = 0;

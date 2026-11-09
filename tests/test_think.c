@@ -237,9 +237,21 @@ int main(void)
         assert(ok_think_see(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
                OK_OK);
         assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "A person with glasses is smiling at the camera."));
+        assert(!t.quip[0]); /* no bar: what it saw, nothing to say */
         assert(strstr(fake.req_body, "\"url\":\"data:image/png;base64,UklGR"));
         assert(!strncmp(fake.req_body, "{\"chat_template_kwargs\":", 24));
         assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"sight\""));
+
+        /* "what it sees | what Okupa says": split, quotes and spaces trimmed. */
+        fake.content = "A man with dark hair, dim light | \\\"You look rad af. Kinda.\\\" "; /* JSON-escaped quotes */
+        assert(ok_think_see(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "A man with dark hair, dim light"));
+        assert(!strcmp(t.quip, "You look rad af. Kinda."));
+        fake.content = " | nothing seen";
+        assert(ok_think_see(&t, &p, device, 1800000000000ull, nonce, wav, sizeof wav, buf, sizeof buf, fetch, NULL) ==
+               OK_OK);
+        assert(t.stage == OK_THINK_ANSWER); /* a line with nothing seen is not an answer */
     }
 
     /* Pictionary: the guess is one to three words, lower case. */
@@ -259,7 +271,7 @@ int main(void)
         assert(ok_think_comment(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==
                OK_OK);
         assert(t.stage == OK_THINK_DECIDED && !strcmp(t.saw, "A cosy little house! I want to live there!"));
-        assert(strstr(fake.req_body, "sent it to hang on your wall"));
+        assert(strstr(fake.req_body, "is showing it to you"));
         assert(ok_think_episode(&t, &p, 1, "", episode, sizeof episode, &n) == OK_OK && strstr(episode, "\"kind\":\"comment\""));
         fake.content = "I think this might be a small cottage";
         assert(ok_think_guess(&t, &p, device, 1800000000000ull, nonce, png, sizeof png, buf, sizeof buf, fetch, NULL) ==

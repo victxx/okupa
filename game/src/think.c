@@ -472,10 +472,13 @@ static size_t base64(const uint8_t *in, size_t n, char *out)
 }
 
 static const char EYES[] =
-    "You are the eyes of Okupa, a small monkey living inside a Nintendo DSi, looking through its camera. Name what "
-    "you really see in at most 15 words of plain English, concrete things first: the person (expression, what they "
-    "hold or wear) and the main objects around them. If the picture is too dark or blurry to tell, say so. No "
-    "preamble.";
+    "You are the eyes of Okupa, a small cheeky monkey living inside a Nintendo DSi, looking through its camera. "
+    "Reply with two parts separated by a vertical bar. First: what you really see in at most 12 words of plain "
+    "English, concrete things first: the person (expression, what they hold or wear) and the main objects around "
+    "them; if it is too dark or blurry to tell, say so. Then a vertical bar. Then what Okupa says to the player "
+    "about the picture, at most 40 characters: a playful roast or a backhanded compliment about what is really in "
+    "it, a little mean and funny, slang welcome (like: you look rad af, sort of), never about body, weight, race or "
+    "anything hurtful. No preamble, no quotes.";
 
 static const char GUESS[] =
     "You are playing Pictionary with a child on a Nintendo DSi. The picture is a quick black-on-white doodle drawn "
@@ -532,13 +535,32 @@ ok_result ok_think_see(ok_think *t, const ok_think_provider *p, const uint8_t de
                        const uint8_t nonce[16], const uint8_t *png, size_t png_len, char *buf, size_t cap,
                        ok_think_fetch_fn fetch, void *fetch_ctx)
 {
-    return look(t, p, device_key, now_ms, nonce, "sight", EYES, "What do you see?", 80, png, png_len, buf, cap, fetch,
-                fetch_ctx);
+    ok_result r = look(t, p, device_key, now_ms, nonce, "sight", EYES, "What do you see?", 100, png, png_len, buf,
+                       cap, fetch, fetch_ctx);
+    char *bar;
+    size_t i, n;
+    t->quip[0] = 0;
+    /* "what it sees | what Okupa says": the line is only decoration. An
+     * answer without the bar is still what it saw, with nothing to say. */
+    if (r == OK_OK && t->stage == OK_THINK_DECIDED && (bar = strchr(t->saw, '|')) != NULL) {
+        const char *q = bar + 1;
+        *bar = 0;
+        while (*q == ' ' || *q == '"') q++;
+        snprintf(t->quip, sizeof t->quip, "%s", q);
+        n = strlen(t->quip);
+        while (n && (t->quip[n - 1] == ' ' || t->quip[n - 1] == '"' || t->quip[n - 1] == '|')) t->quip[--n] = 0;
+        for (i = 0; t->quip[i]; i++)
+            if (t->quip[i] == '|') t->quip[i] = ' ';
+        n = strlen(t->saw);
+        while (n && t->saw[n - 1] == ' ') t->saw[--n] = 0;
+        if (!t->saw[0]) stop(t, OK_THINK_ANSWER);
+    }
+    return r;
 }
 
 static const char COMMENT[] =
     "You are Okupa, a small cheeky, affectionate monkey who lives in a Nintendo DSi. The player just drew this for "
-    "you on the tiny 64x64 sketchbook and sent it to hang on your wall. React to what is really in the drawing in "
+    "you on the tiny 64x64 sketchbook and is showing it to you. React to what is really in the drawing in "
     "one short, warm, specific line in English, at most 40 characters, as Okupa. Only the line, no quotes.";
 
 ok_result ok_think_comment(ok_think *t, const ok_think_provider *p, const uint8_t device_key[32], uint64_t now_ms,

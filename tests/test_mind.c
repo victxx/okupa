@@ -104,7 +104,7 @@ int main(void)
     assert(!strcmp(d.thought, "Who is this person?") && !strcmp(d.ask, "What is your name?"));
     assert(!strcmp(d.remember, "The player is called Victor"));
     ok_mind_memory(&d, memory);
-    assert(!strcmp(memory, "look (asked: What is your name?)")); /* so it does not ask again */
+    assert(!strcmp(memory, "look (asked: What is your name?) (thought: Who is this person?)")); /* so it does not ask or muse again */
     assert(d.x == -1 && d.z == -1 && d.gaze == -1 && d.energy == 50); /* no body given: instinct */
     assert(parse("{\\\"activity\\\":\\\"wander\\\",\\\"mood\\\":\\\"happy\\\",\\\"line\\\":\\\"\\\","
                  "\\\"x\\\":80,\\\"z\\\":250,\\\"gaze\\\":\\\"window\\\",\\\"energy\\\":72.5}", &d) == OK_OK);

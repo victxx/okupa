@@ -235,6 +235,32 @@ static void bubble(frame f, const uint8_t (*font)[8], const char *s, int hx, int
     bubble_as(f, font, s, hx, hy, SAY, 0, NULL);
 }
 
+/* What the okupa says while the console works, from the step under way. */
+static const char *in_character(const char *busy)
+{
+    if (!busy || !busy[0]) return "Hmm, let me think";
+    if (strstr(busy, "words")) return "Mm-hm, I'm listening";
+    if (strstr(busy, "answer")) return "Hmm, let me think";
+    if (strstr(busy, "drawing") || strstr(busy, "guess")) return "Hmm, what could it be";
+    if (strstr(busy, "Camera") || strstr(busy, "what it is") || strstr(busy, "Showing")) return "Ooh, let me see";
+    if (strstr(busy, "ream")) return "Zzz";
+    return "Hmm";
+}
+
+/* The step the console is on, at the foot of the top screen. */
+static void status_pill(frame f, const uint8_t (*font)[8], const ok_ui *u, int bottom)
+{
+    char s[56];
+    int w;
+    snprintf(s, sizeof s, "%.40s%.*s", u->busy, (int)(u->ticks / 20 % 4), "...");
+    w = width(s, 1) + 34;
+    if (w > 244) w = 244;
+    round_box(f, (OK_UI_W - w) / 2, bottom - 16, w, 15, 6, RGB(12, 11, 11));
+    round_box(f, (OK_UI_W - w) / 2 + 3, bottom - 14, 20, 11, 4, RGB(14, 16, 18));
+    text(f, font, (OK_UI_W - w) / 2 + 6, bottom - 12, "0G", PAPER, 1);
+    text(f, font, (OK_UI_W - w) / 2 + 28, bottom - 12, s, RGB(28, 27, 25), 1);
+}
+
 /* While you answer: a round badge by its head with a microphone and rings
  * going out (recording), or a cloud of dots (the answer is being thought over). */
 static void listening(frame f, const uint8_t (*font)[8], const ok_ui *u, int hx, int hy)
@@ -242,8 +268,10 @@ static void listening(frame f, const uint8_t (*font)[8], const ok_ui *u, int hx,
     static const char *const mic[] = {"..kkk..", ".kkkkk.", ".kkwkk.", ".kkkkk.", ".kkkkk.", "k.kkk.k", ".k...k.", "..kkk..", "...k...", ".kkkkk."};
     if (hx < -50) hx = 128, hy = 110;
     if (u->listening == 2) {
+        /* Its own words while it waits; what the console is doing (0G,
+         * signatures) goes on the status lines, never in its mouth. */
         char words[48];
-        const char *base = u->busy[0] ? u->busy : "Thinking";
+        const char *base = in_character(u->busy);
         size_t n = strlen(base);
         while (n && base[n - 1] == '.') n--; /* its own dots are replaced by the moving ones */
         snprintf(words, sizeof words, "%.*s%.*s", (int)n, base, (int)(u->ticks / 20 % 4), "...");
@@ -406,10 +434,13 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
     }
     ok_house_draw(f, hour, minute, p->asleep, NULL, &u->look, skin, &u->anim, &face); /* frames fill as drawings are sent */
     clock_pill(f, font, hour, minute);
-    /* One bubble at a time: answering, a question, something just said, a thought, then its mood. */
+    /* One bubble at a time: listening, something just said, then its
+     * question, a thought, then its mood. What it says goes first: an answer
+     * to the player is never hidden behind its own follow-up question, which
+     * waits until the answer has been read. */
     if (u->listening) listening(f, font, u, face.top_x, face.top_y);
-    else if (u->ask_ticks) bubble_as(f, font, u->ask, face.top_x, face.top_y, ASK, u->ticks, u->ask_hint);
     else if (u->say) bubble(f, font, line, face.top_x, face.top_y);
+    else if (u->ask_ticks) bubble_as(f, font, u->ask, face.top_x, face.top_y, ASK, u->ticks, u->ask_hint);
     else if (u->thought_ticks) bubble_as(f, font, u->thought, face.top_x, face.top_y, THINK, u->ticks, NULL);
     else if (line && !(p->asleep && line == ok_pet_line(p, hour))) bubble(f, font, line, face.top_x, face.top_y);
     if (u->dream_ticks && u->dream_w > 0 && u->dream_h > 0) { /* last night's dream, in a cloud at the top left */
@@ -426,6 +457,15 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
         disc(f, x0 + w + 14, y0 + h + 12, 2, RGB(27, 26, 31));
     }
     if (u->heard_ticks && u->heard[0]) heard_caption(f, font, u);
+    if (u->listening == 2 && u->busy[0] && !u->card_ticks) { /* what the console is doing, apart from what it says */
+        int bottom = OK_UI_H - 4;
+        if (u->heard_ticks && u->heard[0]) {
+            char lines[2][64], quoted[OK_UI_CARD_TEXT + 3];
+            snprintf(quoted, sizeof quoted, "\"%s\"", u->heard);
+            bottom = OK_UI_H - (16 + wrap_lines(quoted, 200, lines, 2) * 11) - 8;
+        }
+        status_pill(f, font, u, bottom);
+    }
     if (u->card_ticks) card(f, font, u);
 }
 
@@ -534,6 +574,11 @@ static const char *strip_line(const ok_ui *u, char out[48], int *kind)
 {
     const ok_facts *fa = &ok_facts_now;
     uint32_t k;
+    if (u->listening == 2 && u->busy[0]) { /* the step under way, while the player waits for it */
+        *kind = 1;
+        snprintf(out, 48, "%.40s%.*s", u->busy, (int)(u->ticks / 20 % 4), "...");
+        return out;
+    }
     if (u->drawing_sent || u->tx_waiting) {
         /* Honest steps: signed is not sent, sent is not on Ethereum; only a
          * block whose body holds it says "in block". */
@@ -1309,7 +1354,7 @@ int ok_ui_tick(ok_ui *u, const ok_pet *p)
     if (u->dream_ticks) u->dream_ticks--;
     if (u->card_ticks && !--u->card_ticks) u->card_live = 0;
     if (u->heard_ticks) u->heard_ticks--;
-    if (u->ask_ticks) u->ask_ticks--;
+    if (u->ask_ticks && !u->say) u->ask_ticks--; /* its question keeps its time while a line is shown first */
     if (u->happy_ticks) u->happy_ticks--;
     if (u->pressed_ticks) u->pressed_ticks--;
     ok_monkey_step(&u->anim, pose(u, p), u->look.wear);
@@ -1595,6 +1640,8 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
                  : p->asleep ? OK_DO_WAKE : OK_DO_SLEEP;
         ok = ok_pet_do(p, action, now);
         say(u, p->asleep && action != OK_DO_SLEEP ? "Zzz... (it's sleeping)" : ok_pet_reply(action, ok));
+        if (ok) u->did = action == OK_DO_FEED ? "fed you" : action == OK_DO_PLAY ? "played with you"
+                       : action == OK_DO_PET ? "petted you" : action == OK_DO_SLEEP ? "put you to bed" : "woke you up";
         if (!p->asleep && action != OK_DO_SLEEP && action != OK_DO_WAKE) {
             ok_monkey_event(&u->anim, !ok ? OK_EVENT_REFUSE : action == OK_DO_FEED ? OK_EVENT_FEED
                                       : action == OK_DO_PLAY ? OK_EVENT_PLAY : OK_EVENT_PET);

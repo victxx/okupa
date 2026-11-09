@@ -51,12 +51,17 @@ int ok_dsi_mind_ear_busy(void);
 void ok_dsi_mind_look(void);
 void ok_dsi_mind_live(int on);
 void ok_dsi_mind_look_photo(uint16_t out[128 * 96]);
+/* What Okupa said about that photo (a cheeky line in the same signed answer), or "". */
+void ok_dsi_mind_look_quip(char out[49]);
 /* The wallet's balance for the screen, from a public JSON-RPC node (mind.txt
  * balance_host=, or =off; by default publicnode for mainnet or Sepolia):
  * display only, never part of sending. take_balance: 1 with it ("0.0042
  * ETH", the block, under a hello's cost), -1 with why not, 0 nothing new. */
 void ok_dsi_mind_balance(const char *address0x);
 int ok_dsi_mind_take_balance(char eth[24], uint64_t *block, int *low, char why[48]);
+/* With the last balance: how many transactions the node says the account
+ * has sent (0 if it did not say). Display and unblocking only. */
+int ok_dsi_mind_balance_nonce(uint64_t *nonce);
 /* Pictionary: 0G's vision model guesses the 64x64 drawing. 0 when the last
  * guess is still on its way (nothing new is sent). */
 int ok_dsi_mind_guess(const uint8_t pixels[512]);
@@ -80,7 +85,7 @@ void ok_dsi_mind_dream_now(void);
 int ok_dsi_mind_take_letter(char text[141]);
 void ok_dsi_mind_letters(int allowed);
 /* 1 once per new verified decision (with its line, thought, question). */
-int ok_dsi_mind_take(ok_mind *d);
+int ok_dsi_mind_take(ok_mind *d); /* 2: it answers what the player said, 1 any other */
 /* Lines for the Dev screen. */
 const char (*ok_dsi_mind_lines(void))[33];
 

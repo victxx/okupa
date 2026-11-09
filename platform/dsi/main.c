@@ -264,7 +264,7 @@ static int64_t mind_nap_until, mind_nap_at;
  * there; never right after the player did something, never twice within
  * ten minutes, and for three minutes at most. idle: seconds since the
  * player last touched or pressed anything. */
-static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now, uint32_t idle)
+static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now, uint32_t idle, int answer)
 {
     static const int moves[OK_ACTIVITIES] = {OK_MOVE_LOOK,   OK_MOVE_SCRATCH, OK_MOVE_STRETCH, OK_MOVE_HOP,
                                              OK_MOVE_PEEK,   OK_MOVE_WANDER,  OK_MOVE_SIGH,    OK_MOVE_WAVE,
@@ -292,8 +292,10 @@ static void obey(ok_ui *u, ok_pet *p, const ok_mind *d, int64_t now, uint32_t id
     const char *said = d->line[0] ? d->line : d->thought[0] ? NULL : doing[d->activity];
     /* It carries on with the same thing, saying nothing: let the body keep
      * going instead of restarting it, and keep the bubble for news. */
-    if (d->activity == last_activity && !d->line[0] && !d->thought[0] && !d->ask[0]) return;
-    if (d->activity == last_activity && !d->line[0]) said = NULL;
+    /* An answer to the player is always seen: its words, or what it does. */
+    if (!answer && d->activity == last_activity && !d->line[0] && !d->thought[0] && !d->ask[0]) return;
+    if (!answer && d->activity == last_activity && !d->line[0]) said = NULL;
+    if (answer && !d->line[0]) said = doing[d->activity];
     last_activity = d->activity;
     if (d->activity == OK_MIND_GO_OUTSIDE) where = OK_PLACE_GARDEN;
     if ((d->activity == OK_MIND_GO_OUTSIDE && here == OK_PLACE_GARDEN) ||
@@ -390,6 +392,8 @@ static void balance_ask(ok_ui *u)
     if (!u->wallet_balance[0]) snprintf(u->wallet_balance_note, sizeof u->wallet_balance_note, "asking a public node...");
 }
 
+static char balance_said[64];
+
 static void balance_take(ok_ui *u)
 {
     char eth[24], why[48], path[64], tmp[72];
@@ -399,6 +403,19 @@ static void balance_take(ok_ui *u)
     if (r > 0) {
         time_t now = time(NULL);
         struct tm *tm = localtime(&now);
+        uint64_t used;
+        uint8_t h[32];
+        /* A hello or letter still "on its way" whose nonce the node says is
+         * used got into a block the console never saw: let it go, so the
+         * next one can be sent. A drawing waits for the console's own proof. */
+        if (ok_dsi_mind_balance_nonce(&used) && ok_dsi_net_pending(h) && !sent_waiting &&
+            used >= ok_dsi_net_peek_nonce()) {
+            ok_dsi_net_forget();
+            snprintf(balance_said, sizeof balance_said, "My %s got in! A public node says so. Send another?",
+                     strcmp(ok_facts_now.tx_kind, "letter") ? "hello" : "letter");
+            u->say = balance_said;
+            u->say_ticks = 60 * 6;
+        }
         snprintf(u->wallet_balance, sizeof u->wallet_balance, "%s", eth);
         snprintf(u->wallet_balance_note, sizeof u->wallet_balance_note, "block %llu, %02d:%02d", (unsigned long long)block,
                  tm ? tm->tm_hour : 0, tm ? tm->tm_min : 0);
@@ -562,7 +579,7 @@ int main(void)
     static ok_mind thought; /* the mind's latest decision */
     int listening = 0;  /* a clip is with 0G */
     int reply_wait = 0; /* 0G heard the player: the next decision is the answer */
-    time_t reply_at = 0;
+    time_t reply_at = 0, listen_at = 0;
     int menu_talk = 0, menu_look = 0; /* the menu's Talk (1 start, 2 held, 3 let go), Photo */
     int game_waiting = 0, game_asked = 0, game_okupa = 0, game_you = 0, game_auto = 0, game_redo = 0; /* Pictionary */
     int game_guess_wanted = 0;         /* Guess! (or X) this frame */
@@ -819,6 +836,7 @@ int main(void)
             } else if (wav) {
                 ok_dsi_mind_hear(wav, len);
                 listening = 1;
+                listen_at = now;
                 ok_ui_busy(&ui, "Sending your words to 0G");
                 ok_ui_listening(&ui, 2); /* until 0G has turned it into words, then until it answers */
             } else {
@@ -836,7 +854,7 @@ int main(void)
          * word, then the okupa's answer (the next verified decision) clears
          * the cloud. Never an invented transcript: a failure says why. */
         {
-            static char heard[OK_MIND_TEXT + 1], why[48], said[96];
+            static char heard[OK_MIND_TEXT + 1], why[48];
             int st = ok_dsi_mind_stage(OK_DSI_HEAR), h;
             if (listening && st)
                 ok_ui_busy(&ui, st == OK_DSI_CHECKING ? "Checking 0G's signature"
@@ -853,16 +871,23 @@ int main(void)
             } else if (h < 0) {
                 ok_ui_listening(&ui, 0);
                 ok_ui_busy(&ui, NULL);
-                snprintf(said, sizeof said, "I couldn't hear you: %.47s", why);
-                ui.say = said;
+                ok_facts_log(ok_dsi_uptime(), 'G', "no words: %.36s", why);
+                ui.say = "Sorry, I couldn't make that out. Again?";
                 ui.say_ticks = 60 * 6;
             }
             if (h) listening = 0;
+            if (listening && !h && now - listen_at > 90) { /* the mind never got to it: say so, don't hang */
+                listening = 0;
+                ok_ui_listening(&ui, 0);
+                ok_ui_busy(&ui, NULL);
+                ui.say = "Sorry, I missed that. Say it again?";
+                ui.say_ticks = 60 * 6;
+            }
             if (reply_wait && now - reply_at > 60) { /* the answer never came: say so */
                 reply_wait = 0;
                 ok_ui_listening(&ui, 0);
                 ok_ui_busy(&ui, NULL);
-                ui.say = "I heard you, but 0G gave me no answer in time.";
+                ui.say = "Hmm... I lost my train of thought. Ask me again?";
                 ui.say_ticks = 60 * 6;
             }
         }
@@ -923,7 +948,7 @@ int main(void)
                     game_waiting = game_redo = 0;
                     ok_ui_listening(&ui, 0);
                     ok_ui_busy(&ui, NULL);
-                    ui.say = "0G took too long. Tap Guess! to try again.";
+                    ui.say = "I can't tell yet... tap Guess! again?";
                     ui.say_ticks = 60 * 6;
                 }
             }
@@ -941,7 +966,7 @@ int main(void)
                 snprintf(foot, sizeof foot, "%lu.%lu s", (unsigned long)(ms / 1000), (unsigned long)(ms / 100 % 10));
             }
             if (g > 0 && game_auto) { /* a peek while drawing: no question, no score */
-                snprintf(said, sizeof said, "I think... %.30s? (0G, %s)", game_guess, foot);
+                snprintf(said, sizeof said, "I think... %.30s?", game_guess);
                 ui.say = said;
                 ui.say_ticks = 60 * 5;
             } else if (g > 0) {
@@ -951,8 +976,8 @@ int main(void)
                 game_since = now;
                 ok_facts_log(ok_dsi_uptime(), 'G', "guess shown: %.30s (%s)", game_guess, foot);
             } else if (g < 0 && !game_auto) {
-                snprintf(said, sizeof said, "No guess from 0G: %.47s", why);
-                ui.say = said;
+                ok_facts_log(ok_dsi_uptime(), 'G', "no guess: %.36s", why);
+                ui.say = "My head's foggy... no guess this time.";
                 ui.say_ticks = 60 * 6;
             }
             if (game_asked && (now - game_since > 45 || !ui.ask_ticks)) game_asked = ask_locked = 0; /* unanswered: let it go */
@@ -996,7 +1021,7 @@ int main(void)
                     comment_waiting = 1;
                     comment_at = now;
                 } else if (comment_wanted == 2) {
-                    ui.say = "Still waiting on 0G about the last one.";
+                    ui.say = "Hold on, I'm still looking at the last one!";
                     ui.say_ticks = 60 * 4;
                 }
                 comment_wanted = 0;
@@ -1043,14 +1068,19 @@ int main(void)
          * happens, and a failure is told as it is. */
         {
             enum { LOOK_ROUNDS = 8 };
-            static int look_waiting, look_live, look_rounds;
+            static int look_waiting, look_live, look_rounds, finder, cam_outer;
             static time_t look_asked_at;
+            static char cam_why[33];
             static char text[OK_MIND_TEXT + 1], why[48], foot[40], said[96];
             static uint16_t px[128 * 96];
             uint32_t ms;
             int r;
-            if (!tech_on && ((keysDown() & KEY_R) || menu_look || ((keysDown() & KEY_B) && look_live && !game_asked))) {
-                if (look_live || look_waiting) { /* looking already: stop the live look (the answer under way still shows) */
+            if (!tech_on && ((keysDown() & KEY_R) || menu_look || ((keysDown() & KEY_B) && (look_live || finder) && !game_asked))) {
+                if (finder) { /* the viewfinder is put away: no photo */
+                    finder = 0;
+                    ok_dsi_eye_preview_stop(0);
+                    ok_ui_card(&ui, NULL, NULL, NULL, 0, 0, 0, NULL);
+                } else if (look_live || look_waiting) { /* looking already: stop the live look (the answer under way still shows) */
                     look_live = 0;
                     ui.card_live = 0;
                     ok_dsi_mind_live(0);
@@ -1058,17 +1088,58 @@ int main(void)
                 } else if (!ok_dsi_mind_alive()) {
                     snprintf(said, sizeof said, "I can't look: %s.", ok_dsi_mind_why_not());
                     ok_ui_card(&ui, "My eyes", said, NULL, 0, 0, 0, "Photo needs the 0G mind running");
-                } else {
-                    look_live = 1;
-                    look_rounds = 0;
-                    ok_dsi_mind_live(1);
-                    ok_dsi_mind_look();
-                    look_waiting = 1;
-                    look_asked_at = now;
-                    ok_ui_busy(&ui, "Camera on");
-                    ok_ui_listening(&ui, 2);
+                } else if (!ok_dsi_eye_preview_start(cam_outer, cam_why)) {
+                    ok_ui_card(&ui, "My eyes failed", cam_why, NULL, 0, 0, 0, "nothing made up");
+                } else { /* first the viewfinder: the player sees what the camera sees and chooses */
+                    finder = 1;
+                    ok_ui_card(&ui, cam_outer ? "Back camera" : "Front camera", "Opening my eyes...", NULL, 0, 0, 0,
+                               "B: put it away");
+                    ui.card_live = 1;
                 }
                 menu_look = 0;
+            }
+            if (finder) {
+                if (ok_dsi_eye_preview_step()) {
+                    ok_ui_card(&ui, ok_dsi_eye_outer() ? "Back camera" : "Front camera", "A: take it   Y: other camera",
+                               ok_dsi_eye_thumb(), 128, 96, 0, "B or tap: put it away");
+                    ui.card_live = 1;
+                    redraw = 1;
+                } else if (ui.card_ticks) {
+                    ui.card_ticks = 600;
+                }
+                if (!ui.card_ticks) { /* tapped away */
+                    finder = 0;
+                    ok_dsi_eye_preview_stop(0);
+                } else if (!tech_on && (keysDown() & KEY_Y)) { /* the other camera */
+                    cam_outer = !cam_outer;
+                    ok_dsi_eye_preview_stop(0);
+                    if (!ok_dsi_eye_preview_start(cam_outer, cam_why)) {
+                        finder = 0;
+                        ok_ui_card(&ui, "My eyes failed", cam_why, NULL, 0, 0, 0, "nothing made up");
+                    } else {
+                        ok_ui_card(&ui, cam_outer ? "Back camera" : "Front camera", "Turning around...", NULL, 0, 0, 0,
+                                   "B: put it away");
+                        ui.card_live = 1;
+                    }
+                } else if (!tech_on && (keysDown() & KEY_A)) { /* this one: the frame on screen is the photo */
+                    finder = 0;
+                    ok_dsi_eye_preview_stop(1);
+                    if (!ok_dsi_mind_alive()) {
+                        ok_dsi_eye_preview_stop(0);
+                        snprintf(said, sizeof said, "I can't look: %s.", ok_dsi_mind_why_not());
+                        ok_ui_card(&ui, "My eyes", said, NULL, 0, 0, 0, "Photo needs the 0G mind running");
+                    } else {
+                        look_live = 0;
+                        look_rounds = 0;
+                        ok_dsi_mind_live(0);
+                        ok_dsi_mind_look();
+                        look_waiting = 1;
+                        look_asked_at = now;
+                        ok_ui_card(&ui, "Click!", "Let me see...", ok_dsi_eye_thumb(), 128, 96, 0, "");
+                        ui.card_live = 0;
+                    }
+                    redraw = 1;
+                }
             }
             if (look_waiting) {
                 int st = ok_dsi_mind_stage(OK_DSI_LOOK);
@@ -1084,6 +1155,7 @@ int main(void)
                 if (now - look_asked_at > 60) { /* no answer in a minute: say so, stop looking */
                     look_waiting = look_live = 0;
                     ok_dsi_mind_live(0);
+                    ok_dsi_eye_preview_stop(0); /* a chosen frame nobody took: the light goes off */
                     ok_ui_listening(&ui, 0);
                     ok_ui_card(&ui, "Hmm...", "No answer from 0G this time.", NULL, 0, 0, 0, "waited 60 s");
                 }
@@ -1099,7 +1171,22 @@ int main(void)
                 ok_dsi_mind_look_photo(px);
                 snprintf(foot, sizeof foot, "#%d  %lu.%lu s%s", look_rounds, (unsigned long)(ms / 1000),
                          (unsigned long)(ms / 100 % 10), look_live && look_rounds < LOOK_ROUNDS ? "  (tap: stop)" : "");
-                ok_ui_card(&ui, "I see...", text, px, 128, 96, 1, foot);
+                {
+                    /* Okupa's own line about the photo first (same signed
+                     * answer as what it saw), then what it saw. */
+                    static char quip[49], shown[OK_UI_CARD_TEXT + 1], quip_say[56];
+                    ok_dsi_mind_look_quip(quip);
+                    if (quip[0]) {
+                        snprintf(shown, sizeof shown, "\"%.48s\" %.100s", quip, text); /* the card cuts it anyway */
+                        ok_ui_card(&ui, "I see...", shown, px, 128, 96, 1, foot);
+                        snprintf(quip_say, sizeof quip_say, "%s", quip);
+                        ui.say = quip_say; /* it keeps saying it once the card is gone */
+                        ui.say_ticks = 60 * 8;
+                        if (!pet.asleep) ok_ui_direct(&ui, &pet, OK_MOVE_WAVE, OK_PLACE_ATTIC, OK_POSE_HAPPY, NULL);
+                    } else {
+                        ok_ui_card(&ui, "I see...", text, px, 128, 96, 1, foot);
+                    }
+                }
                 if (look_live && look_rounds < LOOK_ROUNDS) { /* and the next photo */
                     ok_dsi_mind_look();
                     look_waiting = 1;
@@ -1114,6 +1201,7 @@ int main(void)
                 snprintf(said, sizeof said, "%s%.47s", strncmp(why, "camera", 6) ? "0G did not answer: " : "", why);
                 ok_ui_card(&ui, strncmp(why, "camera", 6) ? "No answer" : "My eyes failed", said, NULL, 0, 0, 0,
                            "nothing made up");
+                ok_dsi_eye_preview_stop(0);
                 look_live = 0;
                 ok_dsi_mind_live(0);
                 redraw = 1;
@@ -1130,14 +1218,21 @@ int main(void)
             show_net = 0;
         }
         player_busy = busy_look || busy_comment || busy_dream || game_waiting || listening || reply_wait;
-        if (ok_dsi_mind_take(&thought)) {
-            if (reply_wait) { /* its answer to what the player said */
-                reply_wait = 0;
-                player_busy = busy_look || busy_comment || busy_dream || game_waiting || listening;
-                if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now);
-                ok_ui_busy(&ui, NULL);
+        {
+            int got = ok_dsi_mind_take(&thought);
+            if (got == 1 && (listening || reply_wait)) {
+                /* a thought from before the player spoke: never shown as the answer */
+                ok_facts_log(ok_dsi_uptime(), 'G', "older thought dropped: you spoke");
+            } else if (got) {
+                if (got == 2 || reply_wait) { /* its answer to what the player said */
+                    reply_wait = 0;
+                    player_busy = busy_look || busy_comment || busy_dream || game_waiting || listening;
+                    if (pet.asleep) ok_pet_do(&pet, OK_DO_WAKE, (int64_t)now);
+                    ok_ui_busy(&ui, NULL);
+                    ok_ui_listening(&ui, 0);
+                }
+                obey(&ui, &pet, &thought, (int64_t)now, (uint32_t)(now - last_input), got == 2);
             }
-            obey(&ui, &pet, &thought, (int64_t)now, (uint32_t)(now - last_input));
         }
         /* What its mind made, drew, dreamed or wrote. */
         {
@@ -1238,11 +1333,11 @@ int main(void)
                         ok_ui_busy(&ui, NULL);
                     }
                     if (dr < 0 && dream_waiting) { /* a dream of its own that failed is only in the log */
-                        snprintf(said_dream, sizeof said_dream, "No dream this time: %.47s", why);
-                        ui.say = said_dream;
+                        ok_facts_log(ok_dsi_uptime(), 'G', "no dream: %.36s", why);
+                        ui.say = "I couldn't drift off into a dream...";
                         ui.say_ticks = 60 * 6;
                     } else if (!dr) {
-                        ui.say = "No dream from 0G in time.";
+                        ui.say = "I couldn't drift off into a dream...";
                         ui.say_ticks = 60 * 5;
                     }
                     dream_waiting = 0;
@@ -1284,6 +1379,10 @@ int main(void)
                 if (!was_held && r == OK_UI_NOTHING && scene == OK_UI_HOME && now - tap_told >= 30) {
                     ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, "tapped the screen");
                     tap_told = now;
+                }
+                if (ui.did) { /* fed, played, petted: the mind hears about it */
+                    ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, ui.did);
+                    ui.did = NULL;
                 }
             }
             held = 1;
@@ -1339,8 +1438,9 @@ int main(void)
                         ui.say_ticks = 60 * 5;
                     }
                 } else {
-                    ui.say = "Still on its way: I'll say when a block has it.";
+                    ui.say = "Still on its way... let me ask a node if it got in.";
                     ui.say_ticks = 60 * 4;
+                    if (ui.wallet_address[0]) balance_ask(&ui); /* its answer may let it go (balance_take) */
                 }
             }
             if (r == OK_UI_SEND_DRAWING && storage) {
