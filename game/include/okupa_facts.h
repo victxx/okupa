@@ -97,6 +97,7 @@ typedef struct {
     char og_feature[40];     /* what else it did this time: "heard: ...", "saw: ...", "guessed: ..." */
     uint32_t og_decisions;   /* verified decisions since the console started */
     uint32_t og_features;    /* what works here: 1 decide, 2 hear, 4 see, 8 guess, 16 dream */
+    int own_mind;            /* the last decision came from its own small mind (no 0G) */
 
     /* The machine. */
     int dsi_mode;            /* 133 MHz DSi mode */

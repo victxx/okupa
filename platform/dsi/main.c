@@ -19,6 +19,7 @@
 #include "okupa_r3d.h"
 #include "okupa_ui.h"
 #include "okupa_icons.h"
+#include "okupa_instinct.h"
 #include "okupa_text.h"
 #include <fat.h>
 #include <malloc.h>
@@ -247,6 +248,8 @@ static void machine_facts(int checks)
 /* Set while the player waits on a look, a guess or an answer: a decision
  * landing meanwhile must not clear that wait from the screen. */
 static int player_busy;
+/* The last thing the player did, for its own small mind as well as 0G's. */
+static const char *local_did;
 static int busy_look, busy_comment, busy_dream; /* a look, a comment or a dream on its way (set by their parts of the loop) */
 static int dream_wanted; /* Dream tapped */
 static int ask_locked; /* a question of the game's own is on screen (Pictionary): the mind's waits */
@@ -547,6 +550,7 @@ int main(void)
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
     ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
+    local_did = "turned the console on";
     /* The network and the mind start once the intro is over: their crypto
      * shares this one CPU and the film needs all of it. */
     ok_save_write(&pet, ui.drawing, saved);
@@ -1100,6 +1104,45 @@ int main(void)
                 }
                 obey(&ui, &pet, &thought, (int64_t)now, (uint32_t)(now - last_input), got == 2);
             }
+            /* Its own small mind (game/src/instinct.c) whenever 0G is not
+             * there or has gone quiet for three minutes: every 20 s with the
+             * player around, a minute otherwise. Never while the player waits
+             * on 0G, and nothing it says is shown as 0G's. */
+            {
+                static time_t mind_at, local_at;
+                static char local_said[OK_MIND_LINES][OK_MIND_LINE + 1];
+                static int local_count;
+                uint32_t idle = (uint32_t)(now - last_input);
+                if (got) mind_at = now;
+                if ((!ok_dsi_mind_alive() || now - mind_at > 180) && !player_busy && !pet.asleep &&
+                    (local_did || now - local_at >= (idle < 60 ? 20 : 60))) {
+                    ok_mind_obs obs;
+                    ok_mind local;
+                    struct tm *lt = localtime(&now);
+                    int k;
+                    memset(&obs, 0, sizeof obs);
+                    obs.pet = &pet;
+                    obs.hour = lt ? lt->tm_hour : 12;
+                    obs.minute = lt ? lt->tm_min : 0;
+                    obs.outside = ok_house_where() == OK_PLACE_GARDEN;
+                    obs.seconds_since_player = idle;
+                    obs.player_did = local_did;
+                    for (k = 0; k < local_count; k++) obs.lines[k] = local_said[k];
+                    obs.line_count = local_count;
+                    ok_instinct_decide(&obs, (uint32_t)cpuGetTiming() ^ (uint32_t)now, &local);
+                    local_did = NULL;
+                    local_at = now;
+                    if (local.line[0]) { /* newest first, the oldest forgotten */
+                        memmove(local_said[1], local_said[0], sizeof local_said[0] * (OK_MIND_LINES - 1));
+                        snprintf(local_said[0], sizeof local_said[0], "%s", local.line);
+                        if (local_count < OK_MIND_LINES) local_count++;
+                    }
+                    ok_facts_now.own_mind = 1;
+                    obey(&ui, &pet, &local, (int64_t)now, idle, 0);
+                } else if (got) {
+                    ok_facts_now.own_mind = 0;
+                }
+            }
         }
         /* What its mind made, drew or dreamed. */
         {
@@ -1206,10 +1249,12 @@ int main(void)
                 r = ok_ui_touch(&ui, &pet, touch.px, touch.py, held, (int64_t)now);
                 if (!was_held && r == OK_UI_NOTHING && scene == OK_UI_HOME && now - tap_told >= 30) {
                     ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, "tapped the screen");
+                    local_did = "tapped the screen";
                     tap_told = now;
                 }
                 if (ui.did) { /* fed, played, petted: the mind hears about it */
                     ok_dsi_mind_observe(&pet, ok_house_where() == OK_PLACE_GARDEN, 0, ui.did);
+                    local_did = ui.did;
                     ui.did = NULL;
                 }
             }
