@@ -20,10 +20,13 @@ discovery, peers, the transaction, blocks, 0G calls and the console itself.
 |---|---|
 | Finding Ethereum nodes | EIP-1459 DNS tree (root signature, hashes and every ENR checked), then discv4 |
 | Talking to them | RLPx (ECIES, EIP-8), Hello, Status eth/69 with the mainnet fork id, Ping/Pong, snappy |
-| Signing | EIP-1559 transactions with libsecp256k1; the key is made on the console from stylus timing |
-| Sending | `Transactions` to every node that reaches Status. No RPC, relay or server of ours |
-| Inclusion check | eth/69 `GetBlockHeaders`/`GetBlockBodies`: re-hash each header, rebuild the transactions trie, look for our hash. A drawing only hangs on the wall once a block holds it |
-| The mind | 0G Compute over TLS 1.2 (BearSSL): a token signed by the console's key, the decision, then the TEE signature checked in C over our own request and response bytes. Only then is the closed-set answer used |
+| Signing | EIP-1559 transactions with libsecp256k1; the key is made on the console from stylus timing, mixed with a one-use seed from a computer when `seeds.bin` is there |
+| Sending | `Transactions` to every node that keeps us, the most reliable first. No RPC, relay or server of ours. Saved before it is sent, so a retry (even after a restart) sends the same bytes; a stuck one can be sped up (same nonce, twice the fee) |
+| Inclusion check | eth/69 `GetBlockHeaders`/`GetBlockBodies`: re-hash each header, rebuild the transactions trie, look for our hash (any version of it). Two different nodes must serve the same block with it before a picture hangs on the wall |
+| Pictures | 64x64 drawings (1 bit) and camera photos in 4 tones (1 KB), whole in the calldata. `tools/gallery` reads them back from the chain with any read-only RPC |
+| Saving | One snapshot (pet, page, wall, nonce, the transaction as signed) in two files that take turns, synced and read back; damage never overwrites the last good one |
+| Games | Banana catch and copy me on the console; Pictionary with a friend on any phone or computer on the same Wi-Fi (the DS serves the page); a friend's drawing can be hung on the wall |
+| The mind | Its own small mind on the console (needs, hour, what you did, a phrase book), or 0G Compute when it is set up: a token signed by the console's key, then the TEE signature checked in C over our own request and response bytes; only then is the closed-set answer used |
 | Senses | Mic → 0G Whisper, camera and drawings → 0G vision (Pictionary, comments), dreams → 0G image model. Each one TEE-verified |
 
 ## CROPS
@@ -41,20 +44,20 @@ discovery, peers, the transaction, blocks, 0G calls and the console itself.
   only for display, and that node learns which IP owns the address.
 - **S (security):** the key is born on the console and never leaves it, but it
   is stored in plain text on the SD card. Inclusion is checked against the
-  transactions root of a header the peer served. That proves the header lists
-  the transaction; it is not consensus or finality, and it trusts one peer.
+  transactions root of a header that two different peers served. That proves
+  those headers list the transaction; it is not consensus or finality (see
+  docs/RESEARCH.md for a light client that would be).
 
-## 0G: what breaks without it
+## 0G is optional
 
-- **No decisions.** The pet keeps its needs and instincts, but it stops choosing
-  what to do and say. The screen says "No answer from 0G: reason". It never
-  makes one up.
-- **No hearing, sight, Pictionary or dreams.** Each of these is a 0G call with a
-  TEE signature that the console checks. Without a verified answer the screen
-  says why, and nothing is shown as 0G's.
-- **Sending on Ethereum is unaffected.** It never depends on 0G.
+- **Without it** the okupa has its own small mind: it moves, speaks and
+  daydreams from its own phrase book, and every game, the camera, the wall and
+  Ethereum work. Nothing it says that way is shown as 0G's.
+- **With it** (`mind.txt` and `mind.key` on the SD) its decisions, hearing,
+  sight, Pictionary guesses and dreams come from 0G, each answer checked
+  against its TEE signature on the console before it is used.
 
-## Status (2026-11-07)
+## Status (2026-11-07, the Mumbai entry; kept on the `mumbai26` branch)
 
 Shown on the real DSi:
 - the core checks pass on the console: sign a transaction in 30 ms, ECDH in 43 ms;
@@ -82,8 +85,11 @@ make && make test && make sanitize           # core and game on a computer
 R3D_GL=0 sh tools/build_dsi.sh               # build/dsi/okupa.nds (software 3D)
 ```
 
-On the SD card, `okupa/mind.txt` names the 0G providers and `okupa/mind.key`
-the key that pays them. `okupa/wifi.txt` holds Wi-Fi networks (plain text).
+On the SD card (`okupa/`): `wifi.txt` holds Wi-Fi networks (plain text);
+`seeds.bin` one-use entropy (`build/okupa-seeds sd/okupa/seeds.bin`, copy it
+once, never keep a copy); `mind.txt` and `mind.key` turn on the 0G mind;
+`state-a.bin`/`state-b.bin` are the save. To try the friend page on a
+computer: `make build/okupa-friend && build/okupa-friend`.
 
 ## Layout
 
@@ -91,7 +97,7 @@ the key that pays them. `okupa/wifi.txt` holds Wi-Fi networks (plain text).
 core/       portable C: Keccak, RLP, keys, tx, ECIES, RLPx, eth/69, discv4, DNS, TLS, blocks, 0G
 game/       the pet, its house, 3D, UI, the mind's prompts, SELECT screens
 platform/   dsi (BlocksDS): main loop, network thread ("postman"), mind thread, senses
-tools/      computer-side checks: peer, crawl, DNS walk, 0G mind, previews, video
+tools/      computer-side: peer, crawl, DNS walk, 0G mind, seeds, the gallery page, the friend page and server, previews
 tests/      unit tests with official vectors and real mainnet blocks
 ```
 
@@ -104,7 +110,7 @@ tests/      unit tests with official vectors and real mainnet blocks
   `platform/` and `tools/`. Planning notes are in `docs/`.
 - **Art:** attic, outside, ivy, plant and sky textures were made with ChatGPT
   image generation. The prompts and hashes are listed in `THIRD_PARTY.md`.
-- **In the game:** every line, guess, description and dream comes from a 0G
-  Compute answer whose TEE signature the console has checked.
+- **In the game:** a line from 0G is used only once its TEE signature is
+  checked on the console; the rest come from the okupa's own phrase book.
 
 Secrets, keys and run data live in `local/` and `run/`, never in Git.

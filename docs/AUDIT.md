@@ -34,7 +34,34 @@ found in the RLP, snappy, ECIES, RLPx, devp2p or discv4 decoders.
 - **False "STUCK" during Wi-Fi scans and connects.** `show_now` now counts
   as a heartbeat.
 
-## Open, by priority
+## Done since (2026-11-09)
+
+- **A pending transaction has a way out:** Speed up re-signs it with the same
+  nonce and twice the fee (three times at most), saved first; any version a
+  block holds counts.
+- **Inclusion no longer trusts one peer:** a second, different node must serve
+  the same block with the transaction in it.
+- **Mind requests with no consumer:** they fail at once when the mind is not
+  running; and the okupa has its own small mind without 0G.
+- **Kind labels:** letters and hellos are gone; the snapshot keeps the kind
+  of picture on its way.
+- **`wall.bin` not atomic:** the wall is in the two-file snapshot now.
+
+## Still open
+
+1. **Inclusion is not consensus:** two peers agreeing is better than one, but
+   only a light client would check finality (docs/RESEARCH.md).
+2. **Watching only happens while a node holds us**, and admission still
+   decides everything on mainnet. The backlog after a long time off is not
+   capped.
+3. **Fees are not read from headers:** the first fee is fixed (2 gwei max);
+   Speed up is the answer when the base fee climbs.
+4. **Keys in plain text on the SD** (account.key, mind.key, wifi.txt).
+5. **Smaller items:** L, R and X act during the intro; the SELECT screens
+   skip the save while open; peers that went full still count as ready.
+
+## Open on 2026-11-07, by priority
+
 
 1. **A pending transaction has no way out.** There is no expiry, no
    replace-by-fee and no "forget" action in Dev, so a dropped or
