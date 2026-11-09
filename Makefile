@@ -23,7 +23,7 @@ BEAR = third_party/bearssl
 BEAR_SRC = $(shell find $(BEAR)/src -name '*.c')
 BEAR_OBJ = $(patsubst $(BEAR)/src/%.c,$(BUILD)/bearssl/%.o,$(BEAR_SRC))
 
-.PHONY: all test sanitize clean peer preview perf
+.PHONY: all test sanitize clean peer preview perf gallery-test
 # Keep library objects between builds.
 .SECONDARY:
 all: $(addprefix $(BUILD)/test-,$(TESTS)) $(BUILD)/okupa-peer $(BUILD)/okupa-preview $(BUILD)/okupa-directions $(BUILD)/okupa-monkey $(BUILD)/okupa-house $(BUILD)/okupa-music $(BUILD)/okupa-intro $(BUILD)/okupa-dnswalk $(BUILD)/okupa-https $(BUILD)/okupa-crawl $(BUILD)/okupa-mind $(BUILD)/okupa-seeds
@@ -44,6 +44,14 @@ $(BUILD)/okupa-crawl: tools/crawl.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard c
 $(BUILD)/okupa-https: tools/https.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h)
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(CORE) $(SECP_OBJ) $(BEAR_OBJ) -o $@
+
+# Acts made by the core, for the gallery page's decoder test (needs node).
+$(BUILD)/okupa-act-vectors: tools/gallery/vectors.c core/src/act.c core/src/okupa.c $(wildcard core/include/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< core/src/act.c core/src/okupa.c -o $@
+
+gallery-test: $(BUILD)/okupa-act-vectors
+	node tools/gallery/test.mjs $(BUILD)/okupa-act-vectors
 
 # One-use seeds for the console's entropy, from this computer's random source.
 $(BUILD)/okupa-seeds: tools/seeds.c $(CORE) $(SECP_OBJ) $(BEAR_OBJ) $(wildcard core/include/*.h game/include/*.h)

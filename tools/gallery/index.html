@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Okupa Gallery</title>
+<style>
+:root {
+  --bg: #1b1c1e;
+  --raised: #232427;
+  --dot: rgba(255, 255, 255, .05);
+  --line: rgba(255, 255, 255, .09);
+  --fg: #e9e7e2;
+  --mute: #8f8e8a;
+  --faint: #5f5f5c;
+  --paper: #ebe9e4;
+  --warn: #e3957f;
+  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; min-height: 100vh; color: var(--fg); font: 15px/1.5 var(--sans);
+  background: var(--bg) radial-gradient(var(--dot) 1px, transparent 1.3px) 0 0 / 18px 18px;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 980px; margin: 0 auto; padding: 44px 16px 64px; }
+a { color: inherit; text-decoration-color: var(--faint); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--fg); }
+
+.mark { font-size: 11px; letter-spacing: .24em; color: var(--mute); text-transform: uppercase; }
+h1 { margin: 6px 0 4px; font-size: clamp(30px, 6vw, 40px); font-weight: 600; letter-spacing: -.025em; line-height: 1.1; }
+.lede { margin: 0; color: var(--mute); max-width: 34em; }
+.who { margin: 14px 0 0; font: 13px var(--mono); color: var(--mute); overflow-wrap: anywhere; white-space: pre-line; }
+.who:empty { display: none; }
+
+form { margin: 28px 0 10px; display: grid; gap: 10px; }
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; min-width: 0; }
+input, select, textarea {
+  font: 14px var(--mono); color: var(--fg); background: rgba(255, 255, 255, .035);
+  border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; width: 100%;
+}
+select { font-family: var(--sans); appearance: none; }
+textarea { resize: vertical; min-height: 4.5em; }
+input:focus, select:focus, textarea:focus, button:focus-visible, summary:focus-visible {
+  outline: 2px solid rgba(233, 231, 226, .35); outline-offset: 1px;
+}
+button { font: 600 14px var(--sans); cursor: pointer; }
+.go { border: 0; border-radius: 999px; padding: 0 20px; background: var(--fg); color: var(--bg); white-space: nowrap; }
+.go:disabled { opacity: .5; cursor: progress; }
+details { border-top: 1px solid var(--line); padding-top: 8px; }
+summary { cursor: pointer; color: var(--mute); font-size: 13px; list-style: none; width: max-content; }
+summary::before { content: "+ "; }
+details[open] summary::before { content: "− "; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-top: 12px; }
+label span { display: block; font: 12px var(--sans); color: var(--mute); margin: 0 0 5px 2px; }
+.modes { display: flex; flex-wrap: wrap; gap: 6px; grid-column: 1 / -1; }
+.modes label { font-size: 13px; color: var(--mute); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.modes input { position: absolute; opacity: 0; width: 1px; }
+.modes label:has(input:checked) { color: var(--fg); border-color: rgba(233, 231, 226, .45); }
+.hint { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--faint); }
+[hidden] { display: none !important; }
+
+.status { min-height: 1.5em; margin: 18px 0 22px; font-size: 13px; color: var(--mute); }
+.status.error { color: var(--warn); }
+
+.wall { display: grid; gap: 22px 16px; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); }
+.card { all: unset; cursor: pointer; display: block; }
+.frame { background: var(--paper); padding: 7%; border-radius: 3px; box-shadow: 0 1px 0 rgba(0, 0, 0, .35), 0 12px 28px -14px rgba(0, 0, 0, .7); transition: transform .18s ease; }
+.card:hover .frame, .card:focus-visible .frame { transform: translateY(-3px); }
+.card:focus-visible .frame { outline: 2px solid rgba(233, 231, 226, .5); outline-offset: 3px; }
+canvas { display: block; width: 100%; aspect-ratio: 1; image-rendering: pixelated; image-rendering: crisp-edges; }
+.meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; font-size: 12px; color: var(--mute); }
+.meta b { font-weight: 500; color: var(--fg); }
+
+.notes { margin-top: 40px; }
+.notes:empty { display: none; }
+.notes h2 { font-size: 12px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); margin: 0 0 8px; }
+.note { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; color: var(--mute); }
+.note .kind { color: var(--fg); min-width: 4.5em; }
+.note .kind.bad { color: var(--warn); }
+.note code { font: 12px var(--mono); }
+
+footer { margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); max-width: 44em; }
+
+dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--raised); color: var(--fg); }
+dialog::backdrop { background: rgba(10, 10, 11, .72); }
+dialog .frame { padding: 5%; box-shadow: none; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 16px 0; font-size: 13px; }
+dt { color: var(--mute); }
+dd { margin: 0; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; }
+.ghost { border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; background: none; color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { .frame { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="mark">Okupa</div>
+    <h1>Gallery</h1>
+    <p class="lede">64&thinsp;×&thinsp;64 drawings and four-grey photos made on a Nintendo DSi, signed there, sent over devp2p, stored whole in transaction calldata and read back from the chain.</p>
+    <p class="who" id="who"></p>
+  </header>
+
+  <form id="query" autocomplete="off">
+    <div class="row">
+      <input name="account" placeholder="Account 0x…" spellcheck="false" aria-label="Account address">
+      <button class="go" id="go">Show</button>
+    </div>
+    <details id="source">
+      <summary>Source</summary>
+      <div class="grid">
+        <label><span>Chain</span>
+          <select name="chain">
+            <option value="mainnet">Ethereum (1)</option>
+            <option value="sepolia">Sepolia (11155111)</option>
+          </select>
+        </label>
+        <label><span>Read-only JSON-RPC · empty uses public defaults</span><input name="rpc" spellcheck="false" inputmode="url"></label>
+        <div class="modes" role="radiogroup" aria-label="How to find transactions">
+          <label><input type="radio" name="mode" value="nonce" checked>Search by nonce</label>
+          <label><input type="radio" name="mode" value="range">Scan blocks</label>
+          <label><input type="radio" name="mode" value="tx">Transaction hashes</label>
+        </div>
+        <label data-for="nonce range"><span>From block</span><input name="from" inputmode="numeric" placeholder="0"></label>
+        <label data-for="range"><span>To block</span><input name="to" inputmode="numeric" placeholder="latest"></label>
+        <label data-for="tx" style="grid-column: 1 / -1"><span>Transaction hashes</span><textarea name="tx" spellcheck="false" placeholder="0x… one per line"></textarea></label>
+        <p class="hint" data-for="nonce">Binary-searches the account nonce over historical blocks; needs an RPC that serves past account state.</p>
+        <p class="hint" data-for="range">Downloads every block in the range (at most 2,000); works on any RPC.</p>
+        <p class="hint" data-for="tx">Looks up each hash directly; the account field becomes optional.</p>
+      </div>
+    </details>
+  </form>
+
+  <p class="status" id="status" role="status" aria-live="polite"></p>
+  <section class="wall" id="wall" aria-label="Drawings"></section>
+  <section class="notes" id="notes"></section>
+
+  <footer>Read-only. Everything shown comes from the RPC above; this page decodes calldata but does not verify consensus, finality or signatures. It plays no part in how the DSi sends transactions.</footer>
+</main>
+
+<dialog id="viewer">
+  <div class="frame"><canvas id="big" width="64" height="64"></canvas></div>
+  <dl id="facts"></dl>
+  <div class="actions">
+    <button class="ghost" id="save">Save PNG</button>
+    <button class="ghost" id="close">Close</button>
+  </div>
+</dialog>
+
+<script id="okpa-core">
+/* OKPA acts, as core/src/act.c writes them (checked by tools/gallery/test.mjs):
+ * "OKPA" | version 1 | kind | payload. hello 0: no payload; drawing 1: 512
+ * bytes, 64 x 64, row-major, MSB first, 1 = ink; letter 2: 1..140 printable
+ * ASCII bytes; photo 3: 1024 bytes, 4 pixels a byte, top 2 bits first,
+ * 0 light .. 3 dark. Anything else is not an act. */
+const OKPA = (() => {
+  function hexToBytes(hex) {
+    if (typeof hex !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(hex)) throw new Error("bad hex");
+    const out = new Uint8Array((hex.length - 2) / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(2 + 2 * i, 2), 16);
+    return out;
+  }
+  function isAct(b) {
+    return b.length >= 6 && b[0] === 0x4f && b[1] === 0x4b && b[2] === 0x50 && b[3] === 0x41;
+  }
+  /* Paper to ink, as the console shows them. */
+  const TONE_RGB = [[235, 233, 228], [163, 164, 168], [93, 94, 97], [23, 24, 26]];
+  function ink(pixels, x, y) {
+    const i = y * 64 + x;
+    return (pixels[i >> 3] & (0x80 >> (i & 7))) !== 0;
+  }
+  function tone(tones, x, y) {
+    const i = y * 64 + x;
+    return (tones[i >> 2] >> (6 - 2 * (i & 3))) & 3;
+  }
+  function inkToTones(pixels) {
+    const t = new Uint8Array(1024);
+    for (let i = 0; i < 4096; i++) if (ink(pixels, i & 63, i >> 6)) t[i >> 2] |= 3 << (6 - 2 * (i & 3));
+    return t;
+  }
+  function decode(b) {
+    if (!isAct(b) || b[4] !== 1) throw new Error("not an OKPA v1 act");
+    const kind = b[5], n = b.length - 6;
+    if (kind === 0 && n === 0) return { kind: "hello", tones: null, text: null };
+    if (kind === 1 && n === 512) return { kind: "drawing", tones: inkToTones(b.slice(6)), text: null };
+    if (kind === 3 && n === 1024) return { kind: "photo", tones: b.slice(6), text: null };
+    if (kind === 2 && n >= 1 && n <= 140 && b.slice(6).every(c => c >= 0x20 && c < 0x7f))
+      return { kind: "letter", tones: null, text: String.fromCharCode(...b.slice(6)) };
+    throw new Error("malformed act");
+  }
+  return { hexToBytes, isAct, decode, ink, tone, TONE_RGB };
+})();
+</script>
+
+<script>
+const CHAINS = {
+  /* Public read-only endpoints tried in order when no ?rpc= is given. drpc serves
+   * historical eth_getTransactionCount with CORS (checked 2026-11-09); publicnode
+   * only recent state. */
+  mainnet: { id: 1, name: "Ethereum", explorer: "https://etherscan.io", rpcs: [
+    "https://eth.drpc.org", "https://ethereum-rpc.publicnode.com"] },
+  sepolia: { id: 11155111, name: "Sepolia", explorer: "https://sepolia.etherscan.io", rpcs: [
+    "https://sepolia.drpc.org", "https://sepolia.gateway.tenderly.co", "https://1rpc.io/sepolia",
+    "https://ethereum-sepolia-rpc.publicnode.com"] },
+};
+const RANGE_MAX = 2000;
+const $ = id => document.getElementById(id);
+const form = $("query");
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null) continue;
+    if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) node.append(c);
+  return node;
+}
+const hex = n => "0x" + n.toString(16);
+const num = n => Number(n).toLocaleString("en-US");
+const short = h => h.slice(0, 8) + "…" + h.slice(-4);
+const when = ts => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+/* JSON-RPC with batching when the endpoint supports it. */
+class RpcError extends Error {}
+class Rpc {
+  constructor(url) { this.url = url; this.id = 0; this.batch = true; }
+  async post(body) {
+    const res = await fetch(this.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`RPC answered HTTP ${res.status}`);
+    return res.json();
+  }
+  unwrap(reply) {
+    if (!reply) throw new Error("RPC reply missing");
+    if (reply.error) throw new RpcError(reply.error.message || JSON.stringify(reply.error));
+    return reply.result;
+  }
+  async call(method, params) {
+    return this.unwrap(await this.post({ jsonrpc: "2.0", id: ++this.id, method, params }));
+  }
+  async many(calls) {
+    if (this.batch && calls.length > 1) {
+      const body = calls.map(([method, params]) => ({ jsonrpc: "2.0", id: ++this.id, method, params }));
+      let replies = null;
+      try { replies = await this.post(body); } catch (e) { /* fall back below */ }
+      if (Array.isArray(replies)) {
+        const byId = new Map(replies.map(r => [r.id, r]));
+        return body.map(b => this.unwrap(byId.get(b.id)));
+      }
+      this.batch = false;
+    }
+    const out = [];
+    for (let i = 0; i < calls.length; i += 4)
+      out.push(...await Promise.all(calls.slice(i, i + 4).map(([m, p]) => this.call(m, p))));
+    return out;
+  }
+}
+
+/* Transactions sent by `account`, found by bisecting eth_getTransactionCount over
+ * historical blocks: tx with nonce k is in the first block whose count exceeds k. */
+async function findByNonce(rpc, account, from, latest, run, report) {
+  const counts = new Map();
+  const probe = async blocks => {
+    const need = [...new Set(blocks)].filter(b => !counts.has(b));
+    if (!need.length) return;
+    let res;
+    try { res = await rpc.many(need.map(b => ["eth_getTransactionCount", [account, hex(b)]])); }
+    catch (e) {
+      if (e instanceof RpcError) throw new Error(`${e.message}. This RPC may not serve historical state; try “Scan blocks” or “Transaction hashes” under Source.`);
+      throw e;
+    }
+    need.forEach((b, i) => counts.set(b, Number(res[i])));
+  };
+  await probe([from, latest]);
+  const first = counts.get(from), total = counts.get(latest);
+  const blocks = new Map();
+  const found = [];
+  for (let k = total - 1; k >= first; k--) {
+    if (run.stale) return null;
+    report(`Locating transaction ${total - k} of ${total - first}…`);
+    for (;;) {
+      let lo = from, hi = latest;
+      for (const [b, c] of counts) {
+        if (c <= k && b > lo) lo = b;
+        if (c > k && b < hi) hi = b;
+      }
+      if (hi - lo <= 1) { found.push({ nonce: k, block: hi }); break; }
+      const step = (hi - lo) / 13, points = [];
+      for (let i = 1; i <= 12; i++) points.push(Math.round(lo + step * i));
+      await probe(points.filter(b => b > lo && b < hi));
+    }
+  }
+  const out = [];
+  for (const { nonce, block } of found) {
+    if (run.stale) return null;
+    if (!blocks.has(block)) blocks.set(block, await rpc.call("eth_getBlockByNumber", [hex(block), true]));
+    const b = blocks.get(block);
+    const tx = b && b.transactions.find(t => t.from.toLowerCase() === account && Number(t.nonce) === nonce);
+    out.push(tx ? entry(tx, b) : { nonce, block, missing: true });
+  }
+  return { entries: out, firstNonce: first, total };
+}
+
+async function scanRange(rpc, account, from, to, run, report) {
+  const out = [];
+  for (let b = from; b <= to; b += 5) {
+    if (run.stale) break;
+    report(`Scanning blocks ${num(b)}–${num(Math.min(b + 4, to))} of ${num(to)}…`);
+    const nums = []; for (let i = b; i <= Math.min(b + 4, to); i++) nums.push(i);
+    const got = await rpc.many(nums.map(n => ["eth_getBlockByNumber", [hex(n), true]]));
+    for (const block of got) if (block) for (const tx of block.transactions)
+      if (tx.from.toLowerCase() === account && OKPA.isAct(OKPA.hexToBytes(tx.input.slice(0, 14)))) out.push(entry(tx, block));
+  }
+  return out;
+}
+
+async function lookupHashes(rpc, hashes, report) {
+  report(`Looking up ${hashes.length} transaction${hashes.length === 1 ? "" : "s"}…`);
+  const txs = await rpc.many(hashes.map(h => ["eth_getTransactionByHash", [h]]));
+  const nums = [...new Set(txs.filter(t => t && t.blockNumber).map(t => t.blockNumber))];
+  const blocks = new Map();
+  (await rpc.many(nums.map(n => ["eth_getBlockByNumber", [n, false]]))).forEach((b, i) => blocks.set(nums[i], b));
+  return txs.map((tx, i) => tx ? entry(tx, blocks.get(tx.blockNumber)) : { hash: hashes[i], missing: true });
+}
+
+function entry(tx, block) {
+  const input = OKPA.hexToBytes(tx.input || tx.data || "0x");
+  let art = null, problem = null;
+  if (OKPA.isAct(input)) { try { art = OKPA.decode(input); } catch (e) { problem = e.message; } }
+  return {
+    hash: tx.hash, nonce: Number(tx.nonce), from: tx.from.toLowerCase(), to: (tx.to || "").toLowerCase(),
+    value: BigInt(tx.value || "0x0"), type: Number(tx.type || "0x0"),
+    block: tx.blockNumber == null ? null : Number(tx.blockNumber), time: block ? Number(block.timestamp) : null,
+    bytes: input.length, act: OKPA.isAct(input), art, problem,
+  };
+}
+
+function paint(canvas, tones) {
+  const ctx = canvas.getContext("2d"), img = ctx.createImageData(64, 64);
+  for (let i = 0; i < 4096; i++) {
+    const c = OKPA.TONE_RGB[OKPA.tone(tones, i & 63, i >> 6)];
+    img.data.set([c[0], c[1], c[2], 255], i * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function link(chain, path, text) {
+  return chain.explorer ? el("a", { href: `${chain.explorer}/${path}`, target: "_blank", rel: "noopener" }, text) : text;
+}
+
+let current = null;
+function open(chain, e) {
+  current = e;
+  paint($("big"), e.art.tones);
+  const facts = $("facts"); facts.replaceChildren();
+  const add = (k, v) => facts.append(el("dt", null, k), el("dd", null, v));
+  add("Nonce", String(e.nonce));
+  add("Block", e.block == null ? "not in a block" : link(chain, `block/${e.block}`, num(e.block)));
+  if (e.time) add("Time", new Date(e.time * 1000).toLocaleString());
+  add("Transaction", link(chain, `tx/${e.hash}`, e.hash));
+  add("From", link(chain, `address/${e.from}`, e.from));
+  if (e.to !== e.from) add("To", e.to || "contract creation");
+  add("Calldata", `${e.bytes} bytes · OKPA ${e.art.kind === "photo" ? "photo, 4 greys" : "drawing, 1 bit"}`);
+  if (e.value !== 0n) add("Value", `${e.value} wei`);
+  $("viewer").showModal();
+}
+$("close").onclick = () => $("viewer").close();
+$("viewer").addEventListener("click", ev => { if (ev.target === $("viewer")) $("viewer").close(); });
+$("save").onclick = () => {
+  const c = el("canvas", { width: 512, height: 512 }), ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = false; ctx.drawImage($("big"), 0, 0, 512, 512);
+  c.toBlob(blob => {
+    const a = el("a", { href: URL.createObjectURL(blob), download: `okupa-${current.nonce}-${current.hash.slice(2, 10)}.png` });
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+};
+
+function render(chain, entries) {
+  const wall = $("wall"), notes = $("notes");
+  wall.replaceChildren(); notes.replaceChildren();
+  const sorted = [...entries].sort((a, b) => (b.block ?? Infinity) - (a.block ?? Infinity) || (b.nonce ?? 0) - (a.nonce ?? 0));
+  const rows = [];
+  for (const e of sorted) {
+    if (e.art && (e.art.kind === "drawing" || e.art.kind === "photo")) {
+      const canvas = el("canvas", { width: 64, height: 64 });
+      paint(canvas, e.art.tones);
+      const card = el("button", { class: "card", type: "button", "aria-label": `${e.art.kind === "photo" ? "Photo" : "Drawing"}, nonce ${e.nonce}, block ${e.block ?? "pending"}` },
+        el("div", { class: "frame" }, canvas),
+        el("div", { class: "meta" }, el("b", null, e.time ? when(e.time) : "pending"), el("span", null, `#${e.nonce}`)));
+      card.onclick = () => open(chain, e);
+      wall.append(card);
+    } else if (e.missing) {
+      rows.push(el("div", { class: "note" }, el("span", { class: "kind bad" }, "missing"),
+        el("span", null, e.hash ? `RPC has no transaction ${short(e.hash)}` : `nonce ${e.nonce} not found in block ${num(e.block)}`)));
+    } else if (e.act) {
+      const bad = !e.art;
+      rows.push(el("div", { class: "note" }, el("span", { class: bad ? "kind bad" : "kind" }, bad ? "invalid" : e.art.kind),
+        el("span", null, `#${e.nonce}`),
+        el("span", null, e.block == null ? "pending" : link(chain, `block/${e.block}`, `block ${num(e.block)}`)),
+        e.time ? el("span", null, when(e.time)) : null,
+        el("code", null, link(chain, `tx/${e.hash}`, short(e.hash))),
+        bad ? el("span", null, `${e.problem}, ${e.bytes} bytes`) : null,
+        e.art && e.art.text ? el("span", null, `“${e.art.text}”`) : null));
+    }
+  }
+  if (rows.length) notes.append(el("h2", null, "Other entries"), ...rows);
+}
+
+function readForm() {
+  const f = new FormData(form);
+  return {
+    account: (f.get("account") || "").trim().toLowerCase(),
+    chain: CHAINS[f.get("chain")] ? f.get("chain") : "mainnet",
+    rpc: (f.get("rpc") || "").trim(),
+    mode: f.get("mode") || "nonce",
+    from: (f.get("from") || "").trim(),
+    to: (f.get("to") || "").trim(),
+    tx: (f.get("tx") || "").split(/[\s,]+/).filter(Boolean),
+  };
+}
+
+function syncModes() {
+  const mode = readForm().mode;
+  for (const n of form.querySelectorAll("[data-for]")) n.hidden = !n.dataset.for.split(" ").includes(mode);
+}
+
+function setStatus(text, error) {
+  $("status").textContent = text;
+  $("status").classList.toggle("error", !!error);
+}
+
+/* Read-only lookup through one RPC; throws so show() can try the next default. */
+async function load(rpcUrl, q, chain, me, report) {
+  const host = new URL(rpcUrl).host, rpc = new Rpc(rpcUrl);
+  report(`Connecting to ${host}…`);
+  const [id, head] = await rpc.many([["eth_chainId", []], ["eth_blockNumber", []]]);
+  if (Number(id) !== chain.id) throw new Error(`${host} serves chain ${Number(id)}, not ${chain.name} (${chain.id}).`);
+  const latest = Number(head);
+  let entries, extra = "";
+  if (q.mode === "tx") {
+    entries = await lookupHashes(rpc, q.tx, report);
+  } else if (q.mode === "range") {
+    const from = q.from ? Number(q.from) : Math.max(0, latest - 500), to = q.to ? Math.min(Number(q.to), latest) : latest;
+    if (to < from) throw new Error("“To block” is before “From block”.");
+    if (to - from + 1 > RANGE_MAX) throw new Error(`That is ${num(to - from + 1)} blocks; scan at most ${num(RANGE_MAX)} at a time, or search by nonce.`);
+    entries = await scanRange(rpc, q.account, from, to, me, report);
+    extra = ` in blocks ${num(from)}–${num(to)}`;
+  } else {
+    const from = Math.min(q.from ? Number(q.from) : 0, latest);
+    const found = await findByNonce(rpc, q.account, from, latest, me, report);
+    if (!found) return null;
+    entries = found.entries;
+    const pending = Number(await rpc.call("eth_getTransactionCount", [q.account, "pending"])) - found.total;
+    const others = entries.filter(e => !e.missing && !e.act).length;
+    if (found.firstNonce) extra += ` · ${found.firstNonce} earlier transaction${found.firstNonce === 1 ? "" : "s"} before block ${num(from)} not searched`;
+    if (others) extra += ` · ${others} other transaction${others === 1 ? "" : "s"} without an Okupa act`;
+    if (pending > 0) extra += ` · ${pending} waiting in this RPC's pool, not yet in a block`;
+  }
+  return { entries, extra, host, latest };
+}
+
+let run = { stale: true };
+async function show() {
+  run.stale = true;
+  const me = run = { stale: false };
+  const q = readForm(), chain = CHAINS[q.chain];
+  const report = t => { if (!me.stale) setStatus(t); };
+  $("wall").replaceChildren(); $("notes").replaceChildren(); $("who").textContent = "";
+  if (q.mode !== "tx" && !/^0x[0-9a-f]{40}$/.test(q.account)) return setStatus("Enter an account address (0x followed by 40 hex characters).", !!q.account);
+  if (q.mode === "tx" && (!q.tx.length || !q.tx.every(h => /^0x[0-9a-fA-F]{64}$/.test(h)))) return setStatus("Enter one or more 32-byte transaction hashes (0x…).", q.tx.length > 0);
+  if ((q.from && !/^\d+$/.test(q.from)) || (q.to && !/^\d+$/.test(q.to))) return setStatus("Block numbers must be whole numbers.", true);
+  if (q.rpc) { try { new URL(q.rpc); } catch { return setStatus("The RPC URL is not valid.", true); } }
+
+  const params = new URLSearchParams();
+  if (q.account) params.set("account", q.account);
+  if (q.chain !== "mainnet") params.set("chain", q.chain);
+  if (q.rpc) params.set("rpc", q.rpc);
+  if (q.mode !== "nonce") params.set("mode", q.mode);
+  if (q.from && q.mode !== "tx") params.set("from", q.from);
+  if (q.to && q.mode === "range") params.set("to", q.to);
+  if (q.mode === "tx") params.set("tx", q.tx.join(","));
+  history.replaceState(null, "", "?" + params);
+
+  const urls = q.rpc ? [q.rpc] : chain.rpcs;
+  $("go").disabled = true;
+  try {
+    let result = null, failures = [];
+    for (const url of urls) {
+      const host = new URL(url).host;
+      try { result = await load(url, q, chain, me, report); break; }
+      catch (e) {
+        if (me.stale) return;
+        failures.push(e instanceof TypeError ? `Could not reach ${host} (network or CORS).` : e.message);
+        if (url !== urls[urls.length - 1]) report(`${host} did not work; trying another public RPC…`);
+      }
+    }
+    if (me.stale) return;
+    if (!result) {
+      setStatus(failures.join(" "), true);
+      $("source").open = true;
+      return;
+    }
+    const { entries, extra, host, latest } = result;
+    $("who").textContent = [q.account, `${chain.name} · head ${num(latest)} · via ${host}`].filter(Boolean).join("\n");
+    render(chain, entries);
+    const drawings = entries.filter(e => e.art && e.art.kind === "drawing").length;
+    const photos = entries.filter(e => e.art && e.art.kind === "photo").length;
+    const hellos = entries.filter(e => e.art && e.art.kind === "hello").length;
+    setStatus(drawings || photos || hellos || entries.some(e => e.act || e.missing)
+      ? `${drawings} drawing${drawings === 1 ? "" : "s"}${photos ? `, ${photos} photo${photos === 1 ? "" : "s"}` : ""}, ${hellos} hello${hellos === 1 ? "" : "s"}${extra}. Inclusion as reported by ${host}.`
+      : `No Okupa acts from this account${extra}.`);
+  } finally {
+    if (!me.stale) $("go").disabled = false;
+  }
+}
+
+form.addEventListener("submit", ev => { ev.preventDefault(); show(); });
+form.addEventListener("change", ev => {
+  if (ev.target.name === "mode") syncModes();
+  if (ev.target.name === "chain") form.rpc.placeholder = CHAINS[form.chain.value].rpcs[0];
+});
+
+(function init() {
+  const p = new URLSearchParams(location.search);
+  form.account.value = p.get("account") || "";
+  form.chain.value = CHAINS[p.get("chain")] ? p.get("chain") : "mainnet";
+  form.rpc.placeholder = CHAINS[form.chain.value].rpcs[0];
+  form.rpc.value = p.get("rpc") || "";
+  const mode = ["nonce", "range", "tx"].includes(p.get("mode")) ? p.get("mode") : "nonce";
+  form.querySelector(`input[name=mode][value=${mode}]`).checked = true;
+  form.from.value = p.get("from") || "";
+  form.to.value = p.get("to") || "";
+  form.tx.value = (p.get("tx") || "").split(",").filter(Boolean).join("\n");
+  syncModes();
+  if (form.account.value || form.tx.value) show();
+  else setStatus("Enter an account address to see its drawings.");
+})();
+</script>
+</body>
+</html>
