@@ -8,6 +8,9 @@ image=$(sed -n 's/.*"image": "\(.*\)".*/\1/p' platform/dsi/toolchain.lock.json)
 id=$(git rev-parse --short=7 HEAD)$(git diff --quiet HEAD -- . 2>/dev/null || echo -dirty)
 mkdir -p build/dsi
 rm -f build/dsi/obj/platform/dsi/main.o # it carries the build id
+# The opening film, baked on this computer (make film), goes inside the ROM.
+rm -rf build/dsi/nitro
+if [ -f build/film.okf ]; then mkdir -p build/dsi/nitro && cp build/film.okf build/dsi/nitro/film.okf; fi
 docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL \
     --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
     --mount "type=bind,src=$PWD,dst=/work,readonly" \

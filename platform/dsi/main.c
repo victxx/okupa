@@ -15,6 +15,8 @@
 #include "okupa_state.h"
 #include "okupa_seeds.h"
 #include "okupa_photo.h"
+#include "okupa_film.h"
+#include "okupa_intro.h"
 #include "okupa_facts.h"
 #include "okupa_keys.h"
 #include "okupa_tech.h"
@@ -25,6 +27,7 @@
 #include "okupa_instinct.h"
 #include "okupa_text.h"
 #include <fat.h>
+#include <filesystem.h>
 #include <malloc.h>
 #include <nds.h>
 #include <stdio.h>
@@ -341,6 +344,99 @@ static void tones_card(const uint8_t tones[OK_PHOTO_BYTES], uint16_t px[128 * 96
         for (x = 0; x < 128; x++)
             px[y * 128 + x] = x < 16 || x >= 112 ? (uint16_t)(RGB15(6, 6, 6) | 0x8000)
                                                  : ink[ok_photo_get(tones, (unsigned)(x - 16) * 2 / 3, (unsigned)y * 2 / 3)];
+}
+
+/* ---- The opening film, baked (okupa_film.h) -------------------------------
+ * Read into memory a piece at a time while the splash plays (so it never
+ * stops), then each frame unpacked and painted with the faded palette: a
+ * fraction of what drawing the 3D scene costs, so it plays at full speed.
+ * Without the file (or the room for it, in DS mode) the film is drawn live. */
+static struct {
+    FILE *f;
+    uint8_t *file, *px;
+    size_t size, got;
+    int ready, shown;
+    ok_film film;
+} film;
+
+static void film_begin(void)
+{
+    static const char *const where[] = {"nitro:/film.okf", "sd:/okupa/film.okf", "fat:/okupa/film.okf"};
+    unsigned i;
+    long n;
+    if (!isDSiMode()) return; /* 4 MB: no room for it */
+    i = nitroFSInit(NULL) ? 0 : 1; /* the ROM's own files, when the loader passed its path; else the SD's */
+    for (; i < sizeof where / sizeof where[0] && !film.f; i++) film.f = fopen(where[i], "rb");
+    if (!film.f) return;
+    if (fseek(film.f, 0, SEEK_END) || (n = ftell(film.f)) <= OK_FILM_HEADER || n > (8 << 20) || fseek(film.f, 0, SEEK_SET) ||
+        !(film.file = malloc((size_t)n))) {
+        fclose(film.f);
+        film.f = NULL;
+        return;
+    }
+    film.size = (size_t)n;
+}
+
+static void film_end(void)
+{
+    if (film.f) fclose(film.f);
+    free(film.file);
+    free(film.px);
+    memset(&film, 0, sizeof film);
+    ok_intro_baked = NULL;
+}
+
+static int film_draw(uint16_t *top, uint32_t t)
+{
+    static uint16_t pal[256];
+    uint16_t to;
+    int k, want, x, y;
+    if (!film.ready) return 0;
+    want = (int)(t / (uint32_t)film.film.ticks);
+    if (want >= film.film.frames) want = film.film.frames - 1;
+    if (want < film.shown) film.shown = -1; /* back to the start (never in practice) */
+    while (film.shown < want) /* in order: differences need the frame before */
+        if (ok_film_frame(&film.film, ++film.shown, film.px) != OK_OK) {
+            film.ready = 0;
+            return 0;
+        }
+    ok_intro_film_fade(t, &to, &k);
+    ok_film_palette(&film.film, to, k, pal);
+    for (y = 0; y < OK_UI_H; y++) {
+        uint16_t *row = top + y * OK_UI_W;
+        int fy = y - film.film.first_row;
+        if (fy < 0 || fy >= film.film.height) {
+            for (x = 0; x < OK_UI_W; x++) row[x] = 0x8000; /* the cinema bars */
+            continue;
+        }
+        for (x = 0; x < film.film.width; x++) row[x] = pal[film.px[fy * film.film.width + x]];
+    }
+    return 1;
+}
+
+/* A piece more of the file each frame; once whole, the film is ready. */
+static void film_step(void)
+{
+    size_t n;
+    if (!film.f) return;
+    n = film.size - film.got < 65536 ? film.size - film.got : 65536;
+    if (fread(film.file + film.got, 1, n, film.f) != n) {
+        film_end();
+        return;
+    }
+    film.got += n;
+    if (film.got < film.size) return;
+    fclose(film.f);
+    film.f = NULL;
+    if (ok_film_open(&film.film, film.file, film.size) != OK_OK ||
+        !(film.px = malloc((size_t)film.film.width * (size_t)film.film.height))) {
+        film_end();
+        return;
+    }
+    film.shown = -1;
+    film.ready = 1;
+    ok_intro_baked = film_draw;
+    ok_facts_log(0, 'D', "film: %d frames baked, %lu KB", film.film.frames, (unsigned long)(film.size / 1024));
 }
 
 /* The machine's own facts, and the core's timed checks for the DSi page. */
@@ -708,6 +804,7 @@ int main(void)
     boot_step = "sound";
     ok_dsi_audio_start();
     boot_step = "intro";
+    film_begin();
     ok_ui_start_intro(&ui);
     ok_dsi_audio_tune(OK_TUNE_INTRO);
     ok_dsi_mind_observe(&pet, 0, 0, "turned the console on");
@@ -873,12 +970,17 @@ int main(void)
         t = cpuGetTiming(); /* bus clock: wraps every 128 s, the difference does not care */
         late += t - frame_at;
         frame_at = t;
-        while (late >= 560190 && ticks < 8) { /* one DS frame, 1/59.83 s, in bus cycles */
-            late -= 560190;
-            ticks++;
-            if (ok_ui_tick(&ui, &pet)) redraw = 1;
+        { /* the film keeps to real time however slowly it is drawn (no slow motion) */
+            int most = ui.scene == OK_UI_FILM || ui.scene == OK_UI_SPLASH ? 60 : 8;
+            while (late >= 560190 && ticks < most) { /* one DS frame, 1/59.83 s, in bus cycles */
+                late -= 560190;
+                ticks++;
+                if (ok_ui_tick(&ui, &pet)) redraw = 1;
+            }
+            if (ticks == most) late = 0;
         }
-        if (ticks == 8) late = 0;
+        if (film.f) film_step();
+        if (film.file && ui.scene != OK_UI_SPLASH && ui.scene != OK_UI_FILM) film_end(); /* over: its memory back */
         { /* A safety net: each pass waits for a VBlank, so twenty passes
            * without one 1/60 s on the bus clock mean that clock has stopped
            * or jumped back. The okupa goes on a tick a pass, and it is logged. */

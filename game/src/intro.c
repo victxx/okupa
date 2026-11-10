@@ -165,7 +165,10 @@ static const struct {
     {540, 690, "...so a tiny squatter moved in."},
 };
 
-void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
+/* The film's picture: the flight over the island to the lit window, with the
+ * cinema bars; no fades (they are applied after, so a baked copy can fade
+ * its palette instead). */
+void ok_intro_film_scene(uint16_t *top, uint32_t t)
 {
     int k = 0, i;
     ok_v3 eye, at;
@@ -180,19 +183,23 @@ void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
         at = ok_v3_make(c[3] * 4096 / 100, c[4] * 4096 / 100, c[5] * 4096 / 100);
     }
     ok_house_outside(top, eye, at, 300, 20, 40, t);
-    /* Cinema bars, and the warm glow of the window filling the screen at the end. */
+    /* Cinema bars. */
     for (i = 0; i < W * 20; i++) top[i] = top[(H - 20) * W + i] = 0x8000;
     ok_r3d_letterbox(20); /* the bars stay solid even while the picture fades in */
-    if (ok_r3d_on_hardware()) { /* over the hardware's 3D: a solid colour, blended in by the hardware */
-        int in = 1000 - ease(t, 0, 50), out = ease(t, 690, OK_FILM_TICKS - 20);
-        if (in > 0 || out > 0) {
-            fill(top, in > 0 ? 0x8000 : RGB(31, 26, 16));
-            ok_r3d_layer_alpha((in > 0 ? in : out) * 16 / 1000);
-        }
-    } else {
-        fade(top, 0x8000, 1000 - ease(t, 0, 50));
-        fade(top, RGB(31, 26, 16), ease(t, 690, OK_FILM_TICKS - 20));
-    }
+}
+
+/* How faded the picture is at t: in from black, out to the window's warm glow. */
+void ok_intro_film_fade(uint32_t t, uint16_t *to, int *k)
+{
+    int in = 1000 - ease(t, 0, 50), out = ease(t, 690, OK_FILM_TICKS - 20);
+    *to = in > 0 ? 0x8000 : RGB(31, 26, 16);
+    *k = in > 0 ? in : out;
+}
+
+/* The words on the bottom screen. */
+void ok_intro_film_words(uint16_t *bottom, uint32_t t)
+{
+    int i;
     fill(bottom, RGB(2, 2, 3));
     for (i = 0; i < (int)(sizeof captions / sizeof captions[0]); i++) {
         int in = ease(t, captions[i].from, captions[i].from + 40), out = ease(t, captions[i].to - 40, captions[i].to);
@@ -205,4 +212,25 @@ void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
                  1, mix(RGB(2, 2, 3), RGB(24, 23, 21), ease(t, 730, 790)), 0, 99);
     }
     big_text(bottom, &ok_sans_regular, 128, 176, "Touch to skip", 1, RGB(9, 9, 10), 0, 99);
+}
+
+int (*ok_intro_baked)(uint16_t *top, uint32_t t);
+
+void ok_intro_film(uint16_t *top, uint16_t *bottom, uint32_t t)
+{
+    uint16_t to;
+    int k;
+    if (!ok_intro_baked || !ok_intro_baked(top, t)) { /* drawn live */
+        ok_intro_film_scene(top, t);
+        ok_intro_film_fade(t, &to, &k);
+        if (ok_r3d_on_hardware()) { /* over the hardware's 3D: a solid colour, blended in by the hardware */
+            if (k > 0) {
+                fill(top, to);
+                ok_r3d_layer_alpha(k * 16 / 1000);
+            }
+        } else {
+            fade(top, to, k);
+        }
+    }
+    ok_intro_film_words(bottom, t);
 }

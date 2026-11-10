@@ -82,6 +82,7 @@ See [docs/STATUS.md](docs/STATUS.md) and [docs/AUDIT.md](docs/AUDIT.md).
 
 ```sh
 make && make test && make sanitize           # core and game on a computer
+make film                                    # bake the opening film (build/film.okf, goes in the ROM)
 R3D_GL=0 sh tools/build_dsi.sh               # build/dsi/okupa.nds (software 3D)
 ```
 
