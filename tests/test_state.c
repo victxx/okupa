@@ -72,6 +72,11 @@ int main(void)
     memset(s.tx_pic, 0x3c, 512);
     s.watch_from = 26360000;
     s.tx_fee_level = 2;
+    ok_decor_init(&s.decor);
+    ok_decor_earn(&s.decor, 20);
+    assert(ok_decor_buy(&s.decor, OK_PIECE_ARMCHAIR, 6, 5) == 0 && ok_decor_buy(&s.decor, OK_PIECE_RUG, 5, 4) == 1);
+    ok_decor_turn(&s.decor, 0);
+    ok_decor_paint(&s.decor, 3, 2);
     s.tx_page = 1;
     s.tx_older = 2;
     memset(s.tx_older_hash[0], 0x61, 32);
@@ -82,6 +87,8 @@ int main(void)
     assert(!memcmp(r.wall[0], s.wall[0], 512) && !memcmp(r.wall[1], s.wall[1], 1024) && r.wall_kind[1] == OK_PIC_TONES);
     assert(r.next_nonce == 7 && r.tx_len == 600 && !memcmp(r.tx, s.tx, 600) && !memcmp(r.tx_hash, s.tx_hash, 32));
     assert(r.tx_pic_kind == OK_PIC_DRAWING && !memcmp(r.tx_pic, s.tx_pic, 512) && r.watch_from == 26360000);
+    assert(r.decor.count == 2 && r.decor.piece[0].kind == OK_PIECE_ARMCHAIR && r.decor.piece[0].turn == 1);
+    assert(r.decor.piece[1].kind == OK_PIECE_RUG && r.decor.wallpaper == 3 && r.decor.floor == 2 && r.decor.bananas == 17);
     assert(r.tx_page == 1 && r.tx_fee_level == 2 && r.tx_older == 2 && r.tx_older_hash[1][31] == 0x62); /* the versions a raised fee left */
 
     /* Any damage, a short read or trailing bytes: refused whole. */

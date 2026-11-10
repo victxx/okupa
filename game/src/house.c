@@ -238,6 +238,164 @@ void ok_house_gaze_point(int gaze, int32_t out[3])
     out[0] = p[0], out[1] = p[1], out[2] = p[2];
 }
 
+/* ---- The player's own furniture (okupa_decor.h) ----------------------------- */
+
+static void sprite_x(int x, int y, int z, int w, int h, int which);
+static const ok_decor *decor;
+void ok_house_decor(const ok_decor *d) { decor = d; }
+
+static const uint16_t wallpapers[OK_DECOR_PAINTS] = {RGB(20, 22, 17), RGB(25, 17, 17), RGB(16, 20, 25), RGB(26, 24, 14)};
+static const uint16_t floors[OK_DECOR_PAINTS] = {RGB(19, 12, 7), RGB(9, 13, 9), RGB(25, 20, 14), RGB(16, 16, 17)};
+
+/* One piece, drawn round its own middle, its front towards +z (the camera)
+ * before it is turned; w, d: its size in units, unturned. */
+static void piece(int kind, int w, int d)
+{
+    int hw = w / 2, hd = d / 2, i;
+    switch (kind) {
+    case OK_PIECE_ARMCHAIR:
+        tex(OK_ROOM_TICKING, 8, RGB(26, 12, 9), OK_R3D_EDGE);
+        box(-hw + 20, 0, -hd + 20, hw - 20, 180, hd - 30);      /* seat */
+        box(-hw + 20, 180, -hd + 20, hw - 20, 520, -hd + 120);  /* back */
+        box(-hw + 10, 0, -hd + 20, -hw + 80, 300, hd - 30);     /* arms */
+        box(hw - 80, 0, -hd + 20, hw - 10, 300, hd - 30);
+        tex(OK_ROOM_COTTON, 0, RGB(29, 26, 20), OK_R3D_EDGE);
+        blob(0, 205, 30, hw - 110, 30, hd - 110);                /* the cushion */
+        break;
+    case OK_PIECE_RUG:
+        tex(OK_ROOM_KNIT, 5, RGB(24, 10, 9), OK_R3D_EDGE);
+        ok_r3d_cylinder(P(0, 0, 0), U(hw - 20), U(8), 14);
+        tex(OK_ROOM_KNIT, 5, RGB(29, 24, 12), OK_R3D_EDGE);
+        ok_r3d_cylinder(P(0, 2, 0), U(hw - 90), U(8), 14);
+        break;
+    case OK_PIECE_LAMP:
+        mat(RGB(6, 6, 6), OK_R3D_EDGE);
+        ok_r3d_cylinder(P(0, 0, 0), U(45), U(12), 8);
+        limb_house(0, 0, 0, 0, 760, 0, 7);
+        mat(RGB(31, 27, 17), OK_R3D_UNLIT);
+        ok_r3d_cylinder(P(0, 700, 0), U(80), U(120), 10);        /* its shade, lit */
+        break;
+    case OK_PIECE_SHELF:
+        tex(OK_ROOM_CRATE, 8, RGB(20, 13, 7), OK_R3D_EDGE);
+        box(-hw + 10, 0, -hd + 30, hw - 10, 900, -hd + 60);     /* back */
+        for (i = 0; i < 4; i++) box(-hw + 10, 10 + i * 290, -hd + 30, hw - 10, 40 + i * 290, hd - 20);
+        box(-hw + 10, 0, -hd + 30, -hw + 40, 900, hd - 20);
+        box(hw - 40, 0, -hd + 30, hw - 10, 900, hd - 20);
+        for (i = 0; i < 9; i++) { /* books */
+            static const uint16_t c[5] = {RGB(9, 14, 22), RGB(26, 20, 8), RGB(22, 9, 8), RGB(8, 18, 10), RGB(20, 12, 22)};
+            int x = -hw + 60 + i * 34, row = i % 3, ht = 150 + (i * 37) % 80;
+            mat(c[i % 5], OK_R3D_EDGE);
+            box(x, 40 + row * 290, -hd + 60, x + 28, 40 + row * 290 + ht, hd - 40);
+        }
+        break;
+    case OK_PIECE_PLANT:
+        tex(OK_ROOM_CLAY, 8, RGB(18, 8, 4), OK_R3D_EDGE);
+        ok_r3d_cylinder(P(0, 0, 0), U(80), U(160), 10);
+        sprite_x(0, 130, 0, 520, 560, 1);
+        break;
+    case OK_PIECE_BEANBAG:
+        mat(RGB(8, 16, 25), OK_R3D_EDGE);
+        blob(0, 140, 0, hw - 30, 140, hd - 30);
+        blob(0, 300, -hd / 3, hw - 80, 90, hd / 3);
+        break;
+    case OK_PIECE_TV:
+        tex(OK_ROOM_CRATE, 8, RGB(14, 9, 5), OK_R3D_EDGE);
+        box(-hw + 20, 0, -hd + 20, hw - 20, 220, hd - 20);      /* the crate it stands on */
+        mat(RGB(20, 18, 15), OK_R3D_EDGE);
+        box(-150, 220, -hd + 30, 150, 470, hd - 30);            /* a fat old set */
+        mat(RGB(7, 10, 9), OK_R3D_UNLIT);
+        box(-120, 250, hd - 31, 90, 440, hd - 28);              /* its screen, glowing */
+        mat(RGB(5, 5, 5), OK_R3D_EDGE);
+        limb_house(-40, 470, 0, -110, 600, 0, 4);               /* rabbit ears */
+        limb_house(40, 470, 0, 110, 600, 0, 4);
+        break;
+    case OK_PIECE_GUITAR:
+        ok_r3d_push();
+        ok_r3d_rotate_x(-DEG(14)); /* leaning on the wall */
+        mat(RGB(24, 13, 5), OK_R3D_EDGE);
+        blob(0, 160, 0, 110, 130, 35);
+        blob(0, 330, 0, 85, 90, 32);
+        mat(RGB(4, 3, 2), OK_R3D_EDGE);
+        ok_r3d_ellipsoid(P(0, 250, 33), P(28, 28, 4), 8, 3);
+        mat(RGB(14, 8, 4), OK_R3D_EDGE);
+        box(-14, 380, -12, 14, 720, 12);
+        ok_r3d_pop();
+        break;
+    case OK_PIECE_FISHBOWL:
+        tex(OK_ROOM_CRATE, 8, RGB(18, 12, 6), OK_R3D_EDGE);
+        box(-70, 0, -70, 70, 320, 70);
+        mat(RGB(16, 24, 29), OK_R3D_EDGE);
+        blob(0, 400, 0, 95, 85, 95);
+        mat(RGB(31, 16, 4), OK_R3D_UNLIT);
+        blob(15, 400, 30, 22, 12, 8);                           /* the fish */
+        break;
+    case OK_PIECE_CHEST:
+        tex(OK_ROOM_CRATE, 6, RGB(24, 15, 7), OK_R3D_EDGE);
+        box(-hw + 20, 0, -hd + 20, hw - 20, 260, hd - 20);
+        mat(RGB(26, 6, 6), OK_R3D_EDGE);
+        box(-hw + 15, 260, -hd + 15, hw - 15, 300, hd - 15);
+        mat(RGB(31, 28, 6), OK_R3D_EDGE);
+        blob(-hw + 120, 330, hd - 60, 40, 40, 40);              /* a ball poking out */
+        break;
+    case OK_PIECE_RECORDS:
+        tex(OK_ROOM_CRATE, 8, RGB(16, 10, 5), OK_R3D_EDGE);
+        box(-80, 0, -80, 80, 260, 80);
+        mat(RGB(22, 13, 6), OK_R3D_EDGE);
+        box(-90, 260, -90, 90, 320, 90);
+        mat(RGB(3, 3, 3), OK_R3D_EDGE);
+        ok_r3d_cylinder(P(0, 320, 0), U(75), U(6), 14);
+        mat(RGB(26, 6, 6), OK_R3D_EDGE);
+        ok_r3d_cylinder(P(0, 326, 0), U(22), U(2), 8);
+        mat(RGB(28, 22, 8), OK_R3D_EDGE);
+        ok_r3d_capsule(P(80, 330, 80), P(20, 330, 30), U(5), 4);
+        mat(RGB(29, 24, 8), OK_R3D_EDGE); /* the horn */
+        ok_r3d_cylinder(P(-60, 330, -60), U(16), U(140), 8);
+        blob(-60, 520, -60, 80, 60, 80);
+        break;
+    case OK_PIECE_TEDDY:
+        mat(RGB(19, 11, 5), OK_R3D_EDGE);
+        blob(0, 100, 0, 75, 95, 60);
+        blob(0, 240, 0, 60, 58, 55);
+        blob(-50, 295, 0, 22, 22, 14);
+        blob(50, 295, 0, 22, 22, 14);
+        blob(-80, 120, 20, 28, 45, 26);
+        blob(80, 120, 20, 28, 45, 26);
+        mat(RGB(3, 3, 3), OK_R3D_EDGE);
+        blob(-20, 255, 52, 7, 7, 4);
+        blob(20, 255, 52, 7, 7, 4);
+        break;
+    case OK_PIECE_BANANA_TREE:
+        tex(OK_ROOM_TIN, 6, RGB(14, 15, 16), OK_R3D_EDGE);
+        ok_r3d_cylinder(P(0, 0, 0), U(85), U(150), 10);
+        mat(RGB(14, 10, 5), OK_R3D_EDGE);
+        limb_house(0, 150, 0, 10, 640, 0, 22);
+        sprite_x(0, 520, 0, 620, 520, 0);
+        mat(RGB(31, 27, 6), OK_R3D_EDGE);
+        for (i = 0; i < 5; i++) blob(-30 + i * 15, 560 - (i % 2) * 20, 40, 14, 40, 14); /* a bunch */
+        break;
+    }
+}
+
+static void decor_draw(void)
+{
+    int i;
+    if (!decor) return;
+    for (i = 0; i < decor->count; i++) {
+        const ok_piece *p = &decor->piece[i];
+        const ok_piece_kind *k = ok_decor_kind(p->kind);
+        int w, d;
+        if (!k) continue;
+        ok_decor_size(p, &w, &d);
+        next_id = 60 + i; /* each piece its own id: the okupa's tap and the edges know it apart */
+        ok_r3d_push();
+        ok_r3d_translate(P(-1400 + p->col * OK_DECOR_CELL + w * OK_DECOR_CELL / 2, 0,
+                           -1100 + p->row * OK_DECOR_CELL + d * OK_DECOR_CELL / 2));
+        ok_r3d_rotate_y(-(int)p->turn * OK_TURN / 4);
+        piece(p->kind, k->w * OK_DECOR_CELL, k->d * OK_DECOR_CELL);
+        ok_r3d_pop();
+    }
+}
+
 /* The frame being hung right now, and how far into it (ticks). */
 static int hang_slot = -1, hang_t;
 void ok_house_hanging(int slot, int t)
@@ -394,11 +552,13 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     ok_r3d_camera(ok_v3_make(0, U(2100), U(4600)), ok_v3_make(0, U(650), 0), 340);
     apply(l);
     /* Floor planks, wallpaper below the eaves, plaster above, a patch of bare brick. */
-    tex(OK_ROOM_PLANKS, 4, wood, 0);
+    if (decor && decor->floor % OK_DECOR_PAINTS) mat(floors[decor->floor % OK_DECOR_PAINTS], 0); /* painted */
+    else tex(OK_ROOM_PLANKS, 4, wood, 0);
     quad_grid(P(-1400, 0, 1300), P(1400, 0, 1300), P(1400, 0, -1100), P(-1400, 0, -1100), 14, 12);
     tex(OK_ROOM_BEAM, 6, wood, 0); /* the floor's front edge */
     quad_grid(P(-1400, -100, 1300), P(1400, -100, 1300), P(1400, 0, 1300), P(-1400, 0, 1300), 14, 1);
-    tex(OK_ROOM_WALLPAPER, 5, RGB(20, 22, 17), 0);
+    if (decor && decor->wallpaper % OK_DECOR_PAINTS) mat(wallpapers[decor->wallpaper % OK_DECOR_PAINTS], 0); /* painted */
+    else tex(OK_ROOM_WALLPAPER, 5, RGB(20, 22, 17), 0);
     quad_grid(P(-1400, 0, -1100), P(1400, 0, -1100), P(1400, 950, -1100), P(-1400, 950, -1100), 14, 5);
     tex(OK_ROOM_PLASTER, 5, RGB(24, 21, 17), 0);
     quad_grid(P(-1400, 950, -1100), P(1400, 950, -1100), P(0, 2100, -1100), P(0, 2100, -1100), 8, 6);
@@ -522,6 +682,7 @@ static void room(uint16_t *frame, const light *l, int lights_off, const uint8_t 
     box(-1290, 95, 170, -1060, 130, 315);
     tex(OK_ROOM_KNIT, 0, RGB(5, 8, 16), OK_R3D_EDGE);
     blob(900, 70, 760, 220, 75, 180);
+    decor_draw(); /* what the player bought and placed */
     if (mask_on_floor) { /* the smiley mask, tossed on the floor */
         int k;
         ok_r3d_push();
@@ -687,6 +848,7 @@ void ok_house_draw(uint16_t *frame, int hour, int minute, int lights_off, const 
         uint32_t s = sum(drawing), t = a->ticks;
         for (i = 0; i < OK_HOUSE_FRAMES; i++) s = s * 7 + (hung[i] ? sum(gallery[i]) + 1 : 0);
         s = s * 7 + (uint32_t)(hang_slot + 1);
+        if (decor) s = s * 31 + ok_decor_sum(decor); /* the furniture moved: draw the room again */
         light l;
         light_at(m, lights_off, &l);
         if (!ok_r3d_retains() || !kept.valid || kept.key != key || kept.art_sum != s) {

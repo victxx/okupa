@@ -4,6 +4,7 @@
 #include "okupa_act.h"
 #include "okupa_font.h"
 #include "okupa_ui.h"
+#include "okupa_house.h"
 #include "png.h"
 #include "okupa_facts.h"
 #include "okupa_session.h"
@@ -319,6 +320,38 @@ int main(int argc, char **argv)
         g.ds_points = 2, g.friend_points = 2;
         shot(dir, "friend-they-draw", &u, &p, 15);
         u.friend = NULL;
+    }
+    { /* the attic done up: furniture and paint */
+        static ok_decor d;
+        ok_decor_init(&d);
+        ok_decor_earn(&d, 500);
+        ok_decor_buy(&d, OK_PIECE_RUG, 5, 5);
+        ok_decor_buy(&d, OK_PIECE_ARMCHAIR, 6, 6);
+        ok_decor_buy(&d, OK_PIECE_LAMP, 8, 4);
+        ok_decor_buy(&d, OK_PIECE_SHELF, 8, 0);
+        ok_decor_buy(&d, OK_PIECE_TV, 3, 5);
+        ok_decor_buy(&d, OK_PIECE_BANANA_TREE, 9, 7);
+        ok_decor_buy(&d, OK_PIECE_TEDDY, 4, 9);
+        ok_decor_buy(&d, OK_PIECE_RECORDS, 2, 4);
+        ok_decor_buy(&d, OK_PIECE_FISHBOWL, 11, 4);
+        ok_decor_buy(&d, OK_PIECE_GUITAR, 9, 2);
+        ok_decor_buy(&d, OK_PIECE_BEANBAG, 6, 9);
+        ok_decor_buy(&d, OK_PIECE_CHEST, 2, 10);
+        ok_decor_paint(&d, 2, 2);
+        ok_house_decor(&d);
+        u.scene = OK_UI_HOME;
+        shot(dir, "attic-decorated", &u, &p, 15);
+        u.decor = d;
+        ok_house_decor(&u.decor);
+        u.scene = OK_UI_DECORATE;
+        u.decor_pick = -1;
+        u.decor_hold = OK_PIECE_LAMP + 1;
+        shot(dir, "decorate-shop", &u, &p, 15);
+        u.decor_hold = 0;
+        u.decor_pick = 1;
+        shot(dir, "decorate-piece", &u, &p, 15);
+        u.decor_pick = -1;
+        ok_house_decor(NULL);
     }
     { /* the small games */
         int k;

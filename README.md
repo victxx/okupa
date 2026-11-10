@@ -26,6 +26,8 @@ discovery, peers, the transaction, blocks, 0G calls and the console itself.
 | Pictures | 64x64 drawings (1 bit) and camera photos in 4 tones (1 KB), whole in the calldata. `tools/gallery` reads them back from the chain with any read-only RPC |
 | Saving | One snapshot (pet, page, wall, nonce, the transaction as signed) in two files that take turns, synced and read back; damage never overwrites the last good one |
 | Games | Banana catch and copy me on the console; Pictionary with a friend on any phone or computer on the same Wi-Fi (the DS serves the page); a friend's drawing can be hung on the wall |
+| The attic | Decor: thirteen pieces of furniture and paint for the walls and the floor, bought with bananas earned in the games, with friends and by hanging pictures, placed on a plan of the floor and seen in 3D at once |
+| Opening film | Baked on a computer with the game's own code (`make film`) and played back from the ROM at 30 fps; drawn live if the file is missing |
 | The mind | Its own small mind on the console (needs, hour, what you did, a phrase book), or 0G Compute when it is set up: a token signed by the console's key, then the TEE signature checked in C over our own request and response bytes; only then is the closed-set answer used |
 | Senses | Mic → 0G Whisper, camera and drawings → 0G vision (Pictionary, comments), dreams → 0G image model. Each one TEE-verified |
 

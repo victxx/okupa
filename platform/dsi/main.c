@@ -201,6 +201,7 @@ static int keep(const ok_ui *u, const ok_pet *p)
 {
     if (!state_ready) return 0;
     state.pet = *p;
+    state.decor = u->decor;
     if (!u->drawing_sent) memcpy(state.page, u->drawing, 512);
     if (state.tx_len && ok_dsi_net_watch_from()) state.watch_from = ok_dsi_net_watch_from();
     return ok_state_save(&store, &state);
@@ -230,6 +231,7 @@ static void hang(ok_ui *u, const ok_pet *p)
     memcpy(state.wall[state.wall_count++], state.tx_pic, OK_STATE_PICTURE);
     forget_tx();
     wall_to_ui(u);
+    ok_decor_earn(&u->decor, 10); /* a picture on the chain: bananas for the attic */
     if (drawing) { /* the page it was drawn on is free again */
         u->drawing_sent = 0;
         memset(u->drawing, 0, sizeof u->drawing);
@@ -713,6 +715,7 @@ int main(void)
     if (isDSiMode()) setCpuClock(true);
 
     ok_ui_init(&ui);
+    ok_house_decor(&ui.decor); /* the attic as the player does it up */
     if (isDSiMode()) ui.wired |= OK_UI_HAS_PHOTO; /* the cameras work without 0G: photos for the wall */
     ui.wired |= OK_UI_HAS_FRIEND; /* a friend on the same Wi-Fi, with a phone or a computer */
     ok_tech_init(&tech);
@@ -734,6 +737,7 @@ int main(void)
             int found;
             memset(&state, 0, sizeof state);
             state.pet = pet;
+            ok_decor_init(&state.decor);
             found = ok_state_import(net_dir, ok_dsi_net_name(), &state);
             state.chain_id = ok_dsi_net_chain_id();
             state_ready = ok_state_save(&store, &state);
@@ -743,6 +747,7 @@ int main(void)
         }
         if (state_ready) {
             pet = state.pet;
+            ui.decor = state.decor;
             ok_pet_update(&pet, (int64_t)now); /* live the time it was off */
             memcpy(ui.drawing, state.page, 512);
             wall_to_ui(&ui);
@@ -911,6 +916,7 @@ int main(void)
                     ui.say_ticks = 240;
                     if (friend.ds_guess_state == OK_GUESS_RIGHT) {
                         ok_monkey_event(&ui.anim, OK_EVENT_PLAY);
+                        ok_decor_earn(&ui.decor, 3);
                         ok_friend_round(&friend, OK_FRIEND_DS_DRAWS); /* your turn to draw */
                         memset(ui.doodle, 0, sizeof ui.doodle);
                     }
@@ -1657,6 +1663,7 @@ int main(void)
             if (r == OK_UI_WALLET_SPEED) speed_up(&ui, &pet);
             if (ui.friend && r == OK_UI_FRIEND_RIGHT) {
                 ok_friend_right((ok_friend *)ui.friend, ui.friend_pick); /* a point each; their turn to draw */
+                ok_decor_earn(&ui.decor, 3);
                 memset(ui.doodle, 0, sizeof ui.doodle);
                 ui.say = "Yes! A point each. Your friend draws now.";
                 ui.say_ticks = 300;
@@ -1714,6 +1721,7 @@ int main(void)
         if (storage && state_ready && !held && now - saved_at >= 2) {
             /* The needs, sleep or the page changed (or five minutes went by): saved. */
             if (memcmp(state.pet.need, pet.need, OK_NEEDS) || state.pet.asleep != pet.asleep ||
+                ok_decor_sum(&state.decor) != ok_decor_sum(&ui.decor) || state.decor.bananas != ui.decor.bananas ||
                 (!ui.drawing_sent && memcmp(state.page, ui.drawing, 512)) || now - saved_at >= 300) {
                 save_status = keep(&ui, &pet) ? "Save: saved to SD" : "Save: FAILED to write SD";
                 saved_at = now;

@@ -30,8 +30,19 @@ int main(void)
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && p.asleep);
     assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !strcmp(u.say, "Zzz... (it's sleeping)"));
     assert(ok_ui_touch(&u, &p, 221, 60, 0, t) == OK_UI_CHANGED && !p.asleep);
-    /* No mind: one menu (Feed..Sleep, Draw, Gallery, Games, Dev), no tabs, no dead buttons. */
-    assert(ok_ui_touch(&u, &p, 161, 160, 0, t) == OK_UI_NOTHING);
+    /* No mind: Feed..Sleep, Draw, Gallery, Games, Decor; Dev on the second menu. */
+    /* Decor: buy a rug with the starting bananas, put it down, turn it, sell it. */
+    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_DECORATE);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 200, 22 + 1 * 20 + 5, 0, t) == OK_UI_CHANGED && u.decor_hold == OK_PIECE_RUG + 1);
+    assert(ok_ui_touch(&u, &p, 6 + 6 * 11 + 3, 22 + 4 * 11 + 3, 0, t) == OK_UI_CHANGED && u.decor.count == 1);
+    assert(u.decor.piece[0].col == 6 && u.decor.piece[0].row == 4 && u.decor.bananas == OK_DECOR_START - 4);
+    assert(u.decor_pick == 0 && !u.decor_hold);
+    ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
+    assert(ok_ui_touch(&u, &p, 200, 22 + 3 * 20 + 5, 0, t) == OK_UI_CHANGED && !u.decor.count); /* sold for 2 */
+    assert(u.decor.bananas == OK_DECOR_START - 2);
+    assert(ok_ui_touch(&u, &p, 20, 176, 0, t) == OK_UI_CHANGED && u.decor.wallpaper == 1); /* walls painted */
+    assert(ok_ui_touch(&u, &p, 220, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
     /* Games: its own small games, no network needed. Banana catch feeds it. */
     assert(ok_ui_touch(&u, &p, 159, 118, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_GAMES_MENU);
     ok_ui_render(&u, &p, 12, 0, ok_font(), top, bottom);
@@ -74,7 +85,7 @@ int main(void)
     ok_facts_now.og_features = 0;
     u.scene = OK_UI_HOME;
     u.pictionary = 0;
-    assert(ok_ui_touch(&u, &p, 97, 60, 0, t) == OK_UI_FRIEND && u.scene == OK_UI_FRIENDS);
+    assert(ok_ui_touch(&u, &p, 159, 60, 0, t) == OK_UI_FRIEND && u.scene == OK_UI_FRIENDS);
     {
         /* The friends screen: waiting shows the address and code; a guess tapped is reported; Back keeps the game. */
         static ok_friend g;
@@ -125,19 +136,21 @@ int main(void)
     inked = 0;
     /* Dreams configured: Dream is there with no dream yet, and asks for one; one kept is shown meanwhile. */
     ok_facts_now.og_features = 16;
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && !u.dream_ticks);
+    u.page = 1; /* Dream is on the second menu */
+    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_DREAM && !u.dream_ticks);
     {
         static uint16_t sky[4] = {0x8000, 0x801f, 0x83e0, 0xfc00};
         ok_ui_dream_keep(&u, sky, 2, 2);
         assert(u.dream_w == 2 && !u.dream_ticks);
-        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_DREAM && u.dream_ticks);
-        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && !u.dream_ticks); /* a tap puts it away */
+        assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_DREAM && u.dream_ticks);
+        assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && !u.dream_ticks); /* a tap puts it away */
         ok_facts_now.og_features = 0;
-        assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_CHANGED && u.dream_ticks); /* no mind: the kept one only */
+        assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_CHANGED && u.dream_ticks); /* no mind: the kept one only */
         u.dream_ticks = 0;
         u.dream_w = u.dream_h = 0;
     }
     ok_facts_now.og_features = 0;
+    u.page = 0;
     assert(ok_ui_touch(&u, &p, 4, 4, 0, t) == OK_UI_NOTHING);
 
     /* The line goes back to the mood line after three seconds. */
@@ -181,12 +194,13 @@ int main(void)
     u.scene = OK_UI_HOME;
 
     /* Dev (on the second menu) asks the platform to run the checks; Back returns. */
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
+    u.page = 1;
+    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_RUN_CHECKS && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 30, 176, 0, t) == OK_UI_RUN_NETWORK && u.scene == OK_UI_DEV);
     assert(ok_ui_touch(&u, &p, 200, 176, 0, t) == OK_UI_CHANGED && u.scene == OK_UI_HOME);
 
     /* Wi-Fi from Dev: search, pick a secured network, type its password. */
-    assert(ok_ui_touch(&u, &p, 221, 118, 0, t) == OK_UI_RUN_CHECKS);
+    assert(ok_ui_touch(&u, &p, 35, 60, 0, t) == OK_UI_RUN_CHECKS);
     assert(ok_ui_touch(&u, &p, 90, 176, 0, t) == OK_UI_WIFI_SCAN && u.scene == OK_UI_WIFI);
     u.ap_count = 2;
     strcpy(u.aps[0].ssid, "iPhone de Okupa");

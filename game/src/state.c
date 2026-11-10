@@ -40,6 +40,8 @@ ok_result ok_state_encode(const ok_state *s, uint64_t generation, uint8_t *out, 
     need += 32u * s->tx_older;
     if (s->tx_pic_kind && !ok_state_picture_size(s->tx_pic_kind)) return OK_ARGUMENT;
     need += s->tx_len + ok_state_picture_size(s->tx_pic_kind);
+    if (s->decor.count < 0 || s->decor.count > OK_DECOR_MAX) return OK_ARGUMENT;
+    need += 1 + 4u * (size_t)s->decor.count + 2 + 2;
     if (need > cap) return OK_RANGE;
     memcpy(q, "OKST", 4);
     q[4] = OK_STATE_VERSION;
@@ -71,6 +73,14 @@ ok_result ok_state_encode(const ok_state *s, uint64_t generation, uint8_t *out, 
     pic = ok_state_picture_size(s->tx_pic_kind);
     memcpy(q, s->tx_pic, pic), q += pic;
     put(q, s->watch_from, 8), q += 8;
+    *q++ = (uint8_t)s->decor.count;
+    for (i = 0; i < s->decor.count; i++) {
+        q[0] = s->decor.piece[i].kind, q[1] = s->decor.piece[i].col, q[2] = s->decor.piece[i].row;
+        q[3] = s->decor.piece[i].turn, q += 4;
+    }
+    *q++ = s->decor.wallpaper;
+    *q++ = s->decor.floor;
+    put(q, s->decor.bananas, 2), q += 2;
     ok_keccak256(out, (size_t)(q - out), q);
     q += 32;
     *len = (size_t)(q - out);
@@ -141,6 +151,19 @@ ok_result ok_state_decode(const uint8_t *in, size_t n, ok_state *s, uint64_t *ge
     NEED(pic + 8);
     memcpy(t.tx_pic, q, pic), q += pic;
     t.watch_from = get(q, 8), q += 8;
+    NEED(1);
+    t.decor.count = *q++;
+    if (t.decor.count > OK_DECOR_MAX) return OK_FORMAT;
+    NEED(4u * (size_t)t.decor.count + 4);
+    for (i = 0; i < t.decor.count; i++) {
+        t.decor.piece[i].kind = q[0], t.decor.piece[i].col = q[1], t.decor.piece[i].row = q[2], t.decor.piece[i].turn = q[3];
+        if (!ok_decor_fits(&t.decor, &t.decor.piece[i], i)) return OK_FORMAT; /* only rooms that could be made */
+        q += 4;
+    }
+    t.decor.wallpaper = *q++;
+    t.decor.floor = *q++;
+    t.decor.bananas = (uint16_t)get(q, 2), q += 2;
+    if (t.decor.wallpaper >= OK_DECOR_PAINTS || t.decor.floor >= OK_DECOR_PAINTS || t.decor.bananas > 999) return OK_FORMAT;
     if (q != end) return OK_FORMAT;
 #undef NEED
     *s = t;

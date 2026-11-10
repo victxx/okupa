@@ -476,13 +476,13 @@ static void top_screen(frame f, const uint8_t (*font)[8], const ok_ui *u, const 
  * something real: Photo, Talk, Games and Friend when the platform
  * says it handles them (ok_ui.wired), Dream once there is a dream. The care
  * buttons fill like a glass with how full that need is. */
-enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_GALLERY, B_TALK, B_PHOTO, B_GAMES, B_FRIEND, B_DREAM, B_DEV,
+enum { B_FEED, B_PLAY, B_PET, B_SLEEP, B_DRAW, B_GALLERY, B_TALK, B_PHOTO, B_GAMES, B_DECOR, B_FRIEND, B_DREAM, B_DEV,
        BUTTONS };
 static const char *labels[BUTTONS] = {"Feed", "Play", "Pet", "Sleep", "Draw", "Gallery", "Talk",
-                                      "Photo", "Games", "Friend", "Dream", "Dev"};
+                                      "Photo", "Games", "Decor", "Friend", "Dream", "Dev"};
 static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(31, 20, 21), RGB(20, 19, 30),
                                          RGB(30, 24, 16), RGB(31, 25, 12), RGB(29, 22, 28), RGB(22, 26, 30),
-                                         RGB(24, 29, 18), RGB(26, 22, 31), RGB(22, 22, 31),
+                                         RGB(24, 29, 18), RGB(30, 22, 14), RGB(26, 22, 31), RGB(22, 22, 31),
                                          RGB(21, 27, 22)};
 #define PER_PAGE 8
 #define BX(s) (8 + ((s) % 4) * 62)
@@ -511,10 +511,10 @@ static const uint16_t accent[BUTTONS] = {RGB(31, 26, 14), RGB(18, 24, 31), RGB(3
 /* The buttons shown, in order; returns how many. */
 static int shown(const ok_ui *u, int list[BUTTONS])
 {
-    static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, 0,
+    static const int needs_wire[BUTTONS] = {0, 0, 0, 0, 0, 0, OK_UI_HAS_TALK, OK_UI_HAS_PHOTO, 0, 0,
                                             OK_UI_HAS_FRIEND, 0, 0};
     /* What the mind says works here (ok_facts.og_features): 2 hearing, 4 the camera, 8 Pictionary, 16 dreams. */
-    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 16, 0};
+    static const uint32_t needs_mind[BUTTONS] = {0, 0, 0, 0, 0, 0, 2, 4, 8, 0, 0, 16, 0};
     int i, n = 0;
     for (i = 0; i < BUTTONS; i++) {
         if (needs_wire[i] && !(u->wired & needs_wire[i]) && !(ok_facts_now.og_features & needs_mind[i])) continue;
@@ -528,7 +528,7 @@ static void button(frame f, const uint8_t (*font)[8], int i, int s, const char *
                    const ok_pet *p)
 {
     static const int icon[BUTTONS] = {OK_ICON_FEED, OK_ICON_PLAY,  OK_ICON_PET,   OK_ICON_SLEEP,  OK_ICON_DRAW,
-                                      OK_ICON_GALLERY, OK_ICON_TALK, OK_ICON_PHOTO, OK_ICON_GAMES,
+                                      OK_ICON_GALLERY, OK_ICON_TALK, OK_ICON_PHOTO, OK_ICON_GAMES, OK_ICON_HOME,
                                       OK_ICON_FRIEND, OK_ICON_DREAM, OK_ICON_DEV};
     static const int need[4] = {OK_NEED_HUNGER, OK_NEED_FUN, OK_NEED_LOVE, OK_NEED_ENERGY};
     int x = BX(s), y = BY(s) + (pressed ? 2 : 0);
@@ -973,6 +973,86 @@ static void password(frame f, const uint8_t (*font)[8], const ok_ui *u)
     centred(f, font, 193, 173, u->typing ? "Guess" : "Connect", INK, 1);
 }
 
+/* ---- Doing up the attic ------------------------------------------------------- */
+
+#define PLAN_X 6
+#define PLAN_Y 22
+#define PLAN_C 11 /* a cell, pixels */
+#define SHOP_X 164
+#define SHOP_ROWS 6
+#define SHOP_Y(i) (22 + (i) * 20)
+static const uint16_t piece_ink[OK_PIECES] = {RGB(26, 12, 9), RGB(29, 24, 12), RGB(31, 27, 17), RGB(20, 13, 7),
+                                              RGB(10, 22, 8),  RGB(8, 16, 25),  RGB(14, 16, 15), RGB(24, 13, 5),
+                                              RGB(16, 24, 29), RGB(24, 15, 7),  RGB(22, 13, 6),  RGB(19, 11, 5),
+                                              RGB(31, 27, 6)};
+
+static void decorate(frame f, const uint8_t (*font)[8], const ok_ui *u)
+{
+    const ok_decor *d = &u->decor;
+    char s[40];
+    int c, r, i, k;
+    snprintf(s, sizeof s, "%u bananas", (unsigned)d->bananas);
+    text(f, font, 6, 6, "Decorate", PAPER, 2);
+    text(f, font, 164, 8, s, RGB(31, 27, 6), 1);
+    /* The floor from above: the attic's own things in grey, the player's in colour. */
+    rect(f, PLAN_X - 2, PLAN_Y - 2, OK_DECOR_COLS * PLAN_C + 4, OK_DECOR_ROWS * PLAN_C + 4, INK);
+    for (r = 0; r < OK_DECOR_ROWS; r++)
+        for (c = 0; c < OK_DECOR_COLS; c++)
+            rect(f, PLAN_X + c * PLAN_C, PLAN_Y + r * PLAN_C, PLAN_C - 1, PLAN_C - 1,
+                 ok_decor_fixed(c, r) ? RGB(9, 9, 10) : RGB(19, 15, 10));
+    for (i = 0; i < d->count; i++) { /* flat ones first, so the rest sit on them */
+        for (k = 0; k < 2; k++) {
+            const ok_piece *p = &d->piece[i];
+            const ok_piece_kind *kind = ok_decor_kind(p->kind);
+            int w, dd;
+            if (!kind || kind->flat != (k == 0)) continue;
+            ok_decor_size(p, &w, &dd);
+            if (i == u->decor_pick)
+                rect(f, PLAN_X + p->col * PLAN_C - 2, PLAN_Y + p->row * PLAN_C - 2, w * PLAN_C + 3, dd * PLAN_C + 3, RGB(31, 28, 6));
+            rect(f, PLAN_X + p->col * PLAN_C, PLAN_Y + p->row * PLAN_C, w * PLAN_C - 1, dd * PLAN_C - 1, piece_ink[p->kind]);
+            s[0] = kind->name[0], s[1] = 0;
+            text(f, font, PLAN_X + p->col * PLAN_C + 2, PLAN_Y + p->row * PLAN_C + 2, s, INK, 1);
+        }
+    }
+    centred(f, font, PLAN_X + OK_DECOR_COLS * PLAN_C / 2, PLAN_Y + OK_DECOR_ROWS * PLAN_C + 4,
+            u->decor_moving ? "Tap where it goes" : u->decor_hold ? "Tap the floor to put it" : "Tap a piece to change it",
+            MUTED, 1);
+    if (u->decor_pick >= 0 && u->decor_pick < d->count) { /* what to do with the piece picked */
+        const ok_piece_kind *kind = ok_decor_kind(d->piece[u->decor_pick].kind);
+        text(f, font, SHOP_X, SHOP_Y(0) + 2, kind ? kind->name : "?", PAPER, 1);
+        frame_box(f, SHOP_X, SHOP_Y(1), 86, 18, PAPER, INK);
+        centred(f, font, SHOP_X + 43, SHOP_Y(1) + 5, "Turn", INK, 1);
+        frame_box(f, SHOP_X, SHOP_Y(2), 86, 18, u->decor_moving ? RGB(29, 22, 6) : PAPER, INK);
+        centred(f, font, SHOP_X + 43, SHOP_Y(2) + 5, "Move", INK, 1);
+        snprintf(s, sizeof s, "Sell (+%d)", kind ? kind->price / 2 : 0);
+        frame_box(f, SHOP_X, SHOP_Y(3), 86, 18, PAPER, INK);
+        centred(f, font, SHOP_X + 43, SHOP_Y(3) + 5, s, INK, 1);
+    } else { /* the catalogue, a page at a time, and the paint */
+        for (i = 0; i < SHOP_ROWS; i++) {
+            int kind = u->decor_page * SHOP_ROWS + i;
+            const ok_piece_kind *p = ok_decor_kind(kind);
+            if (!p) break;
+            frame_box(f, SHOP_X, SHOP_Y(i), 86, 18,
+                      u->decor_hold == kind + 1 ? RGB(29, 22, 6) : d->bananas < p->price ? RGB(20, 19, 18) : PAPER, INK);
+            rect(f, SHOP_X + 3, SHOP_Y(i) + 4, 9, 9, piece_ink[kind]);
+            snprintf(s, sizeof s, "%.9s %d", p->name, p->price);
+            text(f, font, SHOP_X + 15, SHOP_Y(i) + 5, s, INK, 1);
+        }
+        frame_box(f, SHOP_X, SHOP_Y(SHOP_ROWS), 26, 16, PAPER, INK);
+        centred(f, font, SHOP_X + 13, SHOP_Y(SHOP_ROWS) + 4, "<", INK, 1);
+        frame_box(f, SHOP_X + 60, SHOP_Y(SHOP_ROWS), 26, 16, PAPER, INK);
+        centred(f, font, SHOP_X + 73, SHOP_Y(SHOP_ROWS) + 4, ">", INK, 1);
+        snprintf(s, sizeof s, "%d/%d", u->decor_page + 1, (OK_PIECES + SHOP_ROWS - 1) / SHOP_ROWS);
+        centred(f, font, SHOP_X + 43, SHOP_Y(SHOP_ROWS) + 4, s, PAPER, 1);
+    }
+    frame_box(f, 4, 166, 74, 22, PAPER, INK);
+    centred(f, font, 41, 173, "Walls (3)", INK, 1);
+    frame_box(f, 80, 166, 74, 22, PAPER, INK);
+    centred(f, font, 117, 173, "Floor (3)", INK, 1);
+    frame_box(f, 190, 166, 62, 22, PAPER, INK);
+    centred(f, font, 221, 173, "Done", INK, 1);
+}
+
 /* ---- The small games ---------------------------------------------------------- */
 
 #define GAME_ROW_Y(i) (32 + (i) * 30)
@@ -1178,6 +1258,9 @@ void ok_ui_render(const ok_ui *u, const ok_pet *p, int hour, int minute, const u
         } else if (u->scene == OK_UI_CLOSET) {
             if (draw) closet(bottom, font, u);
             if (!u->say) line = "How do I look?";
+        } else if (u->scene == OK_UI_DECORATE) {
+            if (draw) decorate(bottom, font, u);
+            if (!u->say) line = u->decor.count ? "It's starting to feel like home." : "So much empty floor...";
         } else if (u->scene == OK_UI_GAMES_MENU) {
             if (draw) games_menu(bottom, font, u);
             if (!u->say) line = "Play with me!";
@@ -1201,6 +1284,8 @@ void ok_ui_init(ok_ui *u)
     u->last_x = u->last_y = -1;
     u->look.wear = OK_WEAR_NONE; /* the smiley mask lies on the floor until it is worn */
     u->look.top = OK_TOP_NONE;   /* and it wears nothing but its fur, for now */
+    ok_decor_init(&u->decor);
+    u->decor_pick = -1;
     ok_house_room(&room);
     ok_monkey_init(&u->anim, &room, 0, 0x6f6b7570u);
 }
@@ -1704,6 +1789,83 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         }
         return OK_UI_CHANGED;
     }
+    if (u->scene == OK_UI_DECORATE) {
+        ok_decor *d = &u->decor;
+        int col = (x - PLAN_X) / PLAN_C, row = (y - PLAN_Y) / PLAN_C, i;
+        if (held) return OK_UI_NOTHING;
+        if (inside(x, y, 190, 166, 62, 22)) { /* Done */
+            u->scene = OK_UI_HOME;
+            u->decor_hold = 0, u->decor_pick = -1, u->decor_moving = 0;
+            if (d->count) ok_monkey_event(&u->anim, OK_EVENT_HELLO);
+            return OK_UI_CHANGED;
+        }
+        if (inside(x, y, 4, 166, 74, 22) || inside(x, y, 80, 166, 74, 22)) { /* a new coat of paint */
+            int walls = x < 80;
+            if (!ok_decor_paint(d, walls ? (d->wallpaper + 1) % OK_DECOR_PAINTS : d->wallpaper,
+                                walls ? d->floor : (d->floor + 1) % OK_DECOR_PAINTS))
+                say(u, "Paint costs 3 bananas.");
+            else
+                u->sound = 1 + OK_SFX_POP;
+            return OK_UI_CHANGED;
+        }
+        if (x >= PLAN_X && y >= PLAN_Y && col < OK_DECOR_COLS && row < OK_DECOR_ROWS) { /* the floor */
+            if (u->decor_hold) {
+                const ok_piece_kind *k = ok_decor_kind(u->decor_hold - 1);
+                if (k && d->bananas < k->price) say(u, "Not enough bananas. Play a game?");
+                else if (ok_decor_buy(d, u->decor_hold - 1, col, row) < 0) say(u, "It won't fit there.");
+                else {
+                    u->decor_pick = d->count - 1;
+                    u->decor_hold = 0;
+                    u->sound = 1 + OK_SFX_YAY;
+                    say(u, "Perfect spot!");
+                }
+                return OK_UI_CHANGED;
+            }
+            if (u->decor_moving && u->decor_pick >= 0) {
+                if (!ok_decor_move(d, u->decor_pick, col, row)) say(u, "It won't fit there.");
+                else u->decor_moving = 0, u->sound = 1 + OK_SFX_TAP;
+                return OK_UI_CHANGED;
+            }
+            u->decor_pick = ok_decor_at(d, col, row);
+            u->decor_moving = 0;
+            return OK_UI_CHANGED;
+        }
+        if (u->decor_pick >= 0 && u->decor_pick < d->count) {
+            if (inside(x, y, SHOP_X, SHOP_Y(1), 86, 18)) {
+                if (!ok_decor_turn(d, u->decor_pick)) say(u, "No room to turn it.");
+                return OK_UI_CHANGED;
+            }
+            if (inside(x, y, SHOP_X, SHOP_Y(2), 86, 18)) {
+                u->decor_moving = !u->decor_moving;
+                return OK_UI_CHANGED;
+            }
+            if (inside(x, y, SHOP_X, SHOP_Y(3), 86, 18)) {
+                ok_decor_sell(d, u->decor_pick);
+                u->decor_pick = -1;
+                u->decor_moving = 0;
+                say(u, "Sold. Bananas back!");
+                return OK_UI_CHANGED;
+            }
+            return OK_UI_NOTHING;
+        }
+        if (inside(x, y, SHOP_X, SHOP_Y(SHOP_ROWS), 26, 16)) {
+            u->decor_page = u->decor_page ? u->decor_page - 1 : (OK_PIECES - 1) / SHOP_ROWS;
+            return OK_UI_CHANGED;
+        }
+        if (inside(x, y, SHOP_X + 60, SHOP_Y(SHOP_ROWS), 26, 16)) {
+            u->decor_page = (u->decor_page + 1) % ((OK_PIECES + SHOP_ROWS - 1) / SHOP_ROWS);
+            return OK_UI_CHANGED;
+        }
+        for (i = 0; i < SHOP_ROWS; i++) {
+            int kind = u->decor_page * SHOP_ROWS + i;
+            if (!ok_decor_kind(kind)) break;
+            if (inside(x, y, SHOP_X, SHOP_Y(i), 86, 18)) {
+                u->decor_hold = u->decor_hold == kind + 1 ? 0 : kind + 1;
+                return OK_UI_CHANGED;
+            }
+        }
+        return OK_UI_NOTHING;
+    }
     if (u->scene == OK_UI_GAMES_MENU) {
         int i, row = 0;
         if (held) return OK_UI_NOTHING;
@@ -1744,12 +1906,14 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
             if (u->game == 1) {
                 int bites = u->catching.caught / 4, fed = 0;
                 for (k = 0; k < bites && k < 3; k++) fed += ok_pet_do(p, OK_DO_FEED, now);
+                ok_decor_earn(&u->decor, u->catching.caught); /* a banana for the attic for each one caught */
                 snprintf(said, sizeof said, fed ? "%d bananas! Yum!" : "%d bananas... still peckish.", u->catching.caught);
                 u->did = u->catching.caught ? "played banana catch and fed you" : "played banana catch with you";
             } else {
                 int fun = u->copying.rounds >= 2, rounds = u->copying.rounds;
                 if (fun) ok_pet_do(p, OK_DO_PLAY, now);
                 if (rounds >= 6) ok_pet_do(p, OK_DO_PET, now);
+                ok_decor_earn(&u->decor, rounds * 2);
                 snprintf(said, sizeof said, rounds >= 6 ? "%d rounds! You're a genius!" : "%d round%s. Again sometime?", rounds,
                          rounds == 1 ? "" : "s");
                 u->did = "played copy me with you";
@@ -1895,6 +2059,11 @@ int ok_ui_touch(ok_ui *u, ok_pet *p, int x, int y, int held, int64_t now)
         case B_DEV: u->scene = OK_UI_DEV; return OK_UI_RUN_CHECKS;
         case B_PHOTO: return OK_UI_PHOTO; /* the platform shows what the camera and 0G are doing */
         case B_TALK: say(u, "I'm listening!"); return OK_UI_TALK;
+        case B_DECOR:
+            u->scene = OK_UI_DECORATE;
+            u->decor_hold = 0, u->decor_pick = -1, u->decor_moving = 0;
+            say(u, "Ooh, shopping!");
+            return OK_UI_CHANGED;
         case B_GAMES: /* the games: its own ones, Pictionary with its mind, a friend's */
             u->scene = OK_UI_GAMES_MENU;
             return OK_UI_CHANGED;

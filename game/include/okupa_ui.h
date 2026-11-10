@@ -1,6 +1,7 @@
 #ifndef OKUPA_UI_H
 #define OKUPA_UI_H
 
+#include "okupa_decor.h"
 #include "okupa_friend.h"
 #include "okupa_house.h"
 #include "okupa_minigames.h"
@@ -13,7 +14,7 @@
 #define OK_UI_W 256
 #define OK_UI_H 192
 enum { OK_UI_HOME, OK_UI_SKETCH, OK_UI_DEV, OK_UI_WIFI, OK_UI_PASSWORD, OK_UI_WALLET, OK_UI_CLOSET, OK_UI_SPLASH, OK_UI_FILM,
-       OK_UI_GALLERY, OK_UI_FRIENDS, OK_UI_GAMES_MENU, OK_UI_PLAY };
+       OK_UI_GALLERY, OK_UI_FRIENDS, OK_UI_GAMES_MENU, OK_UI_PLAY, OK_UI_DECORATE };
 enum { OK_UI_NOTHING, OK_UI_CHANGED, OK_UI_RUN_CHECKS, OK_UI_RUN_NETWORK, OK_UI_WIFI_SCAN, OK_UI_WIFI_CONNECT, OK_UI_WALLET_OPEN,
        OK_UI_WALLET_SCRIBBLE, OK_UI_WALLET_SPEED, OK_UI_SEND_DRAWING, OK_UI_WALLET_BALANCE,
        /* Buttons the platform may act on (the okupa has already said a hint):
@@ -143,6 +144,12 @@ typedef struct {
     int game;
     ok_catch catching;
     ok_simon copying;
+    /* Doing up the attic (okupa_decor.h): the room and the bananas (the
+     * platform saves them), the piece being bought (kind + 1, 0 none), the
+     * piece picked on the plan (-1 none), whether it is being moved, and the
+     * catalogue's page. */
+    ok_decor decor;
+    int decor_hold, decor_pick, decor_moving, decor_page;
 } ok_ui;
 
 void ok_ui_init(ok_ui *u);

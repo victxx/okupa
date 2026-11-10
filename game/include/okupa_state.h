@@ -2,6 +2,7 @@
 #define OKUPA_STATE_H
 
 #include "okupa.h"
+#include "okupa_decor.h"
 #include "okupa_pet.h"
 #include <stdio.h>
 
@@ -48,6 +49,7 @@ typedef struct {
     uint8_t tx_pic_kind;
     uint8_t tx_pic[OK_STATE_PICTURE];
     uint64_t watch_from; /* the block to start looking for it from (0: unknown) */
+    ok_decor decor;      /* the attic as the player did it up, and the bananas to spend */
 } ok_state;
 
 /* The bytes of a picture of this kind (0 for an unknown kind). */

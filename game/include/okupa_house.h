@@ -1,6 +1,7 @@
 #ifndef OKUPA_HOUSE_H
 #define OKUPA_HOUSE_H
 
+#include "okupa_decor.h"
 #include "okupa_monkey.h"
 #include <stdint.h>
 
@@ -48,6 +49,9 @@ void ok_house_own_frame(int slot);
  * colour} on a 16-cube grid (y up, from the floor; colour 0..15), standing
  * on the floor of a place (OK_PLACE_*) at x, z (hundredths). n 0 clears it. */
 void ok_house_object(const uint8_t (*boxes)[7], int n, int where, int32_t x, int32_t z);
+/* The player's furniture and paint (okupa_decor.h), drawn with the attic;
+ * the room is drawn again whenever it changes. NULL: none. */
+void ok_house_decor(const ok_decor *d);
 /* Where a thing to look at (OK_GAZE_*) is in the current place (hundredths). */
 void ok_house_gaze_point(int gaze, int32_t out[3]);
 /* A new picture arriving in an attic slot (0-5): t ticks into its hanging
